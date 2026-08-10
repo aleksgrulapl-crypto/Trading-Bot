@@ -6,6 +6,7 @@ from config import (
     API_MARKET
 )
 import utils
+import market
 from trade_log import load_log
 import requests
 
@@ -21,6 +22,10 @@ shared_state = {
     }
 }
 
+# ---------------------------------------------------------
+# AUTHENTICATED REQUEST WRAPPER
+# ---------------------------------------------------------
+
 def request(method, url, **kwargs):
     auth.ensure_token()
 
@@ -33,8 +38,9 @@ def request(method, url, **kwargs):
 
     return auth.session.request(method, url, headers=headers, **kwargs)
 
+
 # ---------------------------------------------------------
-# ACCOUNT FETCHING (CFD ONLY — STOCK ACCOUNT REMOVED)
+# ACCOUNT FETCHING + ENRICHMENT
 # ---------------------------------------------------------
 
 def get_account():
@@ -52,8 +58,21 @@ def get_account():
         print("Account fetch error:", e)
         return shared_state["account"]
 
+
+def enrich_account(raw_account):
+    """Enrich account data with balance, equity, margin."""
+    if not raw_account:
+        return raw_account
+
+    return {
+        "balance": raw_account.get("balance"),
+        "equity": raw_account.get("equity"),
+        "margin": raw_account.get("margin")
+    }
+
+
 # ---------------------------------------------------------
-# POSITION FETCHING + METADATA ENRICHMENT
+# POSITION FETCHING (RAW)
 # ---------------------------------------------------------
 
 def fetch_positions_from(endpoint):
@@ -66,20 +85,6 @@ def fetch_positions_from(endpoint):
         print(f"Position fetch error ({endpoint}):", e)
         return []
 
-def enrich_position(p):
-    """Attach instrument metadata + ticker + profitLoss."""
-    pos = p.get("position", {})
-    epic = pos.get("epic")
-
-    if epic:
-        meta = verify_epic(epic)
-        p["instrument"] = meta
-        p["profitLoss"] = meta.get("profitLoss", p.get("profitLoss"))
-    else:
-        p["instrument"] = {}
-        p["profitLoss"] = p.get("profitLoss")
-
-    return p
 
 def get_positions():
     global shared_state
@@ -93,15 +98,14 @@ def get_positions():
         all_positions += fetch_positions_from(API_POSITIONS + "/spot")
         all_positions += fetch_positions_from(API_POSITIONS + "/crypto")
 
-        enriched = [enrich_position(p) for p in all_positions]
-        parsed = utils.parse_positions(enriched)
-
+        parsed = utils.parse_positions(all_positions)
         shared_state["positions"] = parsed
         return parsed
 
     except Exception as e:
         print("Position fetch error:", e)
         return shared_state["positions"]
+
 
 # ---------------------------------------------------------
 # EPIC LOOKUP
@@ -115,6 +119,44 @@ def verify_epic(symbol):
         print("EPIC lookup error:", e)
         return {}
 
+
+# ---------------------------------------------------------
+# POSITION ENRICHMENT PIPELINE
+# ---------------------------------------------------------
+
+def enrich_position(p):
+    """Enrich a single raw position with ticker, instrument metadata, and profit/loss."""
+    if not p:
+        return p
+
+    epic = p.get("epic")
+
+    # Resolve ticker
+    p["ticker"] = utils.resolve_ticker(epic)
+
+    # Resolve instrument metadata
+    instrument = market.get_instrument(epic)
+    p["instrument"] = instrument
+
+    # Calculate profit/loss
+    p["profitLoss"] = utils.calculate_profit_loss(
+        direction=p.get("direction"),
+        open_price=p.get("price"),
+        current_price=p.get("current_price"),
+        size=p.get("size")
+    )
+
+    return p
+
+
+def enrich_positions(raw_positions):
+    """Enrich all positions returned by the API."""
+    enriched = []
+    for p in raw_positions:
+        enriched.append(enrich_position(p))
+    return enriched
+
+
 # ---------------------------------------------------------
 # TRADE LOG + REPORT
 # ---------------------------------------------------------
@@ -123,11 +165,14 @@ def refresh_trade_log():
     shared_state["trade_log"] = load_log()
     return shared_state["trade_log"]
 
+
 def set_daily_report(report):
     shared_state["daily_report"] = report
 
+
 def get_daily_report():
     return shared_state.get("daily_report", {})
+
 
 # ---------------------------------------------------------
 # SYSTEM STATUS
@@ -135,6 +180,7 @@ def get_daily_report():
 
 def update_last_webhook():
     shared_state["system_status"]["last_webhook"] = utils.timestamp()
+
 
 def update_last_trade():
     shared_state["system_status"]["last_trade"] = utils.timestamp()
