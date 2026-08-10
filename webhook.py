@@ -1,19 +1,19 @@
-from config import API_POSITIONS
 from flask import Flask, request, jsonify, render_template
 from scheduler import start_scheduler
-from dashboard import dashboard
+from dashboard import dashboard as dashboard_blueprint
 import session
 import order
 import utils
+import report
 from trade_log import load_log
 from auth import auth
 
 app = Flask(__name__)
-app.register_blueprint(dashboard)
+app.register_blueprint(dashboard_blueprint)
 
 
 # ---------------------------------------------------------
-# STARTUP (Flask 3 compatible)
+# STARTUP
 # ---------------------------------------------------------
 
 print("[Webhook] Starting scheduler...")
@@ -22,13 +22,12 @@ print("[Webhook] Scheduler started.")
 
 
 # ---------------------------------------------------------
-# WEBHOOK ENDPOINT (TradingView)
+# WEBHOOK ENDPOINT
 # ---------------------------------------------------------
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
-
     session.update_last_webhook()
 
     if not data:
@@ -38,14 +37,12 @@ def webhook():
     action = data.get("action")
     size = float(data.get("size", 1))
     price = data.get("price")
-
     sl = data.get("sl")
     tp = data.get("tp")
 
     print(f"[Webhook] Received: {symbol} {action} {size} @ {price}")
 
     result = order.place_order(symbol, action, size, sl, tp)
-
     return jsonify({"status": "ok", "result": result})
 
 
@@ -56,8 +53,12 @@ def webhook():
 @app.route("/")
 @app.route("/dashboard")
 def dashboard():
-    account = session.get_account() or {}
-    positions = session.get_positions() or []
+    raw_positions = session.get_positions() or []
+    positions = session.enrich_positions(raw_positions)
+
+    raw_account = session.get_account() or {}
+    account = session.enrich_account(raw_account)
+
     trade_log = load_log()
     daily_report = session.get_daily_report() or {}
 
@@ -90,7 +91,7 @@ def close_position(position_id):
 
     for p in session.shared_state.get("positions", []):
         if str(p["id"]) == str(position_id):
-            log_trade(
+            utils.log_trade(
                 ticker=p["ticker"],
                 side="CLOSE",
                 size=p["size"],
@@ -100,7 +101,6 @@ def close_position(position_id):
             )
 
     session.update_last_trade()
-
     return jsonify({"status": "ok", "result": result})
 
 
