@@ -31,6 +31,11 @@ def raw_positions():
     raw = session.fetch_positions_from(API_POSITIONS)
     return jsonify(raw)
 
+@app.route("/raw/account")
+def raw_account():
+    raw = session.request("GET", API_ACCOUNTS).json()
+    return jsonify(raw)
+
 
 # ---------------------------------------------------------
 # WEBHOOK ENDPOINT
