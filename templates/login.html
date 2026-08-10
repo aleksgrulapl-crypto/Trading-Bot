@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AG Capital Trader - Login</title>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .login-box {
+            background-color: #161b22;
+            padding: 30px;
+            border-radius: 8px;
+            width: 320px;
+            text-align: center;
+            box-shadow: 0 0 10px #000;
+        }
+        input[type="password"] {
+            width: 90%;
+            padding: 10px;
+            margin-top: 15px;
+            border-radius: 5px;
+            border: none;
+            background-color: #21262d;
+            color: #c9d1d9;
+        }
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            width: 100%;
+            background-color: #238636;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .error {
+            color: #ff7b72;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="login-box">
+    <h2>AG Capital Trader</h2>
+    <p>Enter Dashboard Password</p>
+
+    <form method="POST">
+        <input type="password" name="password" placeholder="Password">
+        <button type="submit">Login</button>
+    </form>
+
+    {% if error %}
+        <div class="error">{{ error }}</div>
+    {% endif %}
+</div>
+
+</body>
+</html>

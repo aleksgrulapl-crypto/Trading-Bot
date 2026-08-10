@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        h1 {
+            text-align: center;
+            padding: 20px;
+            background-color: #161b22;
+            margin: 0;
+            border-bottom: 1px solid #21262d;
+        }
+
+        .section {
+            margin: 25px;
+            padding: 20px;
+            background-color: #161b22;
+            border-radius: 8px;
+            box-shadow: 0 0 10px #000;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        th, td {
+            padding: 10px;
+            border-bottom: 1px solid #21262d;
+        }
+
+        th {
+            background-color: #21262d;
+        }
+
+        .green { color: #3fb950; }
+        .red { color: #f85149; }
+    </style>
+</head>
+
+<body>
+
+<h1>{{ title }}</h1>
+
+<div style="text-align:center; margin-top:15px;">
+    <a href="/dashboard/logout"
+       style="color:#f85149; text-decoration:none; font-weight:bold;">
+       Logout
+    </a>
+</div>
+
+<div id="dashboard-content">
+    {% include "dashboard_partial.html" %}
+</div>
+
+<script>
+function refreshDashboard() {
+    fetch('/dashboard/data')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('dashboard-content').innerHTML = data.html;
+        });
+}
+
+setInterval(refreshDashboard, 5000);
+
+function closePosition(id) {
+    window.location.href = "/dashboard/close/" + id;
+}
+</script>
+
+</body>
+</html>

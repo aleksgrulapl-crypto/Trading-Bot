@@ -1,0 +1,100 @@
+<!-- ACCOUNT SUMMARY -->
+<div class="section">
+    <h2>Account Summary</h2>
+    <p><strong>Balance:</strong> £{{ account['balance'] if account['balance'] else "N/A" }}</p>
+    <p><strong>Equity:</strong> £{{ account['equity'] if account['equity'] else "N/A" }}</p>
+    <p><strong>Margin Used:</strong> £{{ account['margin'] if account['margin'] else "N/A" }}</p>
+</div>
+
+<!-- OPEN POSITIONS -->
+<div class="section">
+    <h2>Positions</h2>
+{% if positions %}
+    <ul>
+    {% for p in positions %}
+        {% set profit = p.profit or 0 %}
+        <li>
+            <strong>{{ p.ticker }}</strong> — 
+            {{ p.size }} units @ £{{ p.price }}
+
+            <span style="color: {% if profit >= 0 %}lime{% else %}red{% endif %};">
+                (PnL: £{{ profit }})
+            </span>
+
+            <span style="color: #ccc;">
+                — Current: £{{ p.current_price }}
+            </span>
+
+            <button onclick="closePosition('{{ p.id }}')">Close</button>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>No open positions.</p>
+{% endif %}
+</div>
+
+<!-- TRADE LOG -->
+<div class="section">
+    <h2>Trade Log</h2>
+
+    {% if trade_log %}
+    <table>
+        <tr>
+            <th>Time</th>
+            <th>Ticker</th>
+            <th>Side</th>
+            <th>Size</th>
+            <th>Price</th>
+            <th>PnL</th>
+        </tr>
+
+        {% for t in trade_log %}
+        {% set profit = t.pnl or 0 %}
+        <tr>
+            <td>{{ t.time }}</td>
+            <td>{{ t.ticker }}</td>
+            <td>{{ t.side }}</td>
+            <td>{{ t.size }}</td>
+            <td>{{ t.price }}</td>
+
+            <td>
+                {% if t.side == "CLOSE" %}
+                    <span style="color: {% if profit >= 0 %}lime{% else %}red{% endif %};">
+                        £{{ profit }}
+                    </span>
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+        <p>No trades logged yet.</p>
+    {% endif %}
+</div>
+
+<!-- DAILY REPORT -->
+<div class="section">
+    <h2>Daily Report</h2>
+
+    {% if daily_report %}
+        <p><strong>Date:</strong> {{ daily_report.date }}</p>
+        <p><strong>Closed PnL:</strong> £{{ daily_report.closed_pnl }}</p>
+        <p><strong>Open PnL:</strong> £{{ daily_report.open_pnl }}</p>
+        <p><strong>Trades Today:</strong> {{ daily_report.trades }}</p>
+        <p><strong>Win Rate:</strong> {{ daily_report.win_rate }}%</p>
+    {% else %}
+        <p>No daily report generated yet.</p>
+    {% endif %}
+</div>
+
+<!-- SYSTEM STATUS -->
+<div class="section">
+    <h2>System Status</h2>
+
+    <p><strong>Last Webhook:</strong> {{ system_status.last_webhook if system_status.last_webhook else "N/A" }}</p>
+    <p><strong>Last Trade:</strong> {{ system_status.last_trade if system_status.last_trade else "N/A" }}</p>
+    <p><strong>Auth Status:</strong> {{ system_status.auth if system_status.auth else "N/A" }}</p>
+</div>
