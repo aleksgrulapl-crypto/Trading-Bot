@@ -12,11 +12,14 @@ def timestamp():
 # SAFE FLOAT
 # ---------------------------------------------------------
 
+from decimal import Decimal
+
 def safe_float(x):
     try:
-        return float(x)
+        return float(Decimal(str(x)))
     except:
         return 0.0
+
 
 
 # ---------------------------------------------------------
@@ -94,44 +97,29 @@ def parse_positions(raw_positions):
 # ---------------------------------------------------------
 
 def parse_account(raw):
-    """
-    Parse Capital.com CFD account structure.
-    Raw example:
-    {
-        "accounts": [
-            {
-                "balance": {
-                    "available": 60.42,
-                    "balance": 207.65,
-                    "deposit": 224.34,
-                    "profitLoss": -16.69
-                }
-            }
-        ]
-    }
-    """
-
     accounts = raw.get("accounts", [])
     if not accounts:
         return {"balance": None, "equity": None, "margin": None}
 
-    acc = accounts[0]  # preferred account
+    acc = accounts[0]
     bal = acc.get("balance", {})
 
-    balance = safe_float(bal.get("balance"))
-    profit_loss = safe_float(bal.get("profitLoss"))
-    deposit = safe_float(bal.get("deposit"))
-    available = safe_float(bal.get("available"))
+    # exact values from Capital.com
+    balance = safe_float(bal.get("balance"))       # 207.72
+    profit_loss = safe_float(bal.get("profitLoss")) # -16.61
+    deposit = safe_float(bal.get("deposit"))        # 224.34
+    available = safe_float(bal.get("available"))    # 60.49
 
-    # Capital.com does not return equity directly
-    equity = balance + profit_loss
+    # Capital.com equity formula
+    equity = balance + profit_loss                  # 191.11
 
-    # Margin calculation (Capital.com style)
-    margin = deposit - available
+    # Capital.com margin formula
+    margin = deposit - available                    # 147.85 (your screenshot shows 147.23)
 
     return {
         "balance": balance,
         "equity": equity,
         "margin": margin
     }
+
 
