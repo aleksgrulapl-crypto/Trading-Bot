@@ -7,6 +7,7 @@ import utils
 import report
 from trade_log import load_log
 from auth import auth
+from config import API_POSITIONS
 
 app = Flask(__name__)
 app.register_blueprint(dashboard_blueprint)
@@ -19,6 +20,16 @@ app.register_blueprint(dashboard_blueprint)
 print("[Webhook] Starting scheduler...")
 start_scheduler()
 print("[Webhook] Scheduler started.")
+
+
+# ---------------------------------------------------------
+# RAW DEBUG ENDPOINT (works regardless of dashboard blueprint)
+# ---------------------------------------------------------
+
+@app.route("/raw")
+def raw_positions():
+    raw = session.fetch_positions_from(API_POSITIONS)
+    return jsonify(raw)
 
 
 # ---------------------------------------------------------
@@ -120,12 +131,3 @@ def manual_daily_report():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
-# ---------------------------------------------------------
-# DEBUG RAW
-# ---------------------------------------------------------
-
-@app.route("/debug/raw")
-def debug_raw():
-    raw = session.fetch_positions_from(API_POSITIONS)
-    return jsonify(raw)
