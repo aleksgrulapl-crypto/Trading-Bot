@@ -1,4 +1,5 @@
 import datetime
+from decimal import Decimal
 
 # ---------------------------------------------------------
 # TIMESTAMP
@@ -9,10 +10,8 @@ def timestamp():
 
 
 # ---------------------------------------------------------
-# SAFE FLOAT
+# SAFE FLOAT + ROUNDING
 # ---------------------------------------------------------
-
-from decimal import Decimal
 
 def safe_float(x):
     try:
@@ -20,6 +19,11 @@ def safe_float(x):
     except:
         return 0.0
 
+def round2(x):
+    try:
+        return round(float(Decimal(str(x))), 2)
+    except:
+        return 0.0
 
 
 # ---------------------------------------------------------
@@ -81,19 +85,18 @@ def parse_positions(raw_positions):
             "ticker": market.get("symbol"),
             "direction": pos.get("direction"),
             "size": safe_float(pos.get("size")),
-            "price": safe_float(pos.get("level")),  # open price
+            "price": safe_float(pos.get("level")),       # open price
             "current_price": safe_float(market.get("bid")),  # live price
-            "profit": safe_float(pos.get("upl")),  # unrealised P/L
-            "profitLoss": None,  # enriched later
-            "instrument": market  # enriched later
+            "profit": safe_float(pos.get("upl")),        # unrealised P/L
+            "profitLoss": None,                          # enriched later
+            "instrument": market                         # enriched later
         })
 
     return parsed
 
 
-
 # ---------------------------------------------------------
-# ACCOUNT PARSING
+# ACCOUNT PARSING (YOUR CUSTOM LOGIC)
 # ---------------------------------------------------------
 
 def parse_account(raw):
@@ -104,22 +107,16 @@ def parse_account(raw):
     acc = accounts[0]
     bal = acc.get("balance", {})
 
-    # exact values from Capital.com
-    balance = safe_float(bal.get("balance"))       # 207.72
-    profit_loss = safe_float(bal.get("profitLoss")) # -16.61
-    deposit = safe_float(bal.get("deposit"))        # 224.34
-    available = safe_float(bal.get("available"))    # 60.49
+    deposit = safe_float(bal.get("deposit"))        # your BALANCE
+    balance = safe_float(bal.get("balance"))        # your EQUITY
+    available = safe_float(bal.get("available"))
+    profit_loss = safe_float(bal.get("profitLoss"))
 
-    # Capital.com equity formula
-    equity = balance + profit_loss                  # 191.11
-
-    # Capital.com margin formula
-    margin = deposit - available                    # 147.85 (your screenshot shows 147.23)
+    # Your rules:
+    ui_balance = deposit
+    ui_equity = balance
+    ui_margin = deposit - available + profit_loss
 
     return {
-        "balance": balance,
-        "equity": equity,
-        "margin": margin
-    }
-
-
+        "balance": round2(ui_balance),
+        "equity": round2(ui_equity),
