@@ -120,3 +120,12 @@ def manual_daily_report():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
+# ---------------------------------------------------------
+# DEBUG RAW
+# ---------------------------------------------------------
+
+@app.route("/debug/raw")
+def debug_raw():
+    raw = session.fetch_positions_from(API_POSITIONS)
+    return jsonify(raw)
