@@ -120,3 +120,5 @@ def parse_account(raw):
     return {
         "balance": round2(ui_balance),
         "equity": round2(ui_equity),
+        "margin": round2(ui_margin)
+    }
