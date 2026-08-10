@@ -69,22 +69,24 @@ def parse_positions(raw_positions):
     parsed = []
 
     for p in raw_positions:
+        market = p.get("market", {})
         pos = p.get("position", {})
 
         parsed.append({
             "id": pos.get("dealId"),
-            "epic": pos.get("epic"),
-            "ticker": None,  # filled later by enrichment
+            "epic": market.get("epic"),
+            "ticker": market.get("symbol"),
             "direction": pos.get("direction"),
             "size": safe_float(pos.get("size")),
-            "price": safe_float(pos.get("price")),
-            "current_price": safe_float(pos.get("current_price")),
-            "profit": safe_float(pos.get("profit")),
-            "profitLoss": None,  # filled later by enrichment
-            "instrument": {},    # filled later by enrichment
+            "price": safe_float(pos.get("level")),  # open price
+            "current_price": safe_float(market.get("bid")),  # live price
+            "profit": safe_float(pos.get("upl")),  # unrealised P/L
+            "profitLoss": None,  # enriched later
+            "instrument": market  # enriched later
         })
 
     return parsed
+
 
 
 # ---------------------------------------------------------

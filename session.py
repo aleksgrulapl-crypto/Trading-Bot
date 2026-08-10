@@ -125,20 +125,16 @@ def verify_epic(symbol):
 # ---------------------------------------------------------
 
 def enrich_position(p):
-    """Enrich a single raw position with ticker, instrument metadata, and profit/loss."""
     if not p:
         return p
 
+    # ticker already parsed from market.symbol
     epic = p.get("epic")
 
-    # Resolve ticker
-    p["ticker"] = utils.resolve_ticker(epic)
+    # instrument metadata already included
+    instrument = p.get("instrument", {})
 
-    # Resolve instrument metadata
-    instrument = market.get_instrument(epic)
-    p["instrument"] = instrument
-
-    # Calculate profit/loss
+    # calculate profit/loss using correct fields
     p["profitLoss"] = utils.calculate_profit_loss(
         direction=p.get("direction"),
         open_price=p.get("price"),
@@ -147,6 +143,7 @@ def enrich_position(p):
     )
 
     return p
+
 
 
 def enrich_positions(raw_positions):
