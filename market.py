@@ -1,44 +1,52 @@
-# ============================
-# MARKET DATA MODULE (Module 3)
-# ============================
+from auth import auth
+from config import API_MARKET, CAPITAL_API_KEY
+import requests
 
-from session import auth
-from config import API_MARKET, TICKER_SETTINGS
+# ---------------------------------------------------------
+# AUTHENTICATED REQUEST WRAPPER
+# ---------------------------------------------------------
 
-class MarketData:
+def request(method, url, **kwargs):
+    auth.ensure_token()
 
-    @staticmethod
-    def get_snapshot(ticker):
-        url = f"{API_MARKET}/{ticker}"
-        r = auth.request("GET", url)
+    headers = kwargs.pop("headers", {})
+    headers.update({
+        "X-CAP-API-KEY": CAPITAL_API_KEY,
+        "CST": auth.cst,
+        "X-SECURITY-TOKEN": auth.xst
+    })
 
-        if r.status_code != 200:
-            raise Exception(f"Market snapshot failed for {ticker}: {r.text}")
+    return auth.session.request(method, url, headers=headers, **kwargs)
 
-        data = r.json()
 
-        snapshot = data.get("snapshot", {})
-        dealing = data.get("dealingRules", {})
-        min_size = dealing.get("minDealSize", {}).get("value", 0.1)
+# ---------------------------------------------------------
+# INSTRUMENT LOOKUP
+# ---------------------------------------------------------
 
-        return {
-            "bid": float(snapshot.get("bid", 0)),
-            "offer": float(snapshot.get("offer", 0)),
-            "market_status": snapshot.get("marketStatus", "UNKNOWN"),
-            "min_size": float(min_size)
+def get_instrument(epic):
+    """
+    Fetch instrument metadata from Capital.com.
+    Returns:
+        {
+            "epic": "...",
+            "instrumentType": "...",
+            "symbol": "...",
+            "marketStatus": "...",
+            "bid": ...,
+            "offer": ...,
+            ...
         }
+    """
+    if not epic:
+        return {}
 
-    @staticmethod
-    def get_entry_price(ticker, side):
-        snap = MarketData.get_snapshot(ticker)
-        return snap["offer"] if side == "buy" else snap["bid"]
+    try:
+        r = request("GET", f"{API_MARKET}/{epic}")
+        if r.status_code != 200:
+            return {}
 
-    @staticmethod
-    def validate_size(ticker, size):
-        config_min = TICKER_SETTINGS.get(ticker, {}).get("min_size")
-        market_min = MarketData.get_snapshot(ticker)["min_size"]
+        return r.json()
 
-        if config_min is None:
-            return max(size, market_min)
-
-        return max(size, config_min)
+    except Exception as e:
+        print("Instrument lookup error:", e)
+        return {}
