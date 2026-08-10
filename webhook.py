@@ -7,7 +7,7 @@ import utils
 import report
 from trade_log import load_log
 from auth import auth
-from config import API_POSITIONS
+from config import API_POSITIONS, API_ACCOUNTS
 
 app = Flask(__name__)
 app.register_blueprint(dashboard_blueprint)
