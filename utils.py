@@ -95,10 +95,43 @@ def parse_positions(raw_positions):
 
 def parse_account(raw):
     """
-    Extract balance, equity, margin from Capital.com account response.
-    """
-    return {
-        "balance": raw.get("balance"),
-        "equity": raw.get("equity"),
-        "margin": raw.get("margin")
+    Parse Capital.com CFD account structure.
+    Raw example:
+    {
+        "accounts": [
+            {
+                "balance": {
+                    "available": 60.42,
+                    "balance": 207.65,
+                    "deposit": 224.34,
+                    "profitLoss": -16.69
+                }
+            }
+        ]
     }
+    """
+
+    accounts = raw.get("accounts", [])
+    if not accounts:
+        return {"balance": None, "equity": None, "margin": None}
+
+    acc = accounts[0]  # preferred account
+    bal = acc.get("balance", {})
+
+    balance = safe_float(bal.get("balance"))
+    profit_loss = safe_float(bal.get("profitLoss"))
+    deposit = safe_float(bal.get("deposit"))
+    available = safe_float(bal.get("available"))
+
+    # Capital.com does not return equity directly
+    equity = balance + profit_loss
+
+    # Margin calculation (Capital.com style)
+    margin = deposit - available
+
+    return {
+        "balance": balance,
+        "equity": equity,
+        "margin": margin
+    }
+
