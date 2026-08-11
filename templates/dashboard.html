@@ -25,7 +25,10 @@
             align-items: center;
         }
 
+        /* Center the title */
         header h1 {
+            flex: 1;
+            text-align: center;
             margin: 0;
             font-size: 26px;
             font-weight: bold;
@@ -47,15 +50,6 @@
             padding: 25px;
         }
 
-        /* Loading indicator */
-        #loading {
-            text-align: center;
-            padding: 15px;
-            color: #8b949e;
-            display: none;
-            font-size: 14px;
-        }
-
         /* Error banner */
         #error-banner {
             background: #3b0000;
@@ -67,6 +61,103 @@
             border-radius: 6px;
             font-size: 14px;
         }
+
+        /* ============================
+           DASHBOARD LAYOUT FIX
+           ============================ */
+
+        .section { margin-bottom: 30px; }
+
+        .section-title {
+            margin-bottom: 15px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #c9d1d9;
+        }
+
+        .card {
+            background: #1e1e1e;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #333;
+            margin-bottom: 25px;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .warning-box {
+            padding: 10px;
+            background: #332200;
+            color: yellow;
+            border: 1px solid yellow;
+            margin-top: 10px;
+            border-radius: 6px;
+        }
+
+        .position-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 15px;
+        }
+
+        .position-card {
+            background: #1e1e1e;
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid #333;
+            transition: transform 0.15s ease;
+        }
+
+        .position-card:hover {
+            transform: translateY(-3px);
+        }
+
+        .pos-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .ticker { font-size: 1.2em; font-weight: bold; }
+
+        .side.BUY { color: #00ff99; }
+        .side.SELL { color: #ff4d4d; }
+
+        .pnl.green { color: #00ff99; }
+        .pnl.red { color: #ff4d4d; }
+
+        .close-btn {
+            margin-top: 12px;
+            width: 100%;
+            padding: 10px;
+            background: #ff4d4d;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .trade-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .trade-table th, .trade-table td {
+            padding: 10px;
+            border-bottom: 1px solid #333;
+        }
+
+        .trade-table th {
+            background: #161b22;
+        }
+
+        .green { color: #00ff99; }
+        .red { color: #ff4d4d; }
     </style>
 </head>
 
@@ -81,7 +172,6 @@
 </header>
 
 <div id="error-banner"></div>
-<div id="loading">Refreshing dashboard...</div>
 
 <div id="dashboard-content">
     {% include "dashboard_partial.html" %}
@@ -89,26 +179,20 @@
 
 <script>
 function refreshDashboard() {
-    const loading = document.getElementById('loading');
     const errorBanner = document.getElementById('error-banner');
-
-    loading.style.display = "block";
-    errorBanner.style.display = "none";
 
     fetch('/dashboard/data')
         .then(response => response.json())
         .then(data => {
-            loading.style.display = "none";
-
             if (data && data.html) {
-                document.getElementById('dashboard-content').innerHTML = data.html;
+                const container = document.getElementById('dashboard-content');
+                container.innerHTML = data.html;
             } else {
                 errorBanner.innerText = "Dashboard refresh failed: Invalid response.";
                 errorBanner.style.display = "block";
             }
         })
         .catch(err => {
-            loading.style.display = "none";
             errorBanner.innerText = "Dashboard refresh error: " + err;
             errorBanner.style.display = "block";
         });
