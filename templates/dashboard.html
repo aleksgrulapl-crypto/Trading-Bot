@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <title>{{ title }}</title>
 
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <style>
         body {
             background-color: #0d1117;
@@ -13,58 +16,71 @@
             padding: 0;
         }
 
-        h1 {
+        header {
+            background-color: #161b22;
+            padding: 20px;
+            border-bottom: 1px solid #21262d;
             text-align: center;
-            padding: 20px;
-            background-color: #161b22;
+        }
+
+        header h1 {
             margin: 0;
-            border-bottom: 1px solid #21262d;
+            font-size: 28px;
+            color: #c9d1d9;
         }
 
-        .section {
-            margin: 25px;
-            padding: 20px;
-            background-color: #161b22;
-            border-radius: 8px;
-            box-shadow: 0 0 10px #000;
+        nav {
+            text-align: center;
+            margin-top: 10px;
         }
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-        }
-
-        th, td {
-            padding: 10px;
-            border-bottom: 1px solid #21262d;
-        }
-
-        th {
-            background-color: #21262d;
-        }
-
-        .green { color: #3fb950; }
-        .red { color: #f85149; }
-        .yellow { color: #f0c040; }
-        .lime { color: #3fb950; }
-        .gray { color: #8b949e; }
-
-        .logout-link {
-            color: #f85149;
+        nav a {
+            color: #58a6ff;
             text-decoration: none;
             font-weight: bold;
+            margin: 0 10px;
+        }
+
+        nav a.logout {
+            color: #ff4d4d;
+        }
+
+        #dashboard-content {
+            padding: 20px;
+        }
+
+        /* Loading indicator */
+        #loading {
+            text-align: center;
+            padding: 20px;
+            color: #8b949e;
+            display: none;
+        }
+
+        /* Error banner */
+        #error-banner {
+            background: #3b0000;
+            color: #ff6b6b;
+            padding: 10px;
+            text-align: center;
+            display: none;
+            margin-bottom: 10px;
         }
     </style>
 </head>
 
 <body>
 
-<h1>{{ title }}</h1>
+<header>
+    <h1>{{ title }}</h1>
+    <nav>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/dashboard/logout" class="logout">Logout</a>
+    </nav>
+</header>
 
-<div style="text-align:center; margin-top:15px;">
-    <a href="/dashboard/logout" class="logout-link">Logout</a>
-</div>
+<div id="error-banner"></div>
+<div id="loading">Refreshing dashboard...</div>
 
 <div id="dashboard-content">
     {% include "dashboard_partial.html" %}
@@ -72,22 +88,34 @@
 
 <script>
 function refreshDashboard() {
+    const loading = document.getElementById('loading');
+    const errorBanner = document.getElementById('error-banner');
+
+    loading.style.display = "block";
+    errorBanner.style.display = "none";
+
     fetch('/dashboard/data')
         .then(response => response.json())
         .then(data => {
+            loading.style.display = "none";
+
             if (data && data.html) {
                 document.getElementById('dashboard-content').innerHTML = data.html;
+            } else {
+                errorBanner.innerText = "Dashboard refresh failed: Invalid response.";
+                errorBanner.style.display = "block";
             }
         })
         .catch(err => {
-            console.error("Dashboard refresh error:", err);
+            loading.style.display = "none";
+            errorBanner.innerText = "Dashboard refresh error: " + err;
+            errorBanner.style.display = "block";
         });
 }
 
 setInterval(refreshDashboard, 5000);
 
 function closePosition(id) {
-    // Prevent accidental double-clicks
     if (!id) return;
     window.location.href = "/dashboard/close/" + id;
 }

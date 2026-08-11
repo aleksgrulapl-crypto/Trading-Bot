@@ -1,5 +1,5 @@
 # ============================
-# AUTH MODULE (FINAL VERSION)
+# AUTH MODULE (FINAL CLEAN)
 # ============================
 
 import requests
@@ -17,16 +17,12 @@ class CapitalAuth:
         self.xst = None
         self.last_login = 0
         self.session = requests.Session()
+        self.api_key = CAPITAL_API_KEY
 
     # ---------------------------------------------------------
-    # FULL LOGIN (always used — refresh-token removed)
+    # FULL LOGIN (silent, clean)
     # ---------------------------------------------------------
     def login(self):
-        print("\n" + "="*60)
-        print("[AUTH] Performing FULL login...")
-        print(f"[AUTH] Endpoint: {API_LOGIN}")
-        print("="*60)
-
         payload = {
             "identifier": CAPITAL_USERNAME,
             "password": CAPITAL_PASSWORD
@@ -37,39 +33,39 @@ class CapitalAuth:
             "Content-Type": "application/json"
         }
 
-        r = self.session.post(API_LOGIN, json=payload, headers=headers)
+        try:
+            r = self.session.post(API_LOGIN, json=payload, headers=headers)
 
-        print(f"[AUTH] Status: {r.status_code}")
-        print(f"[AUTH] Raw response: {r.text}")
+            if r.status_code != 200:
+                print(f"[AUTH ERROR] Login failed → {r.text}")
+                raise Exception("Login failed")
 
-        if r.status_code != 200:
-            raise Exception(f"[AUTH] Login failed: {r.text}")
+            self.cst = r.headers.get("CST")
+            self.xst = r.headers.get("X-SECURITY-TOKEN")
+            self.last_login = time.time()
 
-        self.cst = r.headers.get("CST")
-        self.xst = r.headers.get("X-SECURITY-TOKEN")
-        self.last_login = time.time()
+            print("[AUTH] Login successful.")
 
-        print(f"[AUTH] CST: {self.cst}")
-        print(f"[AUTH] XST: {self.xst}")
-        print("[AUTH] FULL login successful.")
-        print("="*60 + "\n")
+        except Exception as e:
+            print(f"[AUTH ERROR] Exception during login: {e}")
+            raise
 
     # ---------------------------------------------------------
-    # TOKEN MANAGEMENT (refresh-token removed)
+    # TOKEN MANAGEMENT
     # ---------------------------------------------------------
     def ensure_token(self):
         # No token → login
         if not self.cst or not self.xst:
-            print("[AUTH] No token found → FULL login")
+            print("[AUTH] No token found → login")
             return self.login()
 
         # Token older than 10 minutes → login again
         if time.time() - self.last_login > 600:
-            print("[AUTH] Token older than 10 minutes → FULL login")
+            print("[AUTH] Token expired → login")
             return self.login()
 
     # ---------------------------------------------------------
-    # REQUEST WRAPPER (401 retry → full login)
+    # REQUEST WRAPPER (silent, clean)
     # ---------------------------------------------------------
     def request(self, method, url, **kwargs):
         self.ensure_token()
@@ -81,37 +77,26 @@ class CapitalAuth:
             "X-SECURITY-TOKEN": self.xst
         })
 
-        print("\n" + "="*60)
-        print(f"[AUTH REQUEST] {method} {url}")
-        print(f"[AUTH REQUEST] Headers: {headers}")
-        print("="*60)
-
-        r = self.session.request(method, url, headers=headers, **kwargs)
-
-        print(f"[AUTH REQUEST] Status: {r.status_code}")
-        print(f"[AUTH REQUEST] Raw response: {r.text}")
-        print("="*60 + "\n")
-
-        # -----------------------------------------------------
-        # 401 → FULL LOGIN → RETRY
-        # -----------------------------------------------------
-        if r.status_code == 401:
-            print("[AUTH REQUEST] 401 detected → FULL login")
-            self.login()
-
-            headers.update({
-                "CST": self.cst,
-                "X-SECURITY-TOKEN": self.xst
-            })
-
+        try:
             r = self.session.request(method, url, headers=headers, **kwargs)
 
-            print("[AUTH REQUEST] Retried request:")
-            print(f"[AUTH REQUEST] Status: {r.status_code}")
-            print(f"[AUTH REQUEST] Raw response: {r.text}")
-            print("="*60 + "\n")
+            # 401 → login → retry
+            if r.status_code == 401:
+                print("[AUTH] 401 detected → re-login")
+                self.login()
 
-        return r
+                headers.update({
+                    "CST": self.cst,
+                    "X-SECURITY-TOKEN": self.xst
+                })
+
+                r = self.session.request(method, url, headers=headers, **kwargs)
+
+            return r
+
+        except Exception as e:
+            print(f"[AUTH ERROR] Request failed: {e}")
+            return None
 
 
 # ---------------------------------------------------------

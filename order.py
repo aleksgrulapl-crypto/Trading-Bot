@@ -1,69 +1,72 @@
-from auth import auth
+# ============================
+# ORDER MODULE (FINAL CLEAN)
+# ============================
+
 import session
-from trade_log import log_trade
-import utils
+from auth import auth
 from config import API_POSITIONS
+from utils import timestamp
 
-def place_order(ticker, action, size, sl=None, tp=None):
+# ---------------------------------------------------------
+# PLACE ORDER
+# ---------------------------------------------------------
 
-    # Ensure CST/XST are valid
-    auth.ensure_token()
+def place_order(epic, direction, size, sl=None, tp=None):
+    """
+    Places a BUY or SELL order with optional SL/TP.
+    """
 
-    # EPIC lookup (must return instrument.epic)
-    epic_data = session.verify_epic(ticker)
+    # Determine correct price reference
+    # BUY uses offer, SELL uses bid
+    market = session.request("GET", f"https://api-capital.backend-capital.com/api/v1/markets/{epic}")
+    if not market or market.status_code != 200:
+        print(f"[ERROR] Failed to fetch market snapshot for {epic}")
+        return None
 
-    epic = epic_data.get("instrument", {}).get("epic")
-    if not epic:
-        return {
-            "status": "error",
-            "message": f"EPIC not found for ticker {ticker}",
-            "epic_data": epic_data
-        }
+    snapshot = market.json().get("snapshot", {})
+    price = snapshot.get("offer") if direction.upper() == "BUY" else snapshot.get("bid")
 
-    # BUY / SELL
-    direction = "BUY" if action.lower() == "buy" else "SELL"
+    if price is None:
+        print(f"[ERROR] Market price unavailable for {epic}")
+        return None
 
     # Build order payload
     payload = {
         "epic": epic,
-        "direction": direction,
-        "size": size,
+        "direction": direction.upper(),
+        "size": float(size),
         "orderType": "MARKET",
+        "level": None,
         "guaranteedStop": False
     }
 
-    # Optional SL/TP
-    if tp:
-        payload["limitLevel"] = tp
-    if sl:
-        payload["stopLevel"] = sl
+    # Stop Loss
+    if sl is not None:
+        payload["stopLevel"] = float(sl)
 
-    print("\n" + "="*60)
-    print("[ORDER] Sending order payload:")
-    print(payload)
-    print("="*60)
+    # Take Profit
+    if tp is not None:
+        payload["limitLevel"] = float(tp)
 
     # Send order
-    r = session.request("POST", API_POSITIONS, json=payload)
-    result = r.json()
+    response = session.request("POST", API_POSITIONS, json=payload)
 
-    print("[ORDER] Raw response:")
-    print(result)
-    print("="*60)
+    if not response or response.status_code >= 400:
+        print(f"[ERROR] Order failed for {epic} ({direction})")
+        return None
 
-    # If trade executed → log it
-    if "dealReference" in result:
-        price = epic_data.get("snapshot", {}).get("offer")
+    try:
+        data = response.json()
+        deal_ref = data.get("dealReference")
 
-        log_trade(
-            ticker=ticker,
-            side=direction,
-            size=size,
-            price=price,
-            pnl=None,  # pnl is calculated later by dashboard
-            timestamp=utils.timestamp()
-        )
+        print(f"[TRADE] {direction.upper()} {epic} @ {price} (size {size}) → SUCCESS")
+        print(f"[TRADE] dealReference: {deal_ref}")
 
+        # Update dashboard system status
         session.update_last_trade()
 
-    return result
+        return deal_ref
+
+    except Exception as e:
+        print(f"[ERROR] Failed to parse order response: {e}")
+        return None

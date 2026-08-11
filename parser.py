@@ -1,6 +1,12 @@
 # ============================
-# TradingView Alert Parser
+# TradingView Alert Parser (FINAL CLEAN)
 # ============================
+
+import session
+
+# ---------------------------------------------------------
+# MAIN ENTRY POINT
+# ---------------------------------------------------------
 
 def parse_tradingview_alert(data):
     """
@@ -9,16 +15,33 @@ def parse_tradingview_alert(data):
     - JSON TradingView alert dict: {"symbol": "NVDA", "action": "buy", "payload": "..."}
     """
 
-    # -----------------------------------------------------
-    # RAW STRING ALERT (contains "|")
-    # -----------------------------------------------------
+    # Update webhook timestamp
+    session.update_last_webhook()
+
+    # RAW STRING ALERT
     if isinstance(data, str):
         return parse_raw_alert(data)
 
-    # -----------------------------------------------------
     # JSON ALERT
-    # -----------------------------------------------------
-    symbol = data.get("symbol")
+    return parse_json_alert(data)
+
+
+# ---------------------------------------------------------
+# JSON ALERT PARSER
+# ---------------------------------------------------------
+
+def parse_json_alert(data):
+    """
+    JSON TradingView alert format:
+    {
+        "symbol": "NVDA",
+        "action": "buy",
+        "quantity": 1,
+        "payload": "BUY|NVDA|SL:123|TP:130"
+    }
+    """
+
+    symbol = normalise_symbol(data.get("symbol"))
     action = data.get("action", "").lower()
     quantity = float(data.get("quantity", 1))
 
@@ -50,7 +73,7 @@ def parse_raw_alert(raw: str):
         raise ValueError(f"Invalid raw alert format: {raw}")
 
     direction = parts[0].lower()
-    symbol = parts[1]
+    symbol = normalise_symbol(parts[1])
     quantity = 1  # Raw alerts do not include quantity
 
     sl = None
@@ -59,9 +82,9 @@ def parse_raw_alert(raw: str):
     # Extract SL/TP from ANY position
     for part in parts:
         if part.startswith("SL:"):
-            sl = float(part.replace("SL:", ""))
+            sl = safe_float(part.replace("SL:", ""))
         if part.startswith("TP:"):
-            tp = float(part.replace("TP:", ""))
+            tp = safe_float(part.replace("TP:", ""))
 
     if sl is None or tp is None:
         raise ValueError(f"Missing SL/TP in alert: {raw}")
@@ -91,16 +114,16 @@ def parse_payload(payload: str):
         raise ValueError(f"Invalid payload format: {payload}")
 
     direction = parts[0].lower()
-    symbol = parts[1]
+    symbol = normalise_symbol(parts[1])
 
     sl = None
     tp = None
 
     for part in parts:
         if part.startswith("SL:"):
-            sl = float(part.replace("SL:", ""))
+            sl = safe_float(part.replace("SL:", ""))
         if part.startswith("TP:"):
-            tp = float(part.replace("TP:", ""))
+            tp = safe_float(part.replace("TP:", ""))
 
     if sl is None or tp is None:
         raise ValueError(f"Missing SL/TP in payload: {payload}")
@@ -111,3 +134,26 @@ def parse_payload(payload: str):
         "sl": sl,
         "tp": tp
     }
+
+
+# ---------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------
+
+def normalise_symbol(symbol: str):
+    """
+    Ensures ticker is uppercase and stripped.
+    """
+    if not symbol:
+        return None
+    return symbol.strip().upper()
+
+
+def safe_float(value):
+    """
+    Converts to float safely.
+    """
+    try:
+        return float(value)
+    except:
+        raise ValueError(f"Invalid numeric value: {value}")

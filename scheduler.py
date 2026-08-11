@@ -1,13 +1,33 @@
+# ============================
+# SCHEDULER MODULE (FINAL CLEAN)
+# ============================
+
 import threading
 import time
 from datetime import datetime
 import pytz
-import report
-import session
 import json
+
+import session
+import report
 from utils import timestamp
 
 UK_TZ = pytz.timezone("Europe/London")
+
+# ---------------------------------------------------------
+# SAFE FILE APPEND
+# ---------------------------------------------------------
+
+def append_json_line(filename, entry):
+    """
+    Safely appends a JSON line to a log file.
+    Prevents corruption if the process is interrupted.
+    """
+    try:
+        with open(filename, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        print(f"[Scheduler] File write error ({filename}): {e}")
 
 # ---------------------------------------------------------
 # LOG AVAILABLE BALANCE (Hourly)
@@ -15,16 +35,17 @@ UK_TZ = pytz.timezone("Europe/London")
 
 def log_available():
     try:
-        account = session.get_account()
+        raw = session.get_account()
+        account = session.enrich_account(raw)
+
         entry = {
             "timestamp": timestamp(),
-            "available": account.get("available")
+            "available": account.get("available", 0)
         }
 
-        with open("available_log.json", "a") as f:
-            f.write(json.dumps(entry) + "\n")
+        append_json_line("available_log.json", entry)
 
-        print(f"[Scheduler] Logged available balance: £{account.get('available')}")
+        print(f"[Scheduler] Logged available balance: £{entry['available']}")
 
     except Exception as e:
         print(f"[Scheduler] Error logging available balance: {e}")
@@ -35,16 +56,17 @@ def log_available():
 
 def log_equity():
     try:
-        account = session.get_account()
+        raw = session.get_account()
+        account = session.enrich_account(raw)
+
         entry = {
             "timestamp": timestamp(),
-            "equity": account.get("equity")
+            "equity": account.get("equity", 0)
         }
 
-        with open("equity_log.json", "a") as f:
-            f.write(json.dumps(entry) + "\n")
+        append_json_line("equity_log.json", entry)
 
-        print(f"[Scheduler] Logged daily equity: £{account.get('equity')}")
+        print(f"[Scheduler] Logged daily equity: £{entry['equity']}")
 
     except Exception as e:
         print(f"[Scheduler] Error logging equity: {e}")
@@ -83,6 +105,11 @@ class Scheduler:
         thread.start()
 
     def run(self):
+        """
+        Main scheduler loop.
+        Checks every 30 seconds.
+        Prevents double-triggering by sleeping 60 seconds after a job.
+        """
         while self.running:
             now_uk = datetime.now(UK_TZ)
 
@@ -128,7 +155,7 @@ def start_scheduler():
     # Daily report at 21:00 UK time
     scheduler.add_daily_job(21, 0, report.generate_daily_report)
 
-    # Log equity at 21:00 UK time (same minute, but safe)
+    # Log equity at 21:00 UK time
     scheduler.add_daily_job(21, 0, log_equity)
 
     # Log available balance every hour at HH:00

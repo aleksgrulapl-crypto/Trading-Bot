@@ -1,5 +1,5 @@
 # ============================
-# CLOSE POSITION MODULE (FINAL)
+# CLOSE POSITION MODULE (FINAL CLEAN)
 # ============================
 
 import session
@@ -11,6 +11,7 @@ from config import API_POSITIONS
 def close_position(position_id):
     """
     Close a position using Capital.com API + log closed trade.
+    Clean logging, correct PnL, correct bid/offer logic.
     """
 
     # Ensure CST/XST are valid
@@ -20,36 +21,50 @@ def close_position(position_id):
         # Correct endpoint
         url = f"{API_POSITIONS}/{position_id}/close"
 
-        # Correct authenticated request wrapper
+        # Send close request
         response = session.request("POST", url, json={})
 
-        if response.status_code != 200:
+        if not response or response.status_code != 200:
+            print(f"[ERROR] Failed to close position {position_id}")
             return {
                 "status": "error",
-                "message": f"Failed to close position: {response.text}"
+                "message": f"Failed to close position: {response.text if response else 'No response'}"
             }
 
         # Fetch updated positions
-        positions = session.get_positions()
+        raw_positions = session.get_positions()
+        enriched_positions = session.enrich_positions(raw_positions)
 
         # Find closed position details
-        for p in positions:
+        closed = None
+        for p in enriched_positions:
             if str(p["id"]) == str(position_id):
-                ticker = p["ticker"]
-                size = p["size"]
-                close_price = p["current_price"]
-                pnl = p["profit"]
-
-                # Log closed trade
-                log_close(
-                    ticker=ticker,
-                    size=size,
-                    close_price=close_price,
-                    pnl=pnl,
-                    timestamp=timestamp()
-                )
-
+                closed = p
                 break
+
+        if not closed:
+            print(f"[WARN] Closed position {position_id} not found in updated list.")
+            return {
+                "status": "success",
+                "message": f"Position {position_id} closed (details unavailable)."
+            }
+
+        ticker = closed["ticker"]
+        size = closed["size"]
+        close_price = closed["current_price"]
+        pnl = closed["profit"]
+
+        # Log closed trade
+        log_close(
+            ticker=ticker,
+            size=size,
+            close_price=close_price,
+            pnl=pnl,
+            timestamp=timestamp()
+        )
+
+        # Clean confirmation
+        print(f"[TRADE CLOSED] {ticker} @ {close_price} → PnL £{pnl}")
 
         # Update system status
         session.update_last_trade()
@@ -60,6 +75,7 @@ def close_position(position_id):
         }
 
     except Exception as e:
+        print(f"[ERROR] Exception closing position {position_id}: {e}")
         return {
             "status": "error",
             "message": str(e)

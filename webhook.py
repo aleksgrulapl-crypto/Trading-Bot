@@ -1,3 +1,7 @@
+# ============================
+# WEBHOOK MODULE (FINAL CLEAN)
+# ============================
+
 from flask import Flask, request, jsonify, render_template
 from scheduler import start_scheduler
 from dashboard import dashboard as dashboard_blueprint
@@ -5,11 +9,9 @@ from dashboard import dashboard as dashboard_blueprint
 import session
 import order
 import utils
-import report
 from trade_log import load_log
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS
-
 from parser import parse_tradingview_alert
 
 app = Flask(__name__)
@@ -19,9 +21,9 @@ app.register_blueprint(dashboard_blueprint)
 # STARTUP
 # ---------------------------------------------------------
 
-print("[Webhook] Starting scheduler...")
+print("[System] Starting scheduler...")
 start_scheduler()
-print("[Webhook] Scheduler started.")
+print("[System] Scheduler started.")
 
 # ---------------------------------------------------------
 # RAW DEBUG ENDPOINTS
@@ -29,12 +31,12 @@ print("[Webhook] Scheduler started.")
 
 @app.route("/raw")
 def raw_positions():
-    raw = session.fetch_positions_from(API_POSITIONS)
+    raw = session.get_positions()
     return jsonify(raw)
 
 @app.route("/raw/account")
 def raw_account():
-    raw = session.request("GET", API_ACCOUNTS).json()
+    raw = session.get_account()
     return jsonify(raw)
 
 # ---------------------------------------------------------
@@ -45,68 +47,48 @@ def raw_account():
 def webhook():
     session.update_last_webhook()
 
-    raw = request.get_data(as_text=True)
-    print("\n" + "="*60)
-    print("[Webhook] RAW BODY RECEIVED:")
-    print(raw)
-    print("="*60 + "\n")
+    raw_body = request.get_data(as_text=True).strip()
 
-    if not raw.strip():
-        return jsonify({"status": "error", "message": "Empty body received"}), 200
+    if not raw_body:
+        return jsonify({"status": "error", "message": "Empty body"}), 200
 
     # -----------------------------------------------------
-    # 1. RAW TradingView alert (non‑JSON)
+    # Parse RAW or JSON alert
     # -----------------------------------------------------
-    if "|" in raw:
-        try:
-            alert = parse_tradingview_alert(raw)
-        except Exception as e:
-            print("[Webhook] RAW PARSE ERROR:", e)
-            return jsonify({"status": "error", "message": "Invalid raw alert"}), 200
+    try:
+        if "|" in raw_body:
+            alert = parse_tradingview_alert(raw_body)
+        else:
+            json_data = request.get_json(force=True)
+            alert = parse_tradingview_alert(json_data)
+    except Exception as e:
+        print(f"[Webhook] Parse error: {e}")
+        return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
-    else:
-        # -------------------------------------------------
-        # 2. JSON TradingView alert
-        # -------------------------------------------------
-        try:
-            data = request.get_json(force=True)
-            alert = parse_tradingview_alert(data)
-        except Exception as e:
-            print("[Webhook] JSON PARSE ERROR:", e)
-            return jsonify({"status": "error", "message": "Invalid JSON"}), 200
-
-    # -----------------------------------------------------
-    # Extract alert fields
-    # -----------------------------------------------------
     ticker = alert["symbol"]
     action = alert["action"]
     size = alert["quantity"]
     sl = alert.get("sl")
     tp = alert.get("tp")
 
-    print(f"[Webhook] Parsed alert: ticker={ticker}, action={action}, size={size}, SL={sl}, TP={tp}")
+    print(f"[Webhook] Alert → {ticker} {action.upper()} size={size} SL={sl} TP={tp}")
 
     # -----------------------------------------------------
-    # EPIC preview (local mapping)
+    # EPIC lookup
     # -----------------------------------------------------
-    epic_preview = utils.map_symbol_to_epic(ticker)
-    print(f"[Webhook] Local EPIC preview: {epic_preview}")
-
-    # -----------------------------------------------------
-    # REAL EPIC lookup
-    # -----------------------------------------------------
-    print("[Webhook] Performing REAL EPIC lookup...")
     epic_data = session.verify_epic(ticker)
-    print("[Webhook] EPIC lookup result:")
-    print(epic_data)
+    epic = epic_data.get("epic")
+
+    if not epic:
+        print(f"[Webhook] EPIC lookup failed for {ticker}")
+        return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
+
+    print(f"[Webhook] EPIC resolved → {epic}")
 
     # -----------------------------------------------------
     # Place order
     # -----------------------------------------------------
-    result = order.place_order(ticker, action, size, sl, tp)
-
-    print("[Webhook] Order result:")
-    print(result)
+    result = order.place_order(epic, action, size, sl, tp)
 
     return jsonify({"status": "ok", "result": result}), 200
 
@@ -124,7 +106,7 @@ def dashboard():
     account = session.enrich_account(raw_account)
 
     trade_log = load_log()
-    daily_report = session.get_daily_report() or {}
+    daily_report = session.shared_state.get("daily_report", {})
 
     return render_template(
         "dashboard.html",
@@ -136,35 +118,15 @@ def dashboard():
     )
 
 # ---------------------------------------------------------
-# CLOSE POSITION
+# CLOSE POSITION (API)
 # ---------------------------------------------------------
 
 @app.route("/close/<position_id>", methods=["POST"])
-def close_position(position_id):
-    auth.ensure_token()
+def close_position_api(position_id):
+    from close_position import close_position
 
-    payload = {
-        "dealId": position_id,
-        "direction": "SELL",
-        "size": 0
-    }
-
-    r = session.request("POST", f"{API_POSITIONS}/{position_id}/close", json=payload)
-    result = r.json()
-
-    for p in session.shared_state.get("positions", []):
-        if str(p["id"]) == str(position_id):
-            utils.log_trade(
-                ticker=p["ticker"],
-                side="CLOSE",
-                size=p["size"],
-                price=p["current_price"],
-                pnl=p["profit"],
-                timestamp=utils.timestamp()
-            )
-
-    session.update_last_trade()
-    return jsonify({"status": "ok", "result": result})
+    result = close_position(position_id)
+    return jsonify(result)
 
 # ---------------------------------------------------------
 # RUN APP

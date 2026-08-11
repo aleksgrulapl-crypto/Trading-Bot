@@ -1,6 +1,11 @@
+# ============================
+# DASHBOARD MODULE (FINAL CLEAN)
+# ============================
+
 import json
 import functools
 from flask import Blueprint, request, render_template, redirect, jsonify
+
 import session
 import config
 from trade_log import load_log
@@ -45,32 +50,22 @@ def dashboard_logout():
     return resp
 
 # ---------------------------------------------------------
-# LOAD AVAILABLE BALANCE LOG
+# LOAD TREND LOGS
 # ---------------------------------------------------------
 
 def load_available_log():
-    data = []
     try:
         with open("available_log.json") as f:
-            for line in f:
-                data.append(json.loads(line))
+            return [json.loads(line) for line in f]
     except:
-        pass
-    return data
-
-# ---------------------------------------------------------
-# LOAD EQUITY LOG
-# ---------------------------------------------------------
+        return []
 
 def load_equity_log():
-    data = []
     try:
         with open("equity_log.json") as f:
-            for line in f:
-                data.append(json.loads(line))
+            return [json.loads(line) for line in f]
     except:
-        pass
-    return data
+        return []
 
 # ---------------------------------------------------------
 # DASHBOARD HOME
@@ -84,7 +79,7 @@ def dashboard_home():
     raw_positions = session.get_positions() or []
     raw_account = session.get_account() or {}
 
-    # Enrich data for dashboard
+    # Enrich data
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
@@ -93,7 +88,7 @@ def dashboard_home():
     session.shared_state["positions"] = positions
     session.shared_state["trade_log"] = load_log()
 
-    # Load trend logs
+    # Trend logs
     available_log = load_available_log()
     equity_log = load_equity_log()
 
@@ -152,10 +147,9 @@ def dashboard_data():
 def dashboard_close(position_id):
     from close_position import close_position
 
-    # Execute close
     close_position(position_id)
 
-    # Refresh everything
+    # Refresh state
     raw_positions = session.get_positions() or []
     raw_account = session.get_account() or {}
 

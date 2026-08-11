@@ -1,147 +1,157 @@
 # ============================
-# SESSION MODULE (FINAL VERSION)
+# SESSION MODULE (FINAL CLEAN)
 # ============================
 
+import requests
 from auth import auth
-from config import (
-    API_ACCOUNTS,
-    API_POSITIONS,
-    API_BASE
-)
-import utils
-from trade_log import load_log
+from config import API_POSITIONS, API_ACCOUNT
+from utils import timestamp
 
+# Shared state for dashboard
 shared_state = {
     "account": {},
     "positions": [],
     "trade_log": [],
-    "daily_report": {},
     "system_status": {
         "last_webhook": None,
         "last_trade": None,
         "auth": "OK"
-    }
+    },
+    "daily_report": {}
 }
 
 # ---------------------------------------------------------
-# AUTHENTICATED REQUEST WRAPPER
+# GET HEADERS
 # ---------------------------------------------------------
 
-def request(method, url, **kwargs):
-    return auth.request(method, url, **kwargs)
+def get_headers():
+    auth.ensure_token()
+    return {
+        "X-CAP-API-KEY": auth.api_key,
+        "CST": auth.cst,
+        "X-SECURITY-TOKEN": auth.xst
+    }
 
 # ---------------------------------------------------------
-# DIRECT EPIC LOOKUP (correct + stable)
+# REQUEST WRAPPER (CLEAN LOGGING)
 # ---------------------------------------------------------
 
-def verify_epic(ticker):
-    print("\n" + "="*60)
-    print(f"[EPIC LOOKUP] Ticker: {ticker}")
-
-    epic = utils.resolve_epic_from_ticker(ticker)
-    print(f"[EPIC LOOKUP] Resolved EPIC: {epic}")
-
-    if not epic:
-        print("[EPIC LOOKUP] No EPIC mapping found.")
-        return {}
-
-    url = f"{API_BASE}/api/v1/markets/{epic}"
-    print(f"[EPIC LOOKUP] URL: {url}")
-    print("="*60)
+def request(method, url, json=None):
+    headers = get_headers()
 
     try:
-        r = request("GET", url)
+        response = auth.session.request(method, url, headers=headers, json=json)
 
-        print("[EPIC LOOKUP] Status:", r.status_code)
-        print("[EPIC LOOKUP] Raw response:")
-        print(r.text)
-        print("="*60)
+        # Only log errors
+        if response.status_code >= 400:
+            print(f"[ERROR] {method} {url} → {response.status_code}")
+            print(f"[ERROR] Response: {response.text}")
 
-        if r.status_code != 200:
-            print("[EPIC LOOKUP] Failed.")
-            return {}
-
-        return r.json()
+        return response
 
     except Exception as e:
-        print("[EPIC LOOKUP] ERROR:", e)
-        return {}
+        print(f"[ERROR] Request failed: {e}")
+        return None
 
 # ---------------------------------------------------------
-# ACCOUNT FETCHING
-# ---------------------------------------------------------
-
-def get_account():
-    try:
-        r = request("GET", API_ACCOUNTS)
-        raw = r.json() if r.status_code == 200 else {}
-        account = utils.parse_account(raw)
-        shared_state["account"] = account
-        return account
-    except Exception as e:
-        print("Account fetch error:", e)
-        return shared_state["account"]
-
-# ---------------------------------------------------------
-# ACCOUNT ENRICHMENT (dashboard compatibility)
-# ---------------------------------------------------------
-
-def enrich_account(raw_account):
-    # Dashboard expects this function to exist
-    return raw_account
-
-# ---------------------------------------------------------
-# POSITIONS FETCHING
+# GET POSITIONS (RAW)
 # ---------------------------------------------------------
 
 def get_positions():
+    url = f"{API_POSITIONS}?includeProfitLoss=true"
+    response = request("GET", url)
+
+    if not response or response.status_code != 200:
+        return []
+
     try:
-        r = request("GET", API_POSITIONS + "?includeProfitLoss=true")
-        raw = r.json().get("positions", []) if r.status_code == 200 else []
-        parsed = utils.parse_positions(raw)
-        shared_state["positions"] = parsed
-        return parsed
-    except Exception as e:
-        print("Position fetch error:", e)
-        return shared_state["positions"]
+        data = response.json()
+        return data.get("positions", [])
+    except:
+        return []
 
 # ---------------------------------------------------------
-# POSITION ENRICHMENT (dashboard compatibility)
+# GET ACCOUNT (RAW)
+# ---------------------------------------------------------
+
+def get_account():
+    response = request("GET", API_ACCOUNT)
+
+    if not response or response.status_code != 200:
+        return {}
+
+    try:
+        data = response.json()
+        accounts = data.get("accounts", [])
+        return accounts[0] if accounts else {}
+    except:
+        return {}
+
+# ---------------------------------------------------------
+# ENRICH POSITIONS (CORRECT PnL LOGIC)
 # ---------------------------------------------------------
 
 def enrich_positions(raw_positions):
     enriched = []
-    for p in raw_positions:
-        p["profitLoss"] = utils.calculate_profit_loss(
-            p.get("direction"),
-            p.get("price"),
-            p.get("current_price"),
-            p.get("size")
-        )
-        enriched.append(p)
+
+    for item in raw_positions:
+        pos = item["position"]
+        market = item["market"]
+
+        # Correct PnL: use UPL (unrealised PnL)
+        profit = pos.get("upl", 0)
+
+        enriched.append({
+            "id": pos.get("dealId"),
+            "ticker": market.get("symbol"),
+            "epic": market.get("epic"),
+            "size": pos.get("size"),
+            "price": pos.get("level"),
+            "current_price": market.get("bid") if pos.get("direction") == "SELL" else market.get("offer"),
+            "direction": pos.get("direction"),
+            "profit": round(profit, 2),
+            "stopLevel": pos.get("stopLevel"),
+            "limitLevel": pos.get("profitLevel"),
+            "currency": pos.get("currency")
+        })
+
     return enriched
 
 # ---------------------------------------------------------
-# DAILY REPORT (dashboard compatibility)
+# ENRICH ACCOUNT
 # ---------------------------------------------------------
 
-def get_daily_report():
-    return shared_state.get("daily_report", {})
+def enrich_account(raw):
+    if not raw:
+        return {}
+
+    bal = raw.get("balance", {})
+
+    available = bal.get("available", 0)
+    margin_warning = None
+
+    if available < 0:
+        margin_warning = "⚠ Margin Warning: Available balance is negative."
+
+    return {
+        "balance": round(bal.get("balance", 0), 2),
+        "equity": round(bal.get("balance", 0) + bal.get("profitLoss", 0), 2),
+        "margin": round(bal.get("profitLoss", 0), 2),
+        "available": round(available, 2),
+        "available_color": "red" if available < 0 else "lime",
+        "margin_warning": margin_warning
+    }
 
 # ---------------------------------------------------------
-# TRADE LOG
+# UPDATE LAST TRADE TIMESTAMP
 # ---------------------------------------------------------
 
-def refresh_trade_log():
-    shared_state["trade_log"] = load_log()
-    return shared_state["trade_log"]
+def update_last_trade():
+    shared_state["system_status"]["last_trade"] = timestamp()
 
 # ---------------------------------------------------------
-# SYSTEM STATUS UPDATES
+# UPDATE LAST WEBHOOK TIMESTAMP
 # ---------------------------------------------------------
 
 def update_last_webhook():
-    shared_state["system_status"]["last_webhook"] = utils.timestamp()
-
-def update_last_trade():
-    shared_state["system_status"]["last_trade"] = utils.timestamp()
+    shared_state["system_status"]["last_webhook"] = timestamp()

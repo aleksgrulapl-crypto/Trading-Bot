@@ -1,28 +1,33 @@
-<!-- ACCOUNT SUMMARY -->
-<div class="section">
+<!-- ============================
+     ACCOUNT SUMMARY
+============================= -->
+<div class="section card">
     <h2>Account Summary</h2>
 
-    <p><strong>Balance:</strong> £{{ account.balance }}</p>
-    <p><strong>Equity:</strong> £{{ account.equity }}</p>
-    <p><strong>Margin:</strong> £{{ account.margin }}</p>
-
-    <p>
-        <strong>Available:</strong>
-        <span style="color: {{ account.available_color }};">
-            £{{ account.available }}
-        </span>
-    </p>
+    <div class="grid-2">
+        <div><strong>Balance:</strong> £{{ account.balance }}</div>
+        <div><strong>Equity:</strong> £{{ account.equity }}</div>
+        <div><strong>Margin:</strong> £{{ account.margin }}</div>
+        <div>
+            <strong>Available:</strong>
+            <span style="color: {{ account.available_color }};">
+                £{{ account.available }}
+            </span>
+        </div>
+    </div>
 
     {% if account.margin_warning %}
-    <div style="padding: 10px; background: #332200; color: yellow; border: 1px solid yellow; margin-top: 10px;">
+    <div class="warning-box">
         {{ account.margin_warning }}
     </div>
     {% endif %}
 </div>
 
 
-<!-- AVAILABLE BALANCE TREND -->
-<div class="section">
+<!-- ============================
+     AVAILABLE BALANCE TREND
+============================= -->
+<div class="section card">
     <h2>Available Balance Trend</h2>
     <canvas id="availableChart"></canvas>
 
@@ -46,20 +51,27 @@
         data: {
             labels: avLabels,
             datasets: [{
-                label: 'Available Balance (£)',
+                label: 'Available (£)',
                 data: avValues,
-                borderColor: 'lime',
-                backgroundColor: 'rgba(0,255,0,0.2)',
-                tension: 0.3
+                borderColor: '#00ff99',
+                backgroundColor: 'rgba(0,255,153,0.15)',
+                tension: 0.35,
+                borderWidth: 2
             }]
+        },
+        options: {
+            plugins: { legend: { display: false } },
+            scales: { x: { display: false } }
         }
     });
     </script>
 </div>
 
 
-<!-- EQUITY CURVE -->
-<div class="section">
+<!-- ============================
+     EQUITY CURVE
+============================= -->
+<div class="section card">
     <h2>Equity Curve</h2>
     <canvas id="equityChart"></canvas>
 
@@ -83,63 +95,78 @@
         data: {
             labels: eqLabels,
             datasets: [{
-                label: 'Daily Equity (£)',
+                label: 'Equity (£)',
                 data: eqValues,
-                borderColor: 'cyan',
-                backgroundColor: 'rgba(0,255,255,0.2)',
-                tension: 0.3
+                borderColor: '#00e5ff',
+                backgroundColor: 'rgba(0,229,255,0.15)',
+                tension: 0.35,
+                borderWidth: 2
             }]
+        },
+        options: {
+            plugins: { legend: { display: false } },
+            scales: { x: { display: false } }
         }
     });
     </script>
 </div>
 
 
-<!-- OPEN POSITIONS -->
+<!-- ============================
+     OPEN POSITIONS (CARD VIEW)
+============================= -->
 <div class="section">
     <h2>Open Positions</h2>
 
     {% if positions %}
-        <ul>
+        <div class="position-grid">
         {% for p in positions %}
-            {% set pnl = p.profitLoss or p.profit or 0 %}
-            <li>
-                <strong>{{ p.ticker }}</strong>
-                ({{ p.direction }}) —
-                {{ p.size }} units @ £{{ p.price }}
+            {% set pnl = p.profit %}
+            <div class="position-card">
+                <div class="pos-header">
+                    <span class="ticker">{{ p.ticker }}</span>
+                    <span class="side {{ p.direction }}">{{ p.direction|upper }}</span>
+                </div>
 
-                <span style="color: {% if pnl >= 0 %}lime{% else %}red{% endif %};">
-                    (PnL: £{{ pnl | round(2) }})
-                </span>
+                <div class="pos-body">
+                    <div><strong>Size:</strong> {{ p.size }}</div>
+                    <div><strong>Entry:</strong> £{{ p.price }}</div>
+                    <div><strong>Current:</strong> £{{ p.current_price }}</div>
 
-                <span style="color: #ccc;">
-                    — Current: £{{ p.current_price }}
-                </span>
+                    <div>
+                        <strong>PnL:</strong>
+                        <span class="pnl {{ 'green' if pnl >= 0 else 'red' }}">
+                            £{{ pnl | round(2) }}
+                        </span>
+                    </div>
 
-                {% if p.stopLevel %}
-                    <span style="color: orange;">SL: £{{ p.stopLevel }}</span>
-                {% endif %}
+                    {% if p.stopLevel %}
+                        <div><strong>SL:</strong> £{{ p.stopLevel }}</div>
+                    {% endif %}
 
-                {% if p.limitLevel %}
-                    <span style="color: cyan;">TP: £{{ p.limitLevel }}</span>
-                {% endif %}
+                    {% if p.limitLevel %}
+                        <div><strong>TP:</strong> £{{ p.limitLevel }}</div>
+                    {% endif %}
+                </div>
 
-                <button onclick="closePosition('{{ p.id }}')">Close</button>
-            </li>
+                <button class="close-btn" onclick="closePosition('{{ p.id }}')">Close</button>
+            </div>
         {% endfor %}
-        </ul>
+        </div>
     {% else %}
         <p>No open positions.</p>
     {% endif %}
 </div>
 
 
-<!-- TRADE LOG -->
-<div class="section">
+<!-- ============================
+     TRADE LOG
+============================= -->
+<div class="section card">
     <h2>Trade Log</h2>
 
     {% if trade_log %}
-    <table>
+    <table class="trade-table">
         <tr>
             <th>Time</th>
             <th>Ticker</th>
@@ -160,7 +187,7 @@
 
             <td>
                 {% if t.side == "CLOSE" %}
-                    <span style="color: {% if pnl >= 0 %}lime{% else %}red{% endif %};">
+                    <span class="{{ 'green' if pnl >= 0 else 'red' }}">
                         £{{ pnl | round(2) }}
                     </span>
                 {% else %}
@@ -176,35 +203,107 @@
 </div>
 
 
-<!-- DAILY REPORT -->
-<div class="section">
+<!-- ============================
+     DAILY REPORT
+============================= -->
+<div class="section card">
     <h2>Daily Report</h2>
 
     {% if daily_report %}
-        <p><strong>Date:</strong> {{ daily_report.date }}</p>
-        <p><strong>Closed PnL:</strong> £{{ daily_report.closed_pnl }}</p>
-        <p><strong>Open PnL:</strong> £{{ daily_report.open_pnl }}</p>
-        <p><strong>Total Trades:</strong> {{ daily_report.total_trades }}</p>
-        <p><strong>Win Rate:</strong> {{ daily_report.win_rate }}%</p>
-
-        {% if daily_report.best_ticker %}
-        <p><strong>Best Ticker:</strong> {{ daily_report.best_ticker }}</p>
-        {% endif %}
-
-        {% if daily_report.worst_ticker %}
-        <p><strong>Worst Ticker:</strong> {{ daily_report.worst_ticker }}</p>
-        {% endif %}
+        <div class="grid-2">
+            <div><strong>Date:</strong> {{ daily_report.date }}</div>
+            <div><strong>Closed PnL:</strong> £{{ daily_report.closed_pnl }}</div>
+            <div><strong>Open PnL:</strong> £{{ daily_report.open_pnl }}</div>
+            <div><strong>Total Trades:</strong> {{ daily_report.total_trades }}</div>
+            <div><strong>Win Rate:</strong> {{ daily_report.win_rate }}%</div>
+            {% if daily_report.best_ticker %}
+                <div><strong>Best Ticker:</strong> {{ daily_report.best_ticker }}</div>
+            {% endif %}
+            {% if daily_report.worst_ticker %}
+                <div><strong>Worst Ticker:</strong> {{ daily_report.worst_ticker }}</div>
+            {% endif %}
+        </div>
     {% else %}
         <p>No daily report generated yet.</p>
     {% endif %}
 </div>
 
 
-<!-- SYSTEM STATUS -->
-<div class="section">
+<!-- ============================
+     SYSTEM STATUS
+============================= -->
+<div class="section card">
     <h2>System Status</h2>
 
-    <p><strong>Last Webhook:</strong> {{ system_status.last_webhook or "N/A" }}</p>
-    <p><strong>Last Trade:</strong> {{ system_status.last_trade or "N/A" }}</p>
-    <p><strong>Auth Status:</strong> {{ system_status.auth or "N/A" }}</p>
+    <div class="grid-2">
+        <div><strong>Last Webhook:</strong> {{ system_status.last_webhook or "N/A" }}</div>
+        <div><strong>Last Trade:</strong> {{ system_status.last_trade or "N/A" }}</div>
+        <div><strong>Auth Status:</strong> {{ system_status.auth or "N/A" }}</div>
+    </div>
 </div>
+
+
+<!-- ============================
+     CSS (INLINE FOR SIMPLICITY)
+============================= -->
+<style>
+.section { margin-bottom: 30px; }
+.card {
+    background: #1e1e1e;
+    padding: 20px;
+    border-radius: 10px;
+    border: 1px solid #333;
+}
+.grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+.warning-box {
+    padding: 10px;
+    background: #332200;
+    color: yellow;
+    border: 1px solid yellow;
+    margin-top: 10px;
+}
+.position-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 15px;
+}
+.position-card {
+    background: #1e1e1e;
+    padding: 15px;
+    border-radius: 10px;
+    border: 1px solid #333;
+}
+.pos-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+.ticker { font-size: 1.2em; font-weight: bold; }
+.side.BUY { color: #00ff99; }
+.side.SELL { color: #ff4d4d; }
+.pnl.green { color: #00ff99; }
+.pnl.red { color: #ff4d4d; }
+.close-btn {
+    margin-top: 10px;
+    width: 100%;
+    padding: 8px;
+    background: #ff4d4d;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+.trade-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.trade-table th, .trade-table td {
+    padding: 8px;
+    border-bottom: 1px solid #333;
+}
+.green { color: #00ff99; }
+.red { color: #ff4d4d; }
+</style>
