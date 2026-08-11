@@ -3,6 +3,7 @@ from scheduler import start_scheduler
 from dashboard import dashboard as dashboard_blueprint
 
 import json
+import time   # <-- CORRECT LOCATION
 import session
 import order
 from trade_log import load_log
@@ -17,6 +18,10 @@ print("[Webhook] Starting scheduler...")
 start_scheduler()
 print("[Webhook] Scheduler started.")
 
+# ---------------------------------------------------------
+# RAW DEBUG ENDPOINTS
+# ---------------------------------------------------------
+
 @app.route("/raw")
 def raw_positions():
     return jsonify(session.fetch_positions_from(API_POSITIONS))
@@ -24,6 +29,10 @@ def raw_positions():
 @app.route("/raw/account")
 def raw_account():
     return jsonify(session.request("GET", API_ACCOUNTS).json())
+
+# ---------------------------------------------------------
+# WEBHOOK ENDPOINT
+# ---------------------------------------------------------
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -38,19 +47,16 @@ def webhook():
     # JSON FIRST (correct behaviour)
     # ---------------------------------------------------------
     try:
-        # Proper JSON
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
 
     except:
         try:
-            # JSON wrapped inside a string
             data = json.loads(raw)
             alert = parse_tradingview_alert(data)
 
         except:
             try:
-                # RAW fallback
                 alert = parse_tradingview_alert(raw)
             except:
                 return jsonify({"status": "error", "message": "Invalid alert"}), 200
@@ -74,10 +80,11 @@ def webhook():
 
     return jsonify({"status": "ok", "result": result}), 200
 
+# ---------------------------------------------------------
+# DASHBOARD ROUTE
+# ---------------------------------------------------------
+
 @app.route("/")
-
-import time
-
 @app.route("/dashboard")
 def dashboard():
     raw_positions = session.get_positions() or []
@@ -92,13 +99,17 @@ def dashboard():
     return render_template(
         "dashboard.html",
         title="AG Capital Trader",
-        cache_bust=time.time(),   # <-- ADD THIS LINE
+        cache_bust=time.time(),   # <-- CORRECTLY ADDED
         account=account,
         positions=positions,
         trade_log=trade_log,
         daily_report=daily_report,
         system_status=session.shared_state.get("system_status", {})
     )
+
+# ---------------------------------------------------------
+# CLOSE POSITION
+# ---------------------------------------------------------
 
 @app.route("/close/<position_id>", methods=["POST"])
 def close_position(position_id):
@@ -108,6 +119,10 @@ def close_position(position_id):
     result = r.json()
     session.update_last_trade()
     return jsonify({"status": "ok", "result": result})
+
+# ---------------------------------------------------------
+# RUN APP
+# ---------------------------------------------------------
 
 import os
 
