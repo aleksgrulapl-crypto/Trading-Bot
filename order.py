@@ -3,26 +3,27 @@ import session
 from trade_log import log_trade
 import utils
 
-def place_order(symbol, action, size, sl=None, tp=None):
+def place_order(ticker, action, size, sl=None, tp=None):
 
     auth.ensure_token()   # SAFE
 
-    epic_data = session.verify_epic(symbol)
+    # 1. Lookup instrument using the TICKER (NVDA, MU, TSLA)
+    epic_data = session.verify_epic(ticker)
     epic = epic_data.get("instrument", {}).get("epic")
 
     if not epic:
-        return {"status": "error", "message": "EPIC not found"}
+        return {"status": "error", "message": f"EPIC not found for ticker {ticker}"}
 
-    # FIXED: Correct direction mapping
+    # 2. Correct direction mapping
     direction = "BUY" if action.lower() == "buy" else "SELL"
 
     payload = {
-        "epic": epic,
+        "epic": epic,          # <-- REAL EPIC from Capital.com
         "direction": direction,
         "size": size,
         "orderType": "MARKET",
-        "limitLevel": tp,   # TP
-        "stopLevel": sl     # SL
+        "limitLevel": tp,      # TP
+        "stopLevel": sl        # SL
     }
 
     r = session.request("POST", session.API_POSITIONS, json=payload)
@@ -31,9 +32,8 @@ def place_order(symbol, action, size, sl=None, tp=None):
     if "dealReference" in result:
         price = epic_data["snapshot"]["offer"]
 
-        # FIXED: Clean logging
         log_trade(
-            ticker=symbol,
+            ticker=ticker,     # <-- Store original ticker
             side=direction,
             size=size,
             price=price

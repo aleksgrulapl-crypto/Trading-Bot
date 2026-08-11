@@ -68,27 +68,33 @@ def webhook():
     try:
         alert = parse_tradingview_alert(data)
 
-        # Convert ticker → EPIC
-        symbol = utils.map_symbol_to_epic(alert["symbol"])
-        if symbol is None:
-            return jsonify({
-                "status": "error",
-                "message": f"EPIC not found for symbol {alert['symbol']}"
-            }), 200
+        # Extract ticker (NVDA, MU, TSLA, etc.)
+        ticker = alert["symbol"]
+
+        # Convert ticker → EPIC for logging/debug only
+        epic_preview = utils.map_symbol_to_epic(ticker)
+        if epic_preview is None:
+            print(f"[Webhook] WARNING: No EPIC mapping found for ticker {ticker}")
+        else:
+            print(f"[Webhook] EPIC preview: {epic_preview}")
 
         action = alert["action"]
         size = alert["quantity"]
         sl = alert["sl"]
         tp = alert["tp"]
 
-        print(f"[Webhook] Parsed alert: {symbol} {action} {size} SL={sl} TP={tp}")
+        print(f"[Webhook] Parsed alert: {ticker} {action} {size} SL={sl} TP={tp}")
 
-        result = order.place_order(symbol, action, size, sl, tp)
+        # IMPORTANT:
+        # place_order() expects the TICKER, not the EPIC
+        result = order.place_order(ticker, action, size, sl, tp)
+
         return jsonify({"status": "ok", "result": result}), 200
 
     except Exception as e:
         print("[Webhook] ERROR:", e)
         return jsonify({"status": "error", "message": str(e)}), 200
+
 
 
 # ---------------------------------------------------------
