@@ -46,13 +46,22 @@ def raw_account():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # FIX: Accept TradingView's text/plain content-type
-    data = request.get_json(force=True, silent=True)
     session.update_last_webhook()
 
-    if not data:
-        print("[Webhook] ERROR: No JSON received or invalid format")
-        return jsonify({"status": "error", "message": "Invalid or missing JSON"}), 400
+    raw_body = request.data.decode("utf-8", errors="ignore")
+    print("[Webhook] RAW BODY:", raw_body)
+
+    # Try to extract JSON from the raw body
+    try:
+        # JSON is always the first {...} block
+        json_start = raw_body.find("{")
+        json_end = raw_body.rfind("}") + 1
+        json_text = raw_body[json_start:json_end]
+
+        data = json.loads(json_text)
+    except Exception as e:
+        print("[Webhook] ERROR parsing JSON:", e)
+        return jsonify({"status": "error", "message": "Invalid JSON"}), 400
 
     try:
         alert = parse_tradingview_alert(data)
@@ -69,8 +78,9 @@ def webhook():
         return jsonify({"status": "ok", "result": result}), 200
 
     except Exception as e:
-        print(f"[Webhook] ERROR: {e}")
+        print("[Webhook] ERROR:", e)
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 
 # ---------------------------------------------------------
