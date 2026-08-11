@@ -14,6 +14,7 @@ API_REFRESH = None   # Removed / disabled
 
 # --- ACCOUNT & BALANCE ---
 API_ACCOUNTS = f"{API_BASE}/api/v1/accounts"
+API_ACCOUNT = f"{API_BASE}/api/v1/accounts"   # <-- REQUIRED
 
 # --- POSITIONS & MARKET DATA ---
 API_POSITIONS = f"{API_BASE}/api/v1/positions"
