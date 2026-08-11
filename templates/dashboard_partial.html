@@ -1,5 +1,179 @@
-{% extends "base.html" %}
+<!-- ============================
+     ACCOUNT SUMMARY
+============================= -->
+<div class="section card">
+    <h2 class="section-title">Account Summary</h2>
 
-{% block content %}
-    {% include "dashboard_partial.html" %}
-{% endblock %}
+    <div class="grid-2">
+        <div><strong>Balance:</strong> £{{ account.balance }}</div>
+        <div><strong>Equity:</strong> £{{ account.equity }}</div>
+        <div><strong>Margin:</strong> £{{ account.margin }}</div>
+        <div>
+            <strong>Available:</strong>
+            <span class="value-colored" style="color: {{ account.available_color }};">
+                £{{ account.available }}
+            </span>
+        </div>
+    </div>
+
+    {% if account.margin_warning %}
+    <div class="warning-box">
+        {{ account.margin_warning }}
+    </div>
+    {% endif %}
+</div>
+
+
+<!-- ============================
+     AVAILABLE BALANCE TREND
+============================= -->
+<div class="section card">
+    <h2 class="section-title">Available Balance Trend</h2>
+    <canvas id="availableChart"></canvas>
+</div>
+
+
+<!-- ============================
+     EQUITY CURVE
+============================= -->
+<div class="section card">
+    <h2 class="section-title">Equity Curve</h2>
+    <canvas id="equityChart"></canvas>
+</div>
+
+
+<!-- ============================
+     OPEN POSITIONS (CARD VIEW)
+============================= -->
+<div class="section card">
+    <h2 class="section-title">Open Positions</h2>
+
+    {% if positions %}
+        <div class="position-grid">
+        {% for p in positions %}
+            {% set pnl = p.profit %}
+            <div class="position-card">
+                <div class="pos-header">
+                    <span class="ticker">{{ p.ticker }}</span>
+                    <span class="side {{ p.direction }}">{{ p.direction|upper }}</span>
+                </div>
+
+                <div class="pos-body">
+                    <div><strong>Size:</strong> {{ p.size }}</div>
+                    <div><strong>Entry:</strong> £{{ p.price }}</div>
+                    <div><strong>Current:</strong> £{{ p.current_price }}</div>
+
+                    <div>
+                        <strong>PnL:</strong>
+                        <span class="pnl {{ 'green' if pnl >= 0 else 'red' }}">
+                            £{{ pnl | round(2) }}
+                        </span>
+                    </div>
+
+                    {% if p.stopLevel %}
+                        <div><strong>SL:</strong> £{{ p.stopLevel }}</div>
+                    {% endif %}
+
+                    {% if p.limitLevel %}
+                        <div><strong>TP:</strong> £{{ p.limitLevel }}</div>
+                    {% endif %}
+                </div>
+
+                <button class="close-btn" onclick="closePosition('{{ p.id }}')">Close</button>
+            </div>
+        {% endfor %}
+        </div>
+    {% else %}
+        <p>No open positions.</p>
+    {% endif %}
+</div>
+
+
+<!-- ============================
+     TRADE LOG
+============================= -->
+<div class="section card">
+    <h2 class="section-title">Trade Log</h2>
+
+    {% if trade_log %}
+    <table class="trade-table">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Ticker</th>
+                <th>Side</th>
+                <th>Size</th>
+                <th>Price</th>
+                <th>PnL</th>
+            </tr>
+        </thead>
+
+        <tbody>
+        {% for t in trade_log %}
+        {% set pnl = t.pnl or 0 %}
+        <tr>
+            <td>{{ t.time }}</td>
+            <td>{{ t.ticker }}</td>
+            <td>{{ t.side }}</td>
+            <td>{{ t.size }}</td>
+            <td>{{ t.price }}</td>
+
+            <td>
+                {% if t.side == "CLOSE" %}
+                    <span class="{{ 'green' if pnl >= 0 else 'red' }}">
+                        £{{ pnl | round(2) }}
+                    </span>
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+        <p>No trades logged yet.</p>
+    {% endif %}
+</div>
+
+
+<!-- ============================
+     DAILY REPORT
+============================= -->
+<div class="section card">
+    <h2 class="section-title">Daily Report</h2>
+
+    {% if daily_report %}
+        <div class="grid-2">
+            <div><strong>Date:</strong> {{ daily_report.date }}</div>
+            <div><strong>Closed PnL:</strong> £{{ daily_report.closed_pnl }}</div>
+            <div><strong>Open PnL:</strong> £{{ daily_report.open_pnl }}</div>
+            <div><strong>Total Trades:</strong> {{ daily_report.total_trades }}</div>
+            <div><strong>Win Rate:</strong> {{ daily_report.win_rate }}%</div>
+
+            {% if daily_report.best_ticker %}
+                <div><strong>Best Ticker:</strong> {{ daily_report.best_ticker }}</div>
+            {% endif %}
+
+            {% if daily_report.worst_ticker %}
+                <div><strong>Worst Ticker:</strong> {{ daily_report.worst_ticker }}</div>
+            {% endif %}
+        </div>
+    {% else %}
+        <p>No daily report generated yet.</p>
+    {% endif %}
+</div>
+
+
+<!-- ============================
+     SYSTEM STATUS
+============================= -->
+<div class="section card">
+    <h2 class="section-title">System Status</h2>
+
+    <div class="grid-2">
+        <div><strong>Last Webhook:</strong> {{ system_status.last_webhook or "N/A" }}</div>
+        <div><strong>Last Trade:</strong> {{ system_status.last_trade or "N/A" }}</div>
+        <div><strong>Auth Status:</strong> {{ system_status.auth or "N/A" }}</div>
+    </div>
+</div>
