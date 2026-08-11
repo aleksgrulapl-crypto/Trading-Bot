@@ -1,5 +1,5 @@
 # ============================
-# WEBHOOK MODULE (FINAL CLEAN)
+# WEBHOOK MODULE (FULLY TOLERANT VERSION)
 # ============================
 
 from flask import Flask, request, jsonify, render_template
@@ -40,7 +40,7 @@ def raw_account():
     return jsonify(raw)
 
 # ---------------------------------------------------------
-# WEBHOOK ENDPOINT
+# WEBHOOK ENDPOINT (FULLY TOLERANT)
 # ---------------------------------------------------------
 
 @app.route("/webhook", methods=["POST"])
@@ -48,19 +48,26 @@ def webhook():
     session.update_last_webhook()
 
     raw_body = request.get_data(as_text=True).strip()
+    json_body = request.get_json(silent=True)
 
-    if not raw_body:
-        return jsonify({"status": "error", "message": "Empty body"}), 200
+    # Reject empty body
+    if not raw_body and not json_body:
+        return jsonify({"status": "error", "message": "Empty alert"}), 200
 
     # -----------------------------------------------------
-    # Parse RAW or JSON alert
+    # Decide RAW vs JSON automatically
     # -----------------------------------------------------
     try:
-        if "|" in raw_body:
+        if raw_body and "|" in raw_body:
             alert = parse_tradingview_alert(raw_body)
+
+        elif json_body:
+            alert = parse_tradingview_alert(json_body)
+
         else:
-            json_data = request.get_json(force=True)
-            alert = parse_tradingview_alert(json_data)
+            # Fallback: treat raw_body as RAW even without "|"
+            alert = parse_tradingview_alert(raw_body)
+
     except Exception as e:
         print(f"[Webhook] Parse error: {e}")
         return jsonify({"status": "error", "message": "Invalid alert"}), 200
