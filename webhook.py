@@ -9,7 +9,7 @@ import order
 from trade_log import load_log
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS
-from parser import parse_tradingview_alert
+from parser import parse_tradingview_alert, rr2_tp
 from sizing import PositionSizing
 
 app = Flask(__name__)
@@ -50,13 +50,11 @@ def webhook():
         alert = parse_tradingview_alert(data)
 
     except:
-        # Try raw JSON
         try:
             data = json.loads(raw)
             alert = parse_tradingview_alert(data)
 
         except:
-            # Try raw text alert
             try:
                 alert = parse_tradingview_alert(raw)
             except:
@@ -67,18 +65,26 @@ def webhook():
     sl = alert.get("sl")
     tp = alert.get("tp")
 
-    # Use sizing module (50% equity)
-    size = PositionSizing.calculate_size(ticker, action)
-    if size is None:
-        return jsonify({"status": "skipped", "message": "Max positions reached"}), 200
-
     epic_data = session.verify_epic(ticker)
     epic = epic_data.get("epic")
 
     if not epic:
         return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
 
-    # Place order
+    # BUY requires SL
+    if action == "buy" and sl is None:
+        return jsonify({"status": "error", "message": "BUY requires SL"}), 200
+
+    # Auto TP using R:R = 1:2
+    if action == "buy" and tp is None:
+        entry_price = PositionSizing.get_entry_price(epic, action)
+        tp = rr2_tp(entry_price, sl)
+
+    # Use sizing module
+    size = PositionSizing.calculate_size(epic, action)
+    if size is None:
+        return jsonify({"status": "skipped", "message": "Max positions reached"}), 200
+
     result = order.place_order(epic, action, size, sl, tp)
 
     session.update_last_trade()

@@ -1,13 +1,8 @@
 # ============================
-# TradingView Alert Parser (Updated)
+# TradingView Alert Parser (FINAL)
 # ============================
 
 def parse_tradingview_alert(data):
-    """
-    Accepts:
-    - RAW string alerts
-    - JSON alerts
-    """
     if isinstance(data, str):
         return parse_raw_alert(data)
 
@@ -18,20 +13,19 @@ def parse_tradingview_alert(data):
 
 
 # ---------------------------------------------------------
+# R:R = 1:2 TP CALCULATION
+# ---------------------------------------------------------
+
+def rr2_tp(entry, sl):
+    distance = abs(entry - sl)
+    return entry + (distance * 2)
+
+
+# ---------------------------------------------------------
 # JSON ALERT PARSER
 # ---------------------------------------------------------
 
 def parse_json_alert(data):
-    """
-    JSON TradingView alert format:
-    {
-        "symbol": "NVDA",
-        "action": "buy",
-        "quantity": 1,
-        "payload": "BUY|NVDA|SL:123|TP:130"
-    }
-    """
-
     symbol = normalise_symbol(data.get("symbol"))
     if not symbol:
         raise ValueError("Missing symbol")
@@ -48,16 +42,12 @@ def parse_json_alert(data):
     else:
         direction = data.get("action", "").lower()
 
-    # BUY requires SL/TP
-    if direction == "buy" and (sl is None or tp is None):
-        raise ValueError("Missing SL/TP for BUY")
-
-    # SELL / CLOSE do NOT require SL/TP
+    quantity = safe_float(data.get("quantity", 1))
 
     return {
         "symbol": symbol,
         "action": direction,
-        "quantity": safe_float(data.get("quantity", 1)),
+        "quantity": quantity,
         "sl": sl,
         "tp": tp
     }
@@ -69,9 +59,6 @@ def parse_json_alert(data):
 
 def parse_raw_alert(raw: str):
     parts = raw.split("|")
-
-    if len(parts) < 2:
-        raise ValueError("Invalid raw alert format")
 
     direction = parts[0].lower()
     symbol = normalise_symbol(parts[1])
@@ -88,10 +75,6 @@ def parse_raw_alert(raw: str):
 
         if part.upper().startswith("TP:"):
             tp = safe_float(part.replace("TP:", "").strip())
-
-    # BUY requires SL/TP
-    if direction == "buy" and (sl is None or tp is None):
-        raise ValueError("Missing SL/TP for BUY")
 
     return {
         "symbol": symbol,
@@ -123,10 +106,6 @@ def parse_payload(payload: str):
 
         if part.upper().startswith("TP:"):
             tp = safe_float(part.replace("TP:", "").strip())
-
-    # BUY requires SL/TP
-    if direction == "buy" and (sl is None or tp is None):
-        raise ValueError("Missing SL/TP for BUY")
 
     return {
         "direction": direction,

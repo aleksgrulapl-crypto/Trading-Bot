@@ -1,39 +1,37 @@
 # ============================
-# POSITION SIZING MODULE (Updated - No MarketData dependency)
+# POSITION SIZING MODULE (FINAL)
 # ============================
 
-from session import auth, request
+from session import auth
 from config import (
     API_POSITIONS,
     API_ACCOUNTS,
     API_MARKET,
     EQUITY_PERCENT,
+    LEVERAGE,
     MAX_POSITIONS_PER_TICKER
 )
 
 class PositionSizing:
 
     @staticmethod
-    def get_equity():
+    def get_available_balance():
         r = auth.request("GET", API_ACCOUNTS)
 
         if r.status_code != 200:
-            raise Exception(f"Equity fetch failed: {r.text}")
+            raise Exception(f"Account fetch failed: {r.text}")
 
         data = r.json()
         account = data["accounts"][0]
 
+        # IG format: account["balance"]["available"]
         if "balance" in account and "available" in account["balance"]:
             return float(account["balance"]["available"])
 
-        for key in ["available", "availableCash", "availableFunds", "cash"]:
-            if key in account:
-                return float(account[key])
-
-        raise Exception("Could not find usable equity field in account JSON")
+        raise Exception("Available balance field missing in account JSON")
 
     @staticmethod
-    def count_positions(ticker):
+    def count_positions(epic):
         r = auth.request("GET", API_POSITIONS)
 
         if r.status_code != 200:
@@ -43,11 +41,8 @@ class PositionSizing:
 
         count = 0
         for p in positions:
-            epic = (
-                p.get("market", {}).get("epic")
-                or p.get("market", {}).get("instrumentName")
-            )
-            if epic and epic.upper() == ticker.upper():
+            pos_epic = p.get("market", {}).get("epic")
+            if pos_epic and pos_epic.upper() == epic.upper():
                 count += 1
 
         return count
@@ -55,9 +50,6 @@ class PositionSizing:
     @staticmethod
     def get_entry_price(epic, side):
         r = auth.request("GET", f"{API_MARKET}/{epic}")
-
-        if r.status_code != 200:
-            raise Exception(f"Market price fetch failed: {r.text}")
 
         snapshot = r.json().get("snapshot", {})
 
@@ -67,27 +59,16 @@ class PositionSizing:
             return float(snapshot.get("bid"))
 
     @staticmethod
-    def validate_size(size):
-        # Basic validation (can be expanded)
-        if size < 0.1:
-            return 0.1
-        return size
-
-    @staticmethod
-    def calculate_size(ticker, side):
-        if PositionSizing.count_positions(ticker) >= MAX_POSITIONS_PER_TICKER:
-            print(f"Max positions reached for {ticker}. Skipping trade.")
+    def calculate_size(epic, side):
+        if PositionSizing.count_positions(epic) >= MAX_POSITIONS_PER_TICKER:
+            print(f"Max positions reached for {epic}. Skipping trade.")
             return None
 
-        equity = PositionSizing.get_equity()
-        allocation = equity * EQUITY_PERCENT
-
-        # Get EPIC from session
-        epic_data = request("GET", f"{API_MARKET}/search/{ticker}").json()
-        epic = epic_data.get("epic", ticker)
+        available = PositionSizing.get_available_balance()
+        allocation = available * EQUITY_PERCENT
 
         entry_price = PositionSizing.get_entry_price(epic, side)
-        raw_size = allocation / entry_price
 
-        final_size = PositionSizing.validate_size(raw_size)
-        return round(final_size, 2)
+        raw_size = (allocation * LEVERAGE) / entry_price
+
+        return round(raw_size, 2)
