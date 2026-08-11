@@ -25,7 +25,6 @@
             align-items: center;
         }
 
-        /* Center the title */
         header h1 {
             flex: 1;
             text-align: center;
@@ -50,7 +49,6 @@
             padding: 25px;
         }
 
-        /* Error banner */
         #error-banner {
             background: #3b0000;
             color: #ff6b6b;
@@ -61,10 +59,6 @@
             border-radius: 6px;
             font-size: 14px;
         }
-
-        /* ============================
-           DASHBOARD LAYOUT FIX
-           ============================ */
 
         .section { margin-bottom: 30px; }
 
@@ -173,8 +167,14 @@
 
 <div id="error-banner"></div>
 
+<!-- OUTER WRAPPER (keeps styling) -->
 <div id="dashboard-content">
-    {% include "dashboard_partial.html" %}
+
+    <!-- INNER WRAPPER (refresh target) -->
+    <div id="dashboard-inner">
+        {% include "dashboard_partial.html" %}
+    </div>
+
 </div>
 
 <script>
@@ -185,8 +185,7 @@ function refreshDashboard() {
         .then(response => response.json())
         .then(data => {
             if (data && data.html) {
-                const container = document.getElementById('dashboard-content');
-                container.innerHTML = data.html;
+                document.getElementById("dashboard-inner").innerHTML = data.html;
             } else {
                 errorBanner.innerText = "Dashboard refresh failed: Invalid response.";
                 errorBanner.style.display = "block";
