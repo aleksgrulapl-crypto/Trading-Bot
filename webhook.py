@@ -1,5 +1,5 @@
 # ============================
-# WEBHOOK MODULE (FULLY TOLERANT VERSION)
+# WEBHOOK MODULE (FINAL FULLY TOLERANT VERSION)
 # ============================
 
 from flask import Flask, request, jsonify, render_template
@@ -35,35 +35,41 @@ def raw_account():
     return jsonify(session.get_account())
 
 # ---------------------------------------------------------
-# WEBHOOK ENDPOINT (FULLY TOLERANT)
+# WEBHOOK ENDPOINT (FINAL TOLERANT VERSION)
 # ---------------------------------------------------------
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     session.update_last_webhook()
 
-    raw_body = request.get_data(as_text=True).strip()
+    raw_body = request.get_data(as_text=True)
     json_body = request.get_json(silent=True)
 
+    # Debug: show EXACT incoming payload
+    print("=== DEBUG WEBHOOK INPUT ===")
+    print("RAW BODY:", repr(raw_body))
+    print("JSON BODY:", json_body)
+    print("============================")
+
     # Reject empty body
-    if not raw_body and not json_body:
+    if (not raw_body or raw_body.strip() == "") and not json_body:
         return jsonify({"status": "error", "message": "Empty alert"}), 200
 
     # -----------------------------------------------------
     # Decide RAW vs JSON automatically
     # -----------------------------------------------------
     try:
+        # RAW alert (contains |)
         if raw_body and "|" in raw_body:
-            # RAW alert
-            alert = parse_tradingview_alert(raw_body)
+            alert = parse_tradingview_alert(raw_body.strip())
 
+        # JSON alert (parsed successfully)
         elif json_body:
-            # JSON alert
             alert = parse_tradingview_alert(json_body)
 
+        # Fallback: treat raw_body as RAW even without |
         else:
-            # Fallback: treat raw_body as RAW even without "|"
-            alert = parse_tradingview_alert(raw_body)
+            alert = parse_tradingview_alert(raw_body.strip())
 
     except Exception as e:
         print(f"[Webhook] Parse error: {e}")
