@@ -185,6 +185,20 @@ def verify_epic(symbol):
         return {"epic": None, "source": "exception"}
 
 # ---------------------------------------------------------
+# DAILY REPORT (RESTORED FROM WORKING COMMIT)
+# ---------------------------------------------------------
+
+import report
+
+def get_daily_report():
+    try:
+        return report.get_daily_report()
+    except Exception as e:
+        print(f"[REPORT] Failed to load daily report: {e}")
+        return {}
+
+
+# ---------------------------------------------------------
 # UPDATE LAST TRADE TIMESTAMP
 # ---------------------------------------------------------
 
