@@ -1,38 +1,55 @@
 <!-- ACCOUNT SUMMARY -->
 <div class="section">
     <h2>Account Summary</h2>
-    <p><strong>Balance:</strong> £{{ account['balance'] if account['balance'] else "N/A" }}</p>
-    <p><strong>Equity:</strong> £{{ account['equity'] if account['equity'] else "N/A" }}</p>
-    <p><strong>Margin Used:</strong> £{{ account['margin'] if account['margin'] else "N/A" }}</p>
+
+    <p><strong>Balance:</strong> £{{ account.balance }}</p>
+    <p><strong>Equity:</strong> £{{ account.equity }}</p>
+    <p><strong>Margin:</strong> £{{ account.margin }}</p>
+
+    <p>
+        <strong>Available:</strong>
+        <span style="color: {{ account.available_color }};">
+            £{{ account.available }}
+        </span>
+    </p>
+
+    {% if account.margin_warning %}
+    <div style="padding: 10px; background: #330; color: yellow; border: 1px solid yellow; margin-top: 10px;">
+        {{ account.margin_warning }}
+    </div>
+    {% endif %}
 </div>
+
 
 <!-- OPEN POSITIONS -->
 <div class="section">
     <h2>Positions</h2>
-{% if positions %}
-    <ul>
-    {% for p in positions %}
-        {% set profit = p.profit or 0 %}
-        <li>
-            <strong>{{ p.ticker }}</strong> — 
-            {{ p.size }} units @ £{{ p.price }}
 
-            <span style="color: {% if profit >= 0 %}lime{% else %}red{% endif %};">
-                (PnL: £{{ profit }})
-            </span>
+    {% if positions %}
+        <ul>
+        {% for p in positions %}
+            {% set profit = p.profit or 0 %}
+            <li>
+                <strong>{{ p.ticker }}</strong> — 
+                {{ p.size }} units @ £{{ p.price }}
 
-            <span style="color: #ccc;">
-                — Current: £{{ p.current_price }}
-            </span>
+                <span style="color: {% if profit >= 0 %}lime{% else %}red{% endif %};">
+                    (PnL: £{{ profit }})
+                </span>
 
-            <button onclick="closePosition('{{ p.id }}')">Close</button>
-        </li>
-    {% endfor %}
-    </ul>
-{% else %}
-    <p>No open positions.</p>
-{% endif %}
+                <span style="color: #ccc;">
+                    — Current: £{{ p.current_price }}
+                </span>
+
+                <button onclick="closePosition('{{ p.id }}')">Close</button>
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p>No open positions.</p>
+    {% endif %}
 </div>
+
 
 <!-- TRADE LOG -->
 <div class="section">
@@ -75,6 +92,7 @@
     {% endif %}
 </div>
 
+
 <!-- DAILY REPORT -->
 <div class="section">
     <h2>Daily Report</h2>
@@ -89,6 +107,7 @@
         <p>No daily report generated yet.</p>
     {% endif %}
 </div>
+
 
 <!-- SYSTEM STATUS -->
 <div class="section">

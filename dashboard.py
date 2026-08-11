@@ -48,6 +48,21 @@ def dashboard_logout():
 
 
 # ---------------------------------------------------------
+# LOAD AVAILABLE BALANCE LOG
+# ---------------------------------------------------------
+
+def load_available_log():
+    data = []
+    try:
+        with open("available_log.json") as f:
+            for line in f:
+                data.append(json.loads(line))
+    except:
+        pass
+    return data
+
+
+# ---------------------------------------------------------
 # DASHBOARD HOME
 # ---------------------------------------------------------
 
@@ -63,6 +78,9 @@ def dashboard_home():
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
 
+    # Load available balance trend data
+    available_log = load_available_log()
+
     return render_template(
         "dashboard.html",
         title=config.DASHBOARD_TITLE,
@@ -70,7 +88,8 @@ def dashboard_home():
         positions=positions,
         trade_log=load_log(),
         daily_report=session.shared_state.get("daily_report", {}),
-        system_status=session.shared_state.get("system_status", {})
+        system_status=session.shared_state.get("system_status", {}),
+        available_log=available_log
     )
 
 
@@ -88,13 +107,16 @@ def dashboard_data():
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
 
+    available_log = load_available_log()
+
     html = render_template(
         "dashboard_partial.html",
         account=account,
         positions=positions,
         trade_log=load_log(),
         daily_report=session.shared_state.get("daily_report", {}),
-        system_status=session.shared_state.get("system_status", {})
+        system_status=session.shared_state.get("system_status", {}),
+        available_log=available_log
     )
 
     return jsonify({"html": html})
@@ -117,6 +139,7 @@ def dashboard_close(position_id):
 
     return redirect("/dashboard")
 
+
 # ---------------------------------------------------------
 # DEBUG
 # ---------------------------------------------------------
@@ -129,6 +152,6 @@ def dashboard_debug():
         "positions": session.get_positions(),
         "trade_log": load_log(),
         "system_status": session.shared_state.get("system_status", {}),
-        "daily_report": session.shared_state.get("daily_report", {})
+        "daily_report": session.shared_state.get("daily_report", {}),
+        "available_log": load_available_log()
     })
-
