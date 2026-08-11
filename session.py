@@ -143,6 +143,48 @@ def enrich_account(raw):
     }
 
 # ---------------------------------------------------------
+# EPIC LOOKUP (FINAL CLEAN VERSION)
+# ---------------------------------------------------------
+
+from config import EPIC_MAP, API_MARKET
+from auth import auth
+
+def verify_epic(symbol):
+    """
+    Resolves a ticker into an EPIC using:
+    1. Your EPIC_MAP (fast local mapping)
+    2. Capital.com /markets endpoint (fallback)
+    """
+
+    symbol = symbol.upper()
+
+    # 1. Fast local mapping
+    if symbol in EPIC_MAP:
+        return {"epic": EPIC_MAP[symbol], "source": "local"}
+
+    # 2. Fallback: query Capital.com markets endpoint
+    try:
+        url = f"{API_MARKET}/{symbol}"
+        r = auth.request("GET", url)
+
+        if not r or r.status_code != 200:
+            print(f"[EPIC] API lookup failed for {symbol}")
+            return {"epic": None, "source": "api_error"}
+
+        data = r.json()
+        epic = data.get("instrument", {}).get("epic")
+
+        if epic:
+            return {"epic": epic, "source": "api"}
+
+        print(f"[EPIC] No EPIC found for {symbol}")
+        return {"epic": None, "source": "not_found"}
+
+    except Exception as e:
+        print(f"[EPIC] Exception during lookup: {e}")
+        return {"epic": None, "source": "exception"}
+
+# ---------------------------------------------------------
 # UPDATE LAST TRADE TIMESTAMP
 # ---------------------------------------------------------
 
