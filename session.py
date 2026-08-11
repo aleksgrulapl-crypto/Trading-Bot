@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (RESTORED + MODERNISED)
+# SESSION MODULE (RESTORED + MODERNISED) — VERIFIED OK
 # ============================
 
 import requests
@@ -8,7 +8,6 @@ from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
 from utils import timestamp
 import report
 
-# Shared state for dashboard
 shared_state = {
     "account": {},
     "positions": [],
@@ -21,10 +20,6 @@ shared_state = {
     "daily_report": {}
 }
 
-# ---------------------------------------------------------
-# GET HEADERS
-# ---------------------------------------------------------
-
 def get_headers():
     auth.ensure_token()
     return {
@@ -33,53 +28,33 @@ def get_headers():
         "X-SECURITY-TOKEN": auth.xst
     }
 
-# ---------------------------------------------------------
-# REQUEST WRAPPER
-# ---------------------------------------------------------
-
 def request(method, url, json=None):
     headers = get_headers()
-
     try:
         response = auth.session.request(method, url, headers=headers, json=json)
-
         if response.status_code >= 400:
             print(f"[ERROR] {method} {url} → {response.status_code}")
             print(f"[ERROR] Response: {response.text}")
-
         return response
-
     except Exception as e:
         print(f"[ERROR] Request failed: {e}")
         return None
 
-# ---------------------------------------------------------
-# GET POSITIONS
-# ---------------------------------------------------------
-
 def get_positions():
     url = f"{API_POSITIONS}?includeProfitLoss=true"
     response = request("GET", url)
-
     if not response or response.status_code != 200:
         return []
-
     try:
         data = response.json()
         return data.get("positions", [])
     except:
         return []
 
-# ---------------------------------------------------------
-# GET ACCOUNT
-# ---------------------------------------------------------
-
 def get_account():
     response = request("GET", API_ACCOUNT)
-
     if not response or response.status_code != 200:
         return {}
-
     try:
         data = response.json()
         accounts = data.get("accounts", [])
@@ -87,19 +62,12 @@ def get_account():
     except:
         return {}
 
-# ---------------------------------------------------------
-# ENRICH POSITIONS
-# ---------------------------------------------------------
-
 def enrich_positions(raw_positions):
     enriched = []
-
     for item in raw_positions:
         pos = item["position"]
         market = item["market"]
-
         profit = pos.get("upl", 0)
-
         enriched.append({
             "id": pos.get("dealId"),
             "ticker": market.get("symbol"),
@@ -113,25 +81,16 @@ def enrich_positions(raw_positions):
             "limitLevel": pos.get("profitLevel"),
             "currency": pos.get("currency")
         })
-
     return enriched
-
-# ---------------------------------------------------------
-# ENRICH ACCOUNT
-# ---------------------------------------------------------
 
 def enrich_account(raw):
     if not raw:
         return {}
-
     bal = raw.get("balance", {})
-
     available = bal.get("available", 0)
     margin_warning = None
-
     if available < 0:
         margin_warning = "⚠ Margin Warning: Available balance is negative."
-
     return {
         "balance": round(bal.get("balance", 0), 2),
         "equity": round(bal.get("balance", 0) + bal.get("profitLoss", 0), 2),
@@ -141,42 +100,25 @@ def enrich_account(raw):
         "margin_warning": margin_warning
     }
 
-# ---------------------------------------------------------
-# EPIC LOOKUP (RESTORED)
-# ---------------------------------------------------------
-
 def verify_epic(symbol):
     symbol = symbol.upper()
-
-    # 1. Local mapping
     if symbol in EPIC_MAP:
         return {"epic": EPIC_MAP[symbol], "source": "local"}
-
-    # 2. API lookup
     try:
         url = f"{API_MARKET}/{symbol}"
         r = request("GET", url)
-
         if not r or r.status_code != 200:
             print(f"[EPIC] API lookup failed for {symbol}")
             return {"epic": None, "source": "api_error"}
-
         data = r.json()
         epic = data.get("instrument", {}).get("epic")
-
         if epic:
             return {"epic": epic, "source": "api"}
-
         print(f"[EPIC] No EPIC found for {symbol}")
         return {"epic": None, "source": "not_found"}
-
     except Exception as e:
         print(f"[EPIC] Exception during lookup: {e}")
         return {"epic": None, "source": "exception"}
-
-# ---------------------------------------------------------
-# DAILY REPORT (RESTORED)
-# ---------------------------------------------------------
 
 def get_daily_report():
     try:
@@ -187,16 +129,8 @@ def get_daily_report():
         print(f"[REPORT] Failed to load daily report: {e}")
         return {}
 
-# ---------------------------------------------------------
-# UPDATE LAST TRADE
-# ---------------------------------------------------------
-
 def update_last_trade():
     shared_state["system_status"]["last_trade"] = timestamp()
-
-# ---------------------------------------------------------
-# UPDATE LAST WEBHOOK
-# ---------------------------------------------------------
 
 def update_last_webhook():
     shared_state["system_status"]["last_webhook"] = timestamp()

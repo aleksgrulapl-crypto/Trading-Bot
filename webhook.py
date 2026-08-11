@@ -8,8 +8,8 @@ import session
 import order
 from trade_log import load_log
 from auth import auth
-from config import API_POSITIONS, API_ACCOUNTS
-from parser import parse_tradingview_alert, rr2_tp
+from config import API_POSITIONS, API_ACCOUNTS, EQUITY_PERCENT
+from parser import parse_tradingview_alert
 from sizing import PositionSizing
 
 app = Flask(__name__)
@@ -44,7 +44,6 @@ def webhook():
     if not raw or not raw.strip():
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
-    # Try JSON first
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
@@ -53,7 +52,6 @@ def webhook():
         try:
             data = json.loads(raw)
             alert = parse_tradingview_alert(data)
-
         except:
             try:
                 alert = parse_tradingview_alert(raw)
@@ -62,8 +60,6 @@ def webhook():
 
     ticker = alert["symbol"]
     action = alert["action"]
-    sl = alert.get("sl")
-    tp = alert.get("tp")
 
     epic_data = session.verify_epic(ticker)
     epic = epic_data.get("epic")
@@ -71,21 +67,21 @@ def webhook():
     if not epic:
         return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
 
-    # BUY requires SL
-    if action == "buy" and sl is None:
-        return jsonify({"status": "error", "message": "BUY requires SL"}), 200
+    entry_price = PositionSizing.get_entry_price(epic, action)
 
-    # Auto TP using R:R = 1:2
-    if action == "buy" and tp is None:
-        entry_price = PositionSizing.get_entry_price(epic, action)
-        tp = rr2_tp(entry_price, sl)
-
-    # Use sizing module
     size = PositionSizing.calculate_size(epic, action)
     if size is None:
         return jsonify({"status": "skipped", "message": "Max positions reached"}), 200
 
-    result = order.place_order(epic, action, size, sl, tp)
+    available = PositionSizing.get_available_balance()
+    allocation = available * EQUITY_PERCENT
+
+    sl_price, tp_price = PositionSizing.calculate_sl_tp(entry_price, size, allocation)
+
+    print("[WEBHOOK] Final SL:", sl_price)
+    print("[WEBHOOK] Final TP:", tp_price)
+
+    result = order.place_order(epic, action, size, sl_price, tp_price)
 
     session.update_last_trade()
 

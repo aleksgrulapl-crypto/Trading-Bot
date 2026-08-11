@@ -4,66 +4,39 @@
 
 import os
 
-# ---------------------------------------------------------
-# API BASE
-# ---------------------------------------------------------
-
 API_BASE = "https://api-capital.backend-capital.com"
 
-# ---------------------------------------------------------
-# AUTH & SESSION
-# ---------------------------------------------------------
-
+# --- AUTH ---
 API_LOGIN = f"{API_BASE}/api/v1/session"
+API_REFRESH = None   # CFD accounts do not support refresh tokens
 
-# IMPORTANT: CFD accounts DO NOT support refresh-token
-API_REFRESH = None   # Disabled intentionally
-
-# ---------------------------------------------------------
-# ACCOUNT & BALANCE
-# ---------------------------------------------------------
-
+# --- ACCOUNT & BALANCE ---
 API_ACCOUNTS = f"{API_BASE}/api/v1/accounts"
-API_ACCOUNT = f"{API_BASE}/api/v1/accounts"   # Required for dashboard/account fetch
+API_ACCOUNT = f"{API_BASE}/api/v1/accounts"
 
-# ---------------------------------------------------------
-# POSITIONS & MARKET DATA
-# ---------------------------------------------------------
-
+# --- POSITIONS & MARKET DATA ---
 API_POSITIONS = f"{API_BASE}/api/v1/positions"
-
-# EPIC / instrument lookup endpoint (used by verify_epic)
 API_MARKET = f"{API_BASE}/api/v1/markets"
 
-# ---------------------------------------------------------
-# USER CREDENTIALS (ENV VARIABLES)
-# ---------------------------------------------------------
-
+# --- USER CREDENTIALS ---
 CAPITAL_API_KEY = os.getenv("CAPITAL_API_KEY")
 CAPITAL_USERNAME = os.getenv("CAPITAL_USERNAME")
 CAPITAL_PASSWORD = os.getenv("CAPITAL_PASSWORD")
 
-# ---------------------------------------------------------
-# RISK SETTINGS (UPDATED FOR NEW ENGINE)
-# ---------------------------------------------------------
-
-# Max number of open positions per ticker
+# --- RISK SETTINGS ---
 MAX_POSITIONS_PER_TICKER = 3
 
-# % of available balance allocated per trade (20% recommended)
-EQUITY_PERCENT = 0.20
+# 50% of available balance per trade
+EQUITY_PERCENT = 0.50
 
-# Leverage multiplier (Capital.com default for US stocks is 5:1)
+# Leverage (Capital.com US stocks = 5:1)
 LEVERAGE = 5
 
-# Legacy fixed SL/TP percentages (unused in new engine but kept for compatibility)
-FIXED_SL_PERC = 0.05
-FIXED_TP_PERC = 0.10
+# Cash-based SL/TP (Option A)
+SL_PERCENT = 0.10   # 10% of allocated capital
+TP_PERCENT = 0.20   # 20% of allocated capital
 
-# ---------------------------------------------------------
-# TICKER SETTINGS (MINIMUM SIZE PER INSTRUMENT)
-# ---------------------------------------------------------
-
+# --- TICKER SETTINGS ---
 TICKER_SETTINGS = {
     "NVDA": {"min_size": 0.1},
     "TSLA": {"min_size": 0.1},
@@ -84,10 +57,7 @@ TICKER_SETTINGS = {
     "PLUG": {"min_size": 0.1},
 }
 
-# ---------------------------------------------------------
-# DASHBOARD SETTINGS
-# ---------------------------------------------------------
-
+# --- DASHBOARD SETTINGS ---
 DASHBOARD_TITLE = "AG Capital Trader"
 DASHBOARD_PASSWORD = "Killen123%"
 TIMEZONE = "Europe/London"
@@ -98,18 +68,9 @@ DAILY_REPORT_MINUTE = 0
 
 TRADE_LOG_FILE = "/tmp/trade_log.json"
 DAILY_REPORT_FILE = "/tmp/daily_report.json"
-
 CACHE_TTL_SECONDS = 10
 
-# ---------------------------------------------------------
-# EPIC MAPPING (Correct for YOUR Capital.com account)
-# ---------------------------------------------------------
-# Your logs prove your account uses RAW tickers as EPICs:
-# "epic": "MU"
-# "epic": "PLTR"
-# "epic": "NVDA"
-# NOT "US.MU", "US.PLTR", "US.NVDA"
-
+# --- EPIC MAPPING ---
 EPIC_MAP = {
     "NVDA": "NVDA",
     "MU": "MU",

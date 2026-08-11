@@ -8,16 +8,7 @@ from config import API_POSITIONS, API_MARKET
 from utils import timestamp
 from trade_log import log_trade
 
-# ---------------------------------------------------------
-# PLACE ORDER
-# ---------------------------------------------------------
-
 def place_order(epic, direction, size, sl=None, tp=None):
-    """
-    Places a BUY or SELL order with optional SL/TP.
-    """
-
-    # Fetch market snapshot using correct endpoint
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
         print(f"[ERROR] Failed to fetch market snapshot for {epic}")
@@ -30,7 +21,6 @@ def place_order(epic, direction, size, sl=None, tp=None):
         print(f"[ERROR] Market price unavailable for {epic}")
         return {"status": "error", "message": "Price unavailable"}
 
-    # Build order payload
     payload = {
         "epic": epic,
         "direction": direction.upper(),
@@ -46,7 +36,6 @@ def place_order(epic, direction, size, sl=None, tp=None):
     if tp is not None:
         payload["limitLevel"] = float(tp)
 
-    # Send order
     response = session.request("POST", API_POSITIONS, json=payload)
 
     if not response or response.status_code >= 400:
@@ -60,7 +49,6 @@ def place_order(epic, direction, size, sl=None, tp=None):
         print(f"[TRADE] {direction.upper()} {epic} @ {price} (size {size}) → SUCCESS")
         print(f"[TRADE] dealReference: {deal_ref}")
 
-        # Log trade
         log_trade(
             ticker=epic,
             side=direction.upper(),
@@ -69,7 +57,6 @@ def place_order(epic, direction, size, sl=None, tp=None):
             timestamp=timestamp()
         )
 
-        # Update dashboard system status
         session.update_last_trade()
 
         return {

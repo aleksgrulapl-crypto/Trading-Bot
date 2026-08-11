@@ -12,19 +12,6 @@ def parse_tradingview_alert(data):
     raise ValueError("Invalid alert format")
 
 
-# ---------------------------------------------------------
-# R:R = 1:2 TP CALCULATION
-# ---------------------------------------------------------
-
-def rr2_tp(entry, sl):
-    distance = abs(entry - sl)
-    return entry + (distance * 2)
-
-
-# ---------------------------------------------------------
-# JSON ALERT PARSER
-# ---------------------------------------------------------
-
 def parse_json_alert(data):
     symbol = normalise_symbol(data.get("symbol"))
     if not symbol:
@@ -52,10 +39,6 @@ def parse_json_alert(data):
         "tp": tp
     }
 
-
-# ---------------------------------------------------------
-# RAW ALERT PARSER
-# ---------------------------------------------------------
 
 def parse_raw_alert(raw: str):
     parts = raw.split("|")
@@ -85,10 +68,6 @@ def parse_raw_alert(raw: str):
     }
 
 
-# ---------------------------------------------------------
-# PAYLOAD PARSER
-# ---------------------------------------------------------
-
 def parse_payload(payload: str):
     parts = payload.split("|")
 
@@ -114,10 +93,6 @@ def parse_payload(payload: str):
         "tp": tp
     }
 
-
-# ---------------------------------------------------------
-# HELPERS
-# ---------------------------------------------------------
 
 def normalise_symbol(symbol: str):
     if not symbol:

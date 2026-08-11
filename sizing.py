@@ -9,6 +9,8 @@ from config import (
     API_MARKET,
     EQUITY_PERCENT,
     LEVERAGE,
+    SL_PERCENT,
+    TP_PERCENT,
     MAX_POSITIONS_PER_TICKER
 )
 
@@ -24,7 +26,6 @@ class PositionSizing:
         data = r.json()
         account = data["accounts"][0]
 
-        # IG format: account["balance"]["available"]
         if "balance" in account and "available" in account["balance"]:
             return float(account["balance"]["available"])
 
@@ -61,7 +62,7 @@ class PositionSizing:
     @staticmethod
     def calculate_size(epic, side):
         if PositionSizing.count_positions(epic) >= MAX_POSITIONS_PER_TICKER:
-            print(f"Max positions reached for {epic}. Skipping trade.")
+            print(f"[SIZING] Max positions reached for {epic}. Skipping trade.")
             return None
 
         available = PositionSizing.get_available_balance()
@@ -69,6 +70,28 @@ class PositionSizing:
 
         entry_price = PositionSizing.get_entry_price(epic, side)
 
-        raw_size = (allocation * LEVERAGE) / entry_price
+        exposure = allocation * LEVERAGE
+        raw_size = exposure / entry_price
+
+        print("[SIZING] Available:", available)
+        print("[SIZING] Allocation:", allocation)
+        print("[SIZING] Leverage:", LEVERAGE)
+        print("[SIZING] Entry price:", entry_price)
+        print("[SIZING] Raw size:", raw_size)
 
         return round(raw_size, 2)
+
+    @staticmethod
+    def calculate_sl_tp(entry_price, size, allocation):
+        sl_cash = allocation * SL_PERCENT
+        tp_cash = allocation * TP_PERCENT
+
+        sl_price = entry_price - (sl_cash / size)
+        tp_price = entry_price + (tp_cash / size)
+
+        print("[RISK] SL cash:", sl_cash)
+        print("[RISK] TP cash:", tp_cash)
+        print("[RISK] SL price:", sl_price)
+        print("[RISK] TP price:", tp_price)
+
+        return round(sl_price, 2), round(tp_price, 2)
