@@ -1,79 +1,43 @@
-# ============================
-# WEBHOOK MODULE (FINAL FULLY TOLERANT VERSION)
-# ============================
-
 from flask import Flask, request, jsonify, render_template
 from scheduler import start_scheduler
 from dashboard import dashboard as dashboard_blueprint
 
 import session
 import order
+import utils
 from trade_log import load_log
+from auth import auth
+from config import API_POSITIONS, API_ACCOUNTS
 from parser import parse_tradingview_alert
 
 app = Flask(__name__)
 app.register_blueprint(dashboard_blueprint)
 
-# ---------------------------------------------------------
-# STARTUP
-# ---------------------------------------------------------
-
-print("[System] Starting scheduler...")
+print("[Webhook] Starting scheduler...")
 start_scheduler()
-print("[System] Scheduler started.")
-
-# ---------------------------------------------------------
-# RAW DEBUG ENDPOINTS
-# ---------------------------------------------------------
+print("[Webhook] Scheduler started.")
 
 @app.route("/raw")
 def raw_positions():
-    return jsonify(session.get_positions())
+    return jsonify(session.fetch_positions_from(API_POSITIONS))
 
 @app.route("/raw/account")
 def raw_account():
-    return jsonify(session.get_account())
-
-# ---------------------------------------------------------
-# WEBHOOK ENDPOINT (FINAL TOLERANT VERSION)
-# ---------------------------------------------------------
+    return jsonify(session.request("GET", API_ACCOUNTS).json())
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     session.update_last_webhook()
 
-    raw_body = request.get_data(as_text=True)
-    json_body = request.get_json(silent=True)
+    raw = request.get_data(as_text=True)
+    if not raw.strip():
+        return jsonify({"status": "error", "message": "Empty body received"}), 200
 
-    # Debug: show EXACT incoming payload
-    print("=== DEBUG WEBHOOK INPUT ===")
-    print("RAW BODY:", repr(raw_body))
-    print("JSON BODY:", json_body)
-    print("============================")
-
-    # Reject empty body
-    if (not raw_body or raw_body.strip() == "") and not json_body:
-        return jsonify({"status": "error", "message": "Empty alert"}), 200
-
-    # -----------------------------------------------------
-    # Decide RAW vs JSON automatically
-    # -----------------------------------------------------
-    try:
-        # RAW alert (contains |)
-        if raw_body and "|" in raw_body:
-            alert = parse_tradingview_alert(raw_body.strip())
-
-        # JSON alert (parsed successfully)
-        elif json_body:
-            alert = parse_tradingview_alert(json_body)
-
-        # Fallback: treat raw_body as RAW even without |
-        else:
-            alert = parse_tradingview_alert(raw_body.strip())
-
-    except Exception as e:
-        print(f"[Webhook] Parse error: {e}")
-        return jsonify({"status": "error", "message": "Invalid alert"}), 200
+    if "|" in raw:
+        alert = parse_tradingview_alert(raw)
+    else:
+        data = request.get_json(force=True)
+        alert = parse_tradingview_alert(data)
 
     ticker = alert["symbol"]
     action = alert["action"]
@@ -81,30 +45,12 @@ def webhook():
     sl = alert.get("sl")
     tp = alert.get("tp")
 
-    print(f"[Webhook] Alert → {ticker} {action.upper()} size={size} SL={sl} TP={tp}")
-
-    # -----------------------------------------------------
-    # EPIC lookup
-    # -----------------------------------------------------
     epic_data = session.verify_epic(ticker)
     epic = epic_data.get("epic")
 
-    if not epic:
-        print(f"[Webhook] EPIC lookup failed for {ticker}")
-        return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
-
-    print(f"[Webhook] EPIC resolved → {epic}")
-
-    # -----------------------------------------------------
-    # Place order
-    # -----------------------------------------------------
     result = order.place_order(epic, action, size, sl, tp)
 
     return jsonify({"status": "ok", "result": result}), 200
-
-# ---------------------------------------------------------
-# DASHBOARD ROUTES
-# ---------------------------------------------------------
 
 @app.route("/")
 @app.route("/dashboard")
@@ -116,7 +62,7 @@ def dashboard():
     account = session.enrich_account(raw_account)
 
     trade_log = load_log()
-    daily_report = session.shared_state.get("daily_report", {})
+    daily_report = session.get_daily_report() or {}
 
     return render_template(
         "dashboard.html",
@@ -127,18 +73,14 @@ def dashboard():
         system_status=session.shared_state.get("system_status", {})
     )
 
-# ---------------------------------------------------------
-# CLOSE POSITION (API)
-# ---------------------------------------------------------
-
 @app.route("/close/<position_id>", methods=["POST"])
-def close_position_api(position_id):
-    from close_position import close_position
-    return jsonify(close_position(position_id))
-
-# ---------------------------------------------------------
-# RUN APP
-# ---------------------------------------------------------
+def close_position(position_id):
+    auth.ensure_token()
+    payload = {"dealId": position_id, "direction": "SELL", "size": 0}
+    r = session.request("POST", f"{API_POSITIONS}/{position_id}/close", json=payload)
+    result = r.json()
+    session.update_last_trade()
+    return jsonify({"status": "ok", "result": result})
 
 import os
 
