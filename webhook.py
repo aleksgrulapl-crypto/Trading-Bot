@@ -9,6 +9,9 @@ from trade_log import load_log
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS
 
+# NEW IMPORT
+from parser import parse_tradingview_alert
+
 app = Flask(__name__)
 app.register_blueprint(dashboard_blueprint)
 
@@ -23,7 +26,7 @@ print("[Webhook] Scheduler started.")
 
 
 # ---------------------------------------------------------
-# RAW DEBUG ENDPOINT (works regardless of dashboard blueprint)
+# RAW DEBUG ENDPOINTS
 # ---------------------------------------------------------
 
 @app.route("/raw")
@@ -49,14 +52,16 @@ def webhook():
     if not data:
         return jsonify({"status": "error", "message": "No JSON received"})
 
-    symbol = data.get("symbol")
-    action = data.get("action")
-    size = float(data.get("size", 1))
-    price = data.get("price")
-    sl = data.get("sl")
-    tp = data.get("tp")
+    # Parse TradingView alert using new parser
+    alert = parse_tradingview_alert(data)
 
-    print(f"[Webhook] Received: {symbol} {action} {size} @ {price}")
+    symbol = alert["symbol"]
+    action = alert["action"]
+    size = alert["quantity"]
+    sl = alert["sl"]
+    tp = alert["tp"]
+
+    print(f"[Webhook] Received: {symbol} {action} {size} SL={sl} TP={tp}")
 
     result = order.place_order(symbol, action, size, sl, tp)
     return jsonify({"status": "ok", "result": result})

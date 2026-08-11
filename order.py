@@ -13,15 +13,16 @@ def place_order(symbol, action, size, sl=None, tp=None):
     if not epic:
         return {"status": "error", "message": "EPIC not found"}
 
-    direction = "BUY" if action.lower() == "long" else "SELL"
+    # FIXED: Correct direction mapping
+    direction = "BUY" if action.lower() == "buy" else "SELL"
 
     payload = {
         "epic": epic,
         "direction": direction,
         "size": size,
         "orderType": "MARKET",
-        "limitLevel": tp,
-        "stopLevel": sl
+        "limitLevel": tp,   # TP
+        "stopLevel": sl     # SL
     }
 
     r = session.request("POST", session.API_POSITIONS, json=payload)
@@ -30,13 +31,13 @@ def place_order(symbol, action, size, sl=None, tp=None):
     if "dealReference" in result:
         price = epic_data["snapshot"]["offer"]
 
-        # FIX: log_trade() does NOT accept timestamp= argument
+        # FIXED: Clean logging
         log_trade(
-    ticker=symbol,
-    side=direction,
-    size=size,
-    price=price
-)
+            ticker=symbol,
+            side=direction,
+            size=size,
+            price=price
+        )
 
         session.update_last_trade()
 
