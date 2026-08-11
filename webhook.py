@@ -3,7 +3,7 @@ from scheduler import start_scheduler
 from dashboard import dashboard as dashboard_blueprint
 
 import json
-import time   # <-- CORRECT LOCATION
+import time
 import session
 import order
 from trade_log import load_log
@@ -43,27 +43,25 @@ def webhook():
     if not raw or not raw.strip():
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
-    # ---------------------------------------------------------
-    # JSON FIRST (correct behaviour)
-    # ---------------------------------------------------------
+    # Try JSON first
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
 
     except:
+        # Try raw JSON
         try:
             data = json.loads(raw)
             alert = parse_tradingview_alert(data)
 
         except:
+            # Try raw text alert
             try:
                 alert = parse_tradingview_alert(raw)
             except:
                 return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
-    # ---------------------------------------------------------
     # Extract fields
-    # ---------------------------------------------------------
     ticker = alert["symbol"]
     action = alert["action"]
     size = alert["quantity"]
@@ -76,7 +74,10 @@ def webhook():
     if not epic:
         return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
 
+    # Place order
     result = order.place_order(epic, action, size, sl, tp)
+
+    session.update_last_trade()
 
     return jsonify({"status": "ok", "result": result}), 200
 
@@ -99,7 +100,7 @@ def dashboard():
     return render_template(
         "dashboard.html",
         title="AG Capital Trader",
-        cache_bust=time.time(),   # <-- CORRECTLY ADDED
+        cache_bust=time.time(),
         account=account,
         positions=positions,
         trade_log=trade_log,
