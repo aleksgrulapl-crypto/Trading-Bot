@@ -1,5 +1,5 @@
 # ============================
-# POSITION SIZING MODULE (Module 4)
+# POSITION SIZING MODULE (Updated)
 # ============================
 
 from session import auth
@@ -23,17 +23,13 @@ class PositionSizing:
         data = r.json()
         account = data["accounts"][0]
 
-        # Your confirmed format:
-        # account["balance"]["available"]
         if "balance" in account and "available" in account["balance"]:
             return float(account["balance"]["available"])
 
-        # Fallbacks
         for key in ["available", "availableCash", "availableFunds", "cash"]:
             if key in account:
                 return float(account[key])
 
-        print("ACCOUNT JSON (unknown format):", account)
         raise Exception("Could not find usable equity field in account JSON")
 
     @staticmethod

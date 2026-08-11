@@ -10,6 +10,7 @@ from trade_log import load_log
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS
 from parser import parse_tradingview_alert
+from sizing import PositionSizing
 
 app = Flask(__name__)
 app.register_blueprint(dashboard_blueprint)
@@ -61,12 +62,15 @@ def webhook():
             except:
                 return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
-    # Extract fields
     ticker = alert["symbol"]
     action = alert["action"]
-    size = alert["quantity"]
     sl = alert.get("sl")
     tp = alert.get("tp")
+
+    # Use sizing module (50% equity)
+    size = PositionSizing.calculate_size(ticker, action)
+    if size is None:
+        return jsonify({"status": "skipped", "message": "Max positions reached"}), 200
 
     epic_data = session.verify_epic(ticker)
     epic = epic_data.get("epic")
