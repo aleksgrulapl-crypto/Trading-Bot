@@ -1,12 +1,12 @@
 # ============================
-# POSITION SIZING MODULE (Updated)
+# POSITION SIZING MODULE (Updated - No MarketData dependency)
 # ============================
 
-from session import auth
-from market import MarketData
+from session import auth, request
 from config import (
     API_POSITIONS,
     API_ACCOUNTS,
+    API_MARKET,
     EQUITY_PERCENT,
     MAX_POSITIONS_PER_TICKER
 )
@@ -53,6 +53,27 @@ class PositionSizing:
         return count
 
     @staticmethod
+    def get_entry_price(epic, side):
+        r = auth.request("GET", f"{API_MARKET}/{epic}")
+
+        if r.status_code != 200:
+            raise Exception(f"Market price fetch failed: {r.text}")
+
+        snapshot = r.json().get("snapshot", {})
+
+        if side.lower() == "buy":
+            return float(snapshot.get("offer"))
+        else:
+            return float(snapshot.get("bid"))
+
+    @staticmethod
+    def validate_size(size):
+        # Basic validation (can be expanded)
+        if size < 0.1:
+            return 0.1
+        return size
+
+    @staticmethod
     def calculate_size(ticker, side):
         if PositionSizing.count_positions(ticker) >= MAX_POSITIONS_PER_TICKER:
             print(f"Max positions reached for {ticker}. Skipping trade.")
@@ -61,8 +82,12 @@ class PositionSizing:
         equity = PositionSizing.get_equity()
         allocation = equity * EQUITY_PERCENT
 
-        entry_price = MarketData.get_entry_price(ticker, side)
+        # Get EPIC from session
+        epic_data = request("GET", f"{API_MARKET}/search/{ticker}").json()
+        epic = epic_data.get("epic", ticker)
+
+        entry_price = PositionSizing.get_entry_price(epic, side)
         raw_size = allocation / entry_price
 
-        final_size = MarketData.validate_size(ticker, raw_size)
+        final_size = PositionSizing.validate_size(raw_size)
         return round(final_size, 2)
