@@ -75,6 +75,9 @@ def webhook():
     return jsonify({"status": "ok", "result": result}), 200
 
 @app.route("/")
+
+import time
+
 @app.route("/dashboard")
 def dashboard():
     raw_positions = session.get_positions() or []
@@ -88,6 +91,8 @@ def dashboard():
 
     return render_template(
         "dashboard.html",
+        title="AG Capital Trader",
+        cache_bust=time.time(),   # <-- ADD THIS LINE
         account=account,
         positions=positions,
         trade_log=trade_log,
