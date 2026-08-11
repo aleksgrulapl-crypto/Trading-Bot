@@ -10,7 +10,7 @@ import session
 import config
 from trade_log import load_log
 
-dashboard = Blueprint("dashboard", __name__)
+dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
 # ---------------------------------------------------------
 # LOGIN REQUIRED DECORATOR
