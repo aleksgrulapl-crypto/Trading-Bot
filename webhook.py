@@ -48,18 +48,18 @@ def raw_account():
 def webhook():
     session.update_last_webhook()
 
+    # Dump EVERYTHING TradingView sends
     raw_body = request.data.decode("utf-8", errors="ignore")
-    print("[Webhook] RAW BODY:", raw_body)
+    print("\n" + "="*60)
+    print("[Webhook] RAW BODY RECEIVED FROM TRADINGVIEW:")
+    print(raw_body)
+    print("="*60 + "\n")
 
-    # Extract JSON block manually
-    try:
-        json_start = raw_body.find("{")
-        json_end = raw_body.rfind("}") + 1
-        json_text = raw_body[json_start:json_end]
+    # Try to parse JSON normally first
+    data = request.get_json(force=True, silent=True)
 
-        data = json.loads(json_text)
-    except Exception as e:
-        print("[Webhook] ERROR parsing JSON:", e)
+    if not data:
+        print("[Webhook] JSON PARSE FAILED — RAW BODY ABOVE")
         return jsonify({"status": "error", "message": "Invalid JSON"}), 400
 
     try:
@@ -71,7 +71,7 @@ def webhook():
         sl = alert["sl"]
         tp = alert["tp"]
 
-        print(f"[Webhook] Received: {symbol} {action} {size} SL={sl} TP={tp}")
+        print(f"[Webhook] Parsed alert: {symbol} {action} {size} SL={sl} TP={tp}")
 
         result = order.place_order(symbol, action, size, sl, tp)
         return jsonify({"status": "ok", "result": result}), 200
@@ -79,7 +79,6 @@ def webhook():
     except Exception as e:
         print("[Webhook] ERROR:", e)
         return jsonify({"status": "error", "message": str(e)}), 500
-
 
 
 
