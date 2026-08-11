@@ -60,3 +60,16 @@ DAILY_REPORT_MINUTE = 0
 TRADE_LOG_FILE = "/tmp/trade_log.json"
 DAILY_REPORT_FILE = "/tmp/daily_report.json"
 CACHE_TTL_SECONDS = 10
+
+EPIC_MAP = {
+    "NVDA": "US.NVDA",
+    "MU": "US.MU",
+    "TSLA": "US.TSLA",
+    "AAPL": "US.AAPL",
+    "MSFT": "US.MSFT",
+    "AMD": "US.AMD",
+    "META": "US.META",
+    "GOOGL": "US.GOOGL",
+    "AMZN": "US.AMZN"
+}
+

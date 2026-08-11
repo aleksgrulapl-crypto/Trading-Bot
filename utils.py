@@ -66,12 +66,13 @@ def margin_warning(available, deposit):
 # TICKER RESOLUTION
 # ---------------------------------------------------------
 
-def resolve_ticker(epic):
-    if not epic:
+from config import EPIC_MAP
+
+def resolve_epic_from_ticker(ticker):
+    if not ticker:
         return None
-    if "." in epic:
-        return epic.split(".")[0]
-    return epic
+    return EPIC_MAP.get(ticker.upper())
+
 
 
 # ---------------------------------------------------------
