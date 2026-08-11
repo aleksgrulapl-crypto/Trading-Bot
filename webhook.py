@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template
 from scheduler import start_scheduler
 from dashboard import dashboard as dashboard_blueprint
+
 import session
 import order
 import utils
@@ -53,43 +54,61 @@ def webhook():
     if not raw.strip():
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
-    try:
-        data = request.get_json(force=True)
-    except Exception as e:
-        print("[Webhook] JSON PARSE ERROR:", e)
-        return jsonify({"status": "error", "message": "Invalid JSON"}), 200
+    # -----------------------------------------------------
+    # 1. RAW TradingView alert (non‑JSON)
+    # -----------------------------------------------------
+    if "|" in raw:
+        try:
+            alert = parse_tradingview_alert(raw)
+        except Exception as e:
+            print("[Webhook] RAW PARSE ERROR:", e)
+            return jsonify({"status": "error", "message": "Invalid raw alert"}), 200
 
-    try:
-        alert = parse_tradingview_alert(data)
+    else:
+        # -------------------------------------------------
+        # 2. JSON TradingView alert
+        # -------------------------------------------------
+        try:
+            data = request.get_json(force=True)
+            alert = parse_tradingview_alert(data)
+        except Exception as e:
+            print("[Webhook] JSON PARSE ERROR:", e)
+            return jsonify({"status": "error", "message": "Invalid JSON"}), 200
 
-        ticker = alert["symbol"]
-        action = alert["action"]
-        size = alert["quantity"]
-        sl = alert["sl"]
-        tp = alert["tp"]
+    # -----------------------------------------------------
+    # Extract alert fields
+    # -----------------------------------------------------
+    ticker = alert["symbol"]
+    action = alert["action"]
+    size = alert["quantity"]
+    sl = alert.get("sl")
+    tp = alert.get("tp")
 
-        print(f"[Webhook] Parsed alert: ticker={ticker}, action={action}, size={size}, SL={sl}, TP={tp}")
+    print(f"[Webhook] Parsed alert: ticker={ticker}, action={action}, size={size}, SL={sl}, TP={tp}")
 
-        # EPIC preview (local mapping)
-        epic_preview = utils.map_symbol_to_epic(ticker)
-        print(f"[Webhook] Local EPIC preview: {epic_preview}")
+    # -----------------------------------------------------
+    # EPIC preview (local mapping)
+    # -----------------------------------------------------
+    epic_preview = utils.map_symbol_to_epic(ticker)
+    print(f"[Webhook] Local EPIC preview: {epic_preview}")
 
-        # REAL EPIC lookup from Capital.com
-        print("[Webhook] Performing REAL EPIC lookup...")
-        epic_data = session.verify_epic(ticker)
-        print("[Webhook] EPIC lookup result:")
-        print(epic_data)
+    # -----------------------------------------------------
+    # REAL EPIC lookup
+    # -----------------------------------------------------
+    print("[Webhook] Performing REAL EPIC lookup...")
+    epic_data = session.verify_epic(ticker)
+    print("[Webhook] EPIC lookup result:")
+    print(epic_data)
 
-        result = order.place_order(ticker, action, size, sl, tp)
+    # -----------------------------------------------------
+    # Place order
+    # -----------------------------------------------------
+    result = order.place_order(ticker, action, size, sl, tp)
 
-        print("[Webhook] Order result:")
-        print(result)
+    print("[Webhook] Order result:")
+    print(result)
 
-        return jsonify({"status": "ok", "result": result}), 200
-
-    except Exception as e:
-        print("[Webhook] ERROR:", e)
-        return jsonify({"status": "error", "message": str(e)}), 200
+    return jsonify({"status": "ok", "result": result}), 200
 
 # ---------------------------------------------------------
 # DASHBOARD ROUTES

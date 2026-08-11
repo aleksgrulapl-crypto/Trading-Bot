@@ -19,7 +19,6 @@ def login_required(view):
         return view(*args, **kwargs)
     return wrapper
 
-
 # ---------------------------------------------------------
 # LOGIN PAGE
 # ---------------------------------------------------------
@@ -35,7 +34,6 @@ def dashboard_login():
         return render_template("login.html", error="Incorrect password")
     return render_template("login.html", error=None)
 
-
 # ---------------------------------------------------------
 # LOGOUT
 # ---------------------------------------------------------
@@ -45,7 +43,6 @@ def dashboard_logout():
     resp = redirect("/dashboard/login")
     resp.delete_cookie("dashboard_auth")
     return resp
-
 
 # ---------------------------------------------------------
 # LOAD AVAILABLE BALANCE LOG
@@ -61,7 +58,6 @@ def load_available_log():
         pass
     return data
 
-
 # ---------------------------------------------------------
 # LOAD EQUITY LOG
 # ---------------------------------------------------------
@@ -76,7 +72,6 @@ def load_equity_log():
         pass
     return data
 
-
 # ---------------------------------------------------------
 # DASHBOARD HOME
 # ---------------------------------------------------------
@@ -85,13 +80,18 @@ def load_equity_log():
 @login_required
 def dashboard_home():
 
-    # Safely refresh account + positions
-    account = session.get_account() or {}
-    positions = session.get_positions() or []
+    # Fetch raw data
+    raw_positions = session.get_positions() or []
+    raw_account = session.get_account() or {}
 
-    # Update shared state safely
+    # Enrich data for dashboard
+    positions = session.enrich_positions(raw_positions)
+    account = session.enrich_account(raw_account)
+
+    # Update shared state
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
+    session.shared_state["trade_log"] = load_log()
 
     # Load trend logs
     available_log = load_available_log()
@@ -102,13 +102,12 @@ def dashboard_home():
         title=config.DASHBOARD_TITLE,
         account=account,
         positions=positions,
-        trade_log=load_log(),
+        trade_log=session.shared_state["trade_log"],
         daily_report=session.shared_state.get("daily_report", {}),
         system_status=session.shared_state.get("system_status", {}),
         available_log=available_log,
         equity_log=equity_log
     )
-
 
 # ---------------------------------------------------------
 # DASHBOARD PARTIAL (AJAX REFRESH)
@@ -118,11 +117,15 @@ def dashboard_home():
 @login_required
 def dashboard_data():
 
-    account = session.get_account() or {}
-    positions = session.get_positions() or []
+    raw_positions = session.get_positions() or []
+    raw_account = session.get_account() or {}
+
+    positions = session.enrich_positions(raw_positions)
+    account = session.enrich_account(raw_account)
 
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
+    session.shared_state["trade_log"] = load_log()
 
     available_log = load_available_log()
     equity_log = load_equity_log()
@@ -131,7 +134,7 @@ def dashboard_data():
         "dashboard_partial.html",
         account=account,
         positions=positions,
-        trade_log=load_log(),
+        trade_log=session.shared_state["trade_log"],
         daily_report=session.shared_state.get("daily_report", {}),
         system_status=session.shared_state.get("system_status", {}),
         available_log=available_log,
@@ -139,7 +142,6 @@ def dashboard_data():
     )
 
     return jsonify({"html": html})
-
 
 # ---------------------------------------------------------
 # CLOSE POSITION
@@ -153,11 +155,15 @@ def dashboard_close(position_id):
     # Execute close
     close_position(position_id)
 
-    # Refresh positions safely
-    session.shared_state["positions"] = session.get_positions() or []
+    # Refresh everything
+    raw_positions = session.get_positions() or []
+    raw_account = session.get_account() or {}
+
+    session.shared_state["positions"] = session.enrich_positions(raw_positions)
+    session.shared_state["account"] = session.enrich_account(raw_account)
+    session.shared_state["trade_log"] = load_log()
 
     return redirect("/dashboard")
-
 
 # ---------------------------------------------------------
 # DEBUG
@@ -167,9 +173,9 @@ def dashboard_close(position_id):
 @login_required
 def dashboard_debug():
     return jsonify({
-        "account": session.get_account(),
-        "positions": session.get_positions(),
-        "trade_log": load_log(),
+        "account": session.shared_state.get("account"),
+        "positions": session.shared_state.get("positions"),
+        "trade_log": session.shared_state.get("trade_log"),
         "system_status": session.shared_state.get("system_status", {}),
         "daily_report": session.shared_state.get("daily_report", {}),
         "available_log": load_available_log(),

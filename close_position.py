@@ -1,21 +1,27 @@
+# ============================
+# CLOSE POSITION MODULE (FINAL)
+# ============================
+
 import session
 from auth import auth
-auth.login()
 from trade_log import log_close
+from utils import timestamp
+from config import API_POSITIONS
 
 def close_position(position_id):
     """
     Close a position using Capital.com API + log closed trade.
     """
 
-    # Ensure authenticated
-    auth.login()
+    # Ensure CST/XST are valid
+    auth.ensure_token()
 
     try:
-        url = f"{session.API_BASE}/positions/{position_id}/close"
-        headers = session.get_headers()
+        # Correct endpoint
+        url = f"{API_POSITIONS}/{position_id}/close"
 
-        response = session.requests.post(url, headers=headers)
+        # Correct authenticated request wrapper
+        response = session.request("POST", url, json={})
 
         if response.status_code != 200:
             return {
@@ -23,21 +29,30 @@ def close_position(position_id):
                 "message": f"Failed to close position: {response.text}"
             }
 
-        # Fetch updated positions to find the closed one
+        # Fetch updated positions
         positions = session.get_positions()
 
-        # Find the closed position details
+        # Find closed position details
         for p in positions:
-            if p["id"] == position_id:
+            if str(p["id"]) == str(position_id):
                 ticker = p["ticker"]
                 size = p["size"]
                 close_price = p["current_price"]
                 pnl = p["profit"]
 
-                # Log the closed trade
-                log_close(ticker, size, close_price, pnl)
+                # Log closed trade
+                log_close(
+                    ticker=ticker,
+                    size=size,
+                    close_price=close_price,
+                    pnl=pnl,
+                    timestamp=timestamp()
+                )
 
                 break
+
+        # Update system status
+        session.update_last_trade()
 
         return {
             "status": "success",

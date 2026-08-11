@@ -1,5 +1,5 @@
 # ============================
-# CONFIG MODULE (Module 1)
+# CONFIG MODULE (FINAL VERSION)
 # ============================
 
 import os
@@ -8,7 +8,9 @@ API_BASE = "https://api-capital.backend-capital.com"
 
 # --- AUTH & SESSION ---
 API_LOGIN = f"{API_BASE}/api/v1/session"
-API_REFRESH = f"{API_BASE}/api/v1/session/refresh-token"
+
+# IMPORTANT: CFD accounts DO NOT support refresh-token
+API_REFRESH = None   # Removed / disabled
 
 # --- ACCOUNT & BALANCE ---
 API_ACCOUNTS = f"{API_BASE}/api/v1/accounts"
@@ -16,7 +18,7 @@ API_ACCOUNTS = f"{API_BASE}/api/v1/accounts"
 # --- POSITIONS & MARKET DATA ---
 API_POSITIONS = f"{API_BASE}/api/v1/positions"
 
-# EPIC / instrument search endpoint (used by verify_epic)
+# EPIC / instrument lookup endpoint (used by verify_epic)
 API_MARKET = f"{API_BASE}/api/v1/markets"
 
 # --- USER CREDENTIALS ---
@@ -50,7 +52,7 @@ TICKER_SETTINGS = {
     "PLUG": {"min_size": 0.1},
 }
 
-# Dashboard settings
+# --- DASHBOARD SETTINGS ---
 DASHBOARD_TITLE = "AG Capital Trader"
 DASHBOARD_PASSWORD = "Killen123%"
 TIMEZONE = "Europe/London"
@@ -61,15 +63,24 @@ TRADE_LOG_FILE = "/tmp/trade_log.json"
 DAILY_REPORT_FILE = "/tmp/daily_report.json"
 CACHE_TTL_SECONDS = 10
 
-EPIC_MAP = {
-    "NVDA": "US.NVDA",
-    "MU": "US.MU",
-    "TSLA": "US.TSLA",
-    "AAPL": "US.AAPL",
-    "MSFT": "US.MSFT",
-    "AMD": "US.AMD",
-    "META": "US.META",
-    "GOOGL": "US.GOOGL",
-    "AMZN": "US.AMZN"
-}
+# ---------------------------------------------------------
+# EPIC MAPPING (Correct for YOUR Capital.com account)
+# ---------------------------------------------------------
+# Your logs prove your account uses RAW tickers as EPICs:
+# "epic": "MU"
+# "epic": "PLTR"
+# "epic": "NVDA"
+# NOT "US.MU", "US.PLTR", "US.NVDA"
 
+EPIC_MAP = {
+    "NVDA": "NVDA",
+    "MU": "MU",
+    "TSLA": "TSLA",
+    "AAPL": "AAPL",
+    "MSFT": "MSFT",
+    "AMD": "AMD",
+    "META": "META",
+    "GOOGL": "GOOGL",
+    "AMZN": "AMZN",
+    "PLTR": "PLTR"
+}

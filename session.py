@@ -1,10 +1,9 @@
 # ============================
-# SESSION MODULE (Corrected)
+# SESSION MODULE (FINAL VERSION)
 # ============================
 
 from auth import auth
 from config import (
-    CAPITAL_API_KEY,
     API_ACCOUNTS,
     API_POSITIONS,
     API_BASE
@@ -32,7 +31,7 @@ def request(method, url, **kwargs):
     return auth.request(method, url, **kwargs)
 
 # ---------------------------------------------------------
-# DIRECT EPIC LOOKUP (old bot logic restored)
+# DIRECT EPIC LOOKUP (correct + stable)
 # ---------------------------------------------------------
 
 def verify_epic(ticker):
@@ -84,7 +83,15 @@ def get_account():
         return shared_state["account"]
 
 # ---------------------------------------------------------
-# POSITIONS
+# ACCOUNT ENRICHMENT (dashboard compatibility)
+# ---------------------------------------------------------
+
+def enrich_account(raw_account):
+    # Dashboard expects this function to exist
+    return raw_account
+
+# ---------------------------------------------------------
+# POSITIONS FETCHING
 # ---------------------------------------------------------
 
 def get_positions():
@@ -99,12 +106,39 @@ def get_positions():
         return shared_state["positions"]
 
 # ---------------------------------------------------------
-# TRADE LOG + REPORT
+# POSITION ENRICHMENT (dashboard compatibility)
+# ---------------------------------------------------------
+
+def enrich_positions(raw_positions):
+    enriched = []
+    for p in raw_positions:
+        p["profitLoss"] = utils.calculate_profit_loss(
+            p.get("direction"),
+            p.get("price"),
+            p.get("current_price"),
+            p.get("size")
+        )
+        enriched.append(p)
+    return enriched
+
+# ---------------------------------------------------------
+# DAILY REPORT (dashboard compatibility)
+# ---------------------------------------------------------
+
+def get_daily_report():
+    return shared_state.get("daily_report", {})
+
+# ---------------------------------------------------------
+# TRADE LOG
 # ---------------------------------------------------------
 
 def refresh_trade_log():
     shared_state["trade_log"] = load_log()
     return shared_state["trade_log"]
+
+# ---------------------------------------------------------
+# SYSTEM STATUS UPDATES
+# ---------------------------------------------------------
 
 def update_last_webhook():
     shared_state["system_status"]["last_webhook"] = utils.timestamp()

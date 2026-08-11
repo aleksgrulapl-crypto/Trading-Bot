@@ -1,12 +1,11 @@
 # ============================
-# AUTH MODULE (Debug Version)
+# AUTH MODULE (FINAL VERSION)
 # ============================
 
 import requests
 import time
 from config import (
     API_LOGIN,
-    API_REFRESH,
     CAPITAL_API_KEY,
     CAPITAL_USERNAME,
     CAPITAL_PASSWORD
@@ -20,7 +19,7 @@ class CapitalAuth:
         self.session = requests.Session()
 
     # ---------------------------------------------------------
-    # FULL LOGIN
+    # FULL LOGIN (always used — refresh-token removed)
     # ---------------------------------------------------------
     def login(self):
         print("\n" + "="*60)
@@ -56,53 +55,21 @@ class CapitalAuth:
         print("="*60 + "\n")
 
     # ---------------------------------------------------------
-    # REFRESH TOKEN
-    # ---------------------------------------------------------
-    def refresh(self):
-        print("\n" + "="*60)
-        print("[AUTH] Attempting token refresh...")
-        print(f"[AUTH] Endpoint: {API_REFRESH}")
-        print("="*60)
-
-        headers = {
-            "X-CAP-API-KEY": CAPITAL_API_KEY,
-            "CST": self.cst,
-            "X-SECURITY-TOKEN": self.xst
-        }
-
-        r = self.session.post(API_REFRESH, headers=headers)
-
-        print(f"[AUTH] Status: {r.status_code}")
-        print(f"[AUTH] Raw response: {r.text}")
-
-        if r.status_code != 200:
-            print("[AUTH] Refresh failed → FULL login required")
-            return self.login()
-
-        self.cst = r.headers.get("CST")
-        self.xst = r.headers.get("X-SECURITY-TOKEN")
-        self.last_login = time.time()
-
-        print(f"[AUTH] New CST: {self.cst}")
-        print(f"[AUTH] New XST: {self.xst}")
-        print("[AUTH] Token refreshed successfully.")
-        print("="*60 + "\n")
-
-    # ---------------------------------------------------------
-    # TOKEN MANAGEMENT
+    # TOKEN MANAGEMENT (refresh-token removed)
     # ---------------------------------------------------------
     def ensure_token(self):
+        # No token → login
         if not self.cst or not self.xst:
             print("[AUTH] No token found → FULL login")
             return self.login()
 
-        # Refresh every 20 minutes (safer)
-        if time.time() - self.last_login > 1200:
-            print("[AUTH] Token older than 20 minutes → refreshing")
-            return self.refresh()
+        # Token older than 10 minutes → login again
+        if time.time() - self.last_login > 600:
+            print("[AUTH] Token older than 10 minutes → FULL login")
+            return self.login()
 
     # ---------------------------------------------------------
-    # REQUEST WRAPPER
+    # REQUEST WRAPPER (401 retry → full login)
     # ---------------------------------------------------------
     def request(self, method, url, **kwargs):
         self.ensure_token()
@@ -125,9 +92,12 @@ class CapitalAuth:
         print(f"[AUTH REQUEST] Raw response: {r.text}")
         print("="*60 + "\n")
 
+        # -----------------------------------------------------
+        # 401 → FULL LOGIN → RETRY
+        # -----------------------------------------------------
         if r.status_code == 401:
-            print("[AUTH REQUEST] 401 detected → refreshing token")
-            self.refresh()
+            print("[AUTH REQUEST] 401 detected → FULL login")
+            self.login()
 
             headers.update({
                 "CST": self.cst,

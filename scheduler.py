@@ -9,30 +9,45 @@ from utils import timestamp
 
 UK_TZ = pytz.timezone("Europe/London")
 
-
 # ---------------------------------------------------------
-# AVAILABLE BALANCE LOGGING
+# LOG AVAILABLE BALANCE (Hourly)
 # ---------------------------------------------------------
 
 def log_available():
-    """
-    Logs available balance once per hour for trend chart.
-    """
     try:
-        account = session.get_account()  # your existing function
+        account = session.get_account()
         entry = {
             "timestamp": timestamp(),
-            "available": account["available"]
+            "available": account.get("available")
         }
 
         with open("available_log.json", "a") as f:
             f.write(json.dumps(entry) + "\n")
 
-        print(f"[Scheduler] Logged available balance: £{account['available']}")
+        print(f"[Scheduler] Logged available balance: £{account.get('available')}")
 
     except Exception as e:
         print(f"[Scheduler] Error logging available balance: {e}")
 
+# ---------------------------------------------------------
+# LOG EQUITY (Daily)
+# ---------------------------------------------------------
+
+def log_equity():
+    try:
+        account = session.get_account()
+        entry = {
+            "timestamp": timestamp(),
+            "equity": account.get("equity")
+        }
+
+        with open("equity_log.json", "a") as f:
+            f.write(json.dumps(entry) + "\n")
+
+        print(f"[Scheduler] Logged daily equity: £{account.get('equity')}")
+
+    except Exception as e:
+        print(f"[Scheduler] Error logging equity: {e}")
 
 # ---------------------------------------------------------
 # SCHEDULER CLASS
@@ -44,20 +59,14 @@ class Scheduler:
         self.running = False
 
     def add_daily_job(self, hour, minute, func):
-        """
-        Add a job that runs every day at a specific UK time.
-        """
         self.jobs.append({
             "hour": hour,
             "minute": minute,
-            "func": func
+            "func": func,
+            "hourly": False
         })
 
     def add_hourly_job(self, minute, func):
-        """
-        Add a job that runs every hour at a specific minute.
-        Example: minute=0 → runs at HH:00 every hour.
-        """
         self.jobs.append({
             "hour": None,
             "minute": minute,
@@ -66,9 +75,6 @@ class Scheduler:
         })
 
     def start(self):
-        """
-        Start the background scheduler thread.
-        """
         if self.running:
             return
 
@@ -77,23 +83,19 @@ class Scheduler:
         thread.start()
 
     def run(self):
-        """
-        Main scheduler loop.
-        Checks every 30 seconds.
-        """
         while self.running:
             now_uk = datetime.now(UK_TZ)
 
             for job in self.jobs:
 
                 # DAILY JOBS
-                if "hourly" not in job:
+                if not job["hourly"]:
                     if now_uk.hour == job["hour"] and now_uk.minute == job["minute"]:
                         print(f"[Scheduler] Running daily job: {job['func'].__name__}")
                         try:
                             job["func"]()
                         except Exception as e:
-                            print(f"[Scheduler] Error running job {job['func'].__name__}: {e}")
+                            print(f"[Scheduler] Error running daily job {job['func'].__name__}: {e}")
                         time.sleep(60)
 
                 # HOURLY JOBS
@@ -108,13 +110,15 @@ class Scheduler:
 
             time.sleep(30)
 
-
 # ---------------------------------------------------------
 # GLOBAL SCHEDULER INSTANCE
 # ---------------------------------------------------------
 
 scheduler = Scheduler()
 
+# ---------------------------------------------------------
+# STARTUP
+# ---------------------------------------------------------
 
 def start_scheduler():
     """
@@ -124,31 +128,11 @@ def start_scheduler():
     # Daily report at 21:00 UK time
     scheduler.add_daily_job(21, 0, report.generate_daily_report)
 
+    # Log equity at 21:00 UK time (same minute, but safe)
+    scheduler.add_daily_job(21, 0, log_equity)
+
     # Log available balance every hour at HH:00
     scheduler.add_hourly_job(0, log_available)
 
-    # Log equity balance chart at 21.00 UK time
-    scheduler.add_daily_job(21, 0, log_equity)
-
     scheduler.start()
     print("[Scheduler] Started background scheduler.")
-
-# ---------------------------------------------------------
-# LOG EQUITY
-# ---------------------------------------------------------
-
-def log_equity():
-    try:
-        account = session.get_account()
-        entry = {
-            "timestamp": timestamp(),
-            "equity": account["equity"]
-        }
-
-        with open("equity_log.json", "a") as f:
-            f.write(json.dumps(entry) + "\n")
-
-        print(f"[Scheduler] Logged daily equity: £{account['equity']}")
-
-    except Exception as e:
-        print(f"[Scheduler] Error logging equity: {e}")

@@ -14,7 +14,7 @@
     </p>
 
     {% if account.margin_warning %}
-    <div style="padding: 10px; background: #330; color: yellow; border: 1px solid yellow; margin-top: 10px;">
+    <div style="padding: 10px; background: #332200; color: yellow; border: 1px solid yellow; margin-top: 10px;">
         {{ account.margin_warning }}
     </div>
     {% endif %}
@@ -29,28 +29,30 @@
     <script>
     const avCtx = document.getElementById('availableChart').getContext('2d');
 
-    const avData = {
-        labels: [
-            {% for entry in available_log %}
-                "{{ entry.timestamp }}",
-            {% endfor %}
-        ],
-        datasets: [{
-            label: 'Available Balance (£)',
-            data: [
-                {% for entry in available_log %}
-                    {{ entry.available }},
-                {% endfor %}
-            ],
-            borderColor: 'lime',
-            backgroundColor: 'rgba(0,255,0,0.2)',
-            tension: 0.3
-        }]
-    };
+    const avLabels = [
+        {% for entry in available_log %}
+            "{{ entry.timestamp }}",
+        {% endfor %}
+    ];
+
+    const avValues = [
+        {% for entry in available_log %}
+            {{ entry.available }},
+        {% endfor %}
+    ];
 
     new Chart(avCtx, {
         type: 'line',
-        data: avData,
+        data: {
+            labels: avLabels,
+            datasets: [{
+                label: 'Available Balance (£)',
+                data: avValues,
+                borderColor: 'lime',
+                backgroundColor: 'rgba(0,255,0,0.2)',
+                tension: 0.3
+            }]
+        }
     });
     </script>
 </div>
@@ -64,28 +66,30 @@
     <script>
     const eqCtx = document.getElementById('equityChart').getContext('2d');
 
-    const eqData = {
-        labels: [
-            {% for entry in equity_log %}
-                "{{ entry.timestamp }}",
-            {% endfor %}
-        ],
-        datasets: [{
-            label: 'Daily Equity (£)',
-            data: [
-                {% for entry in equity_log %}
-                    {{ entry.equity }},
-                {% endfor %}
-            ],
-            borderColor: 'cyan',
-            backgroundColor: 'rgba(0,255,255,0.2)',
-            tension: 0.3
-        }]
-    };
+    const eqLabels = [
+        {% for entry in equity_log %}
+            "{{ entry.timestamp }}",
+        {% endfor %}
+    ];
+
+    const eqValues = [
+        {% for entry in equity_log %}
+            {{ entry.equity }},
+        {% endfor %}
+    ];
 
     new Chart(eqCtx, {
         type: 'line',
-        data: eqData,
+        data: {
+            labels: eqLabels,
+            datasets: [{
+                label: 'Daily Equity (£)',
+                data: eqValues,
+                borderColor: 'cyan',
+                backgroundColor: 'rgba(0,255,255,0.2)',
+                tension: 0.3
+            }]
+        }
     });
     </script>
 </div>
@@ -93,23 +97,32 @@
 
 <!-- OPEN POSITIONS -->
 <div class="section">
-    <h2>Positions</h2>
+    <h2>Open Positions</h2>
 
     {% if positions %}
         <ul>
         {% for p in positions %}
-            {% set profit = p.profit or 0 %}
+            {% set pnl = p.profitLoss or p.profit or 0 %}
             <li>
-                <strong>{{ p.ticker }}</strong> — 
+                <strong>{{ p.ticker }}</strong>
+                ({{ p.direction }}) —
                 {{ p.size }} units @ £{{ p.price }}
 
-                <span style="color: {% if profit >= 0 %}lime{% else %}red{% endif %};">
-                    (PnL: £{{ profit }})
+                <span style="color: {% if pnl >= 0 %}lime{% else %}red{% endif %};">
+                    (PnL: £{{ pnl | round(2) }})
                 </span>
 
                 <span style="color: #ccc;">
                     — Current: £{{ p.current_price }}
                 </span>
+
+                {% if p.stopLevel %}
+                    <span style="color: orange;">SL: £{{ p.stopLevel }}</span>
+                {% endif %}
+
+                {% if p.limitLevel %}
+                    <span style="color: cyan;">TP: £{{ p.limitLevel }}</span>
+                {% endif %}
 
                 <button onclick="closePosition('{{ p.id }}')">Close</button>
             </li>
@@ -137,7 +150,7 @@
         </tr>
 
         {% for t in trade_log %}
-        {% set profit = t.pnl or 0 %}
+        {% set pnl = t.pnl or 0 %}
         <tr>
             <td>{{ t.time }}</td>
             <td>{{ t.ticker }}</td>
@@ -147,8 +160,8 @@
 
             <td>
                 {% if t.side == "CLOSE" %}
-                    <span style="color: {% if profit >= 0 %}lime{% else %}red{% endif %};">
-                        £{{ profit }}
+                    <span style="color: {% if pnl >= 0 %}lime{% else %}red{% endif %};">
+                        £{{ pnl | round(2) }}
                     </span>
                 {% else %}
                     -
@@ -171,8 +184,16 @@
         <p><strong>Date:</strong> {{ daily_report.date }}</p>
         <p><strong>Closed PnL:</strong> £{{ daily_report.closed_pnl }}</p>
         <p><strong>Open PnL:</strong> £{{ daily_report.open_pnl }}</p>
-        <p><strong>Trades Today:</strong> {{ daily_report.trades }}</p>
+        <p><strong>Total Trades:</strong> {{ daily_report.total_trades }}</p>
         <p><strong>Win Rate:</strong> {{ daily_report.win_rate }}%</p>
+
+        {% if daily_report.best_ticker %}
+        <p><strong>Best Ticker:</strong> {{ daily_report.best_ticker }}</p>
+        {% endif %}
+
+        {% if daily_report.worst_ticker %}
+        <p><strong>Worst Ticker:</strong> {{ daily_report.worst_ticker }}</p>
+        {% endif %}
     {% else %}
         <p>No daily report generated yet.</p>
     {% endif %}
@@ -183,7 +204,7 @@
 <div class="section">
     <h2>System Status</h2>
 
-    <p><strong>Last Webhook:</strong> {{ system_status.last_webhook if system_status.last_webhook else "N/A" }}</p>
-    <p><strong>Last Trade:</strong> {{ system_status.last_trade if system_status.last_trade else "N/A" }}</p>
-    <p><strong>Auth Status:</strong> {{ system_status.auth if system_status.auth else "N/A" }}</p>
+    <p><strong>Last Webhook:</strong> {{ system_status.last_webhook or "N/A" }}</p>
+    <p><strong>Last Trade:</strong> {{ system_status.last_trade or "N/A" }}</p>
+    <p><strong>Auth Status:</strong> {{ system_status.auth or "N/A" }}</p>
 </div>

@@ -46,6 +46,15 @@
 
         .green { color: #3fb950; }
         .red { color: #f85149; }
+        .yellow { color: #f0c040; }
+        .lime { color: #3fb950; }
+        .gray { color: #8b949e; }
+
+        .logout-link {
+            color: #f85149;
+            text-decoration: none;
+            font-weight: bold;
+        }
     </style>
 </head>
 
@@ -54,10 +63,7 @@
 <h1>{{ title }}</h1>
 
 <div style="text-align:center; margin-top:15px;">
-    <a href="/dashboard/logout"
-       style="color:#f85149; text-decoration:none; font-weight:bold;">
-       Logout
-    </a>
+    <a href="/dashboard/logout" class="logout-link">Logout</a>
 </div>
 
 <div id="dashboard-content">
@@ -69,13 +75,20 @@ function refreshDashboard() {
     fetch('/dashboard/data')
         .then(response => response.json())
         .then(data => {
-            document.getElementById('dashboard-content').innerHTML = data.html;
+            if (data && data.html) {
+                document.getElementById('dashboard-content').innerHTML = data.html;
+            }
+        })
+        .catch(err => {
+            console.error("Dashboard refresh error:", err);
         });
 }
 
 setInterval(refreshDashboard, 5000);
 
 function closePosition(id) {
+    // Prevent accidental double-clicks
+    if (!id) return;
     window.location.href = "/dashboard/close/" + id;
 }
 </script>
