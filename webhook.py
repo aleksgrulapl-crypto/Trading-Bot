@@ -8,10 +8,7 @@ from dashboard import dashboard as dashboard_blueprint
 
 import session
 import order
-import utils
 from trade_log import load_log
-from auth import auth
-from config import API_POSITIONS, API_ACCOUNTS
 from parser import parse_tradingview_alert
 
 app = Flask(__name__)
@@ -31,13 +28,11 @@ print("[System] Scheduler started.")
 
 @app.route("/raw")
 def raw_positions():
-    raw = session.get_positions()
-    return jsonify(raw)
+    return jsonify(session.get_positions())
 
 @app.route("/raw/account")
 def raw_account():
-    raw = session.get_account()
-    return jsonify(raw)
+    return jsonify(session.get_account())
 
 # ---------------------------------------------------------
 # WEBHOOK ENDPOINT (FULLY TOLERANT)
@@ -59,9 +54,11 @@ def webhook():
     # -----------------------------------------------------
     try:
         if raw_body and "|" in raw_body:
+            # RAW alert
             alert = parse_tradingview_alert(raw_body)
 
         elif json_body:
+            # JSON alert
             alert = parse_tradingview_alert(json_body)
 
         else:
@@ -131,9 +128,7 @@ def dashboard():
 @app.route("/close/<position_id>", methods=["POST"])
 def close_position_api(position_id):
     from close_position import close_position
-
-    result = close_position(position_id)
-    return jsonify(result)
+    return jsonify(close_position(position_id))
 
 # ---------------------------------------------------------
 # RUN APP
