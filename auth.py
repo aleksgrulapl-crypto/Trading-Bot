@@ -1,5 +1,5 @@
 # ============================
-# AUTH MODULE (Rewritten)
+# AUTH MODULE (Debug Version)
 # ============================
 
 import requests
@@ -20,10 +20,13 @@ class CapitalAuth:
         self.session = requests.Session()
 
     # ---------------------------------------------------------
-    # FULL LOGIN (always restores full metadata permissions)
+    # FULL LOGIN
     # ---------------------------------------------------------
     def login(self):
-        print("Performing FULL login...")
+        print("\n" + "="*60)
+        print("[AUTH] Performing FULL login...")
+        print(f"[AUTH] Endpoint: {API_LOGIN}")
+        print("="*60)
 
         payload = {
             "identifier": CAPITAL_USERNAME,
@@ -37,20 +40,29 @@ class CapitalAuth:
 
         r = self.session.post(API_LOGIN, json=payload, headers=headers)
 
+        print(f"[AUTH] Status: {r.status_code}")
+        print(f"[AUTH] Raw response: {r.text}")
+
         if r.status_code != 200:
-            raise Exception(f"Login failed: {r.text}")
+            raise Exception(f"[AUTH] Login failed: {r.text}")
 
         self.cst = r.headers.get("CST")
         self.xst = r.headers.get("X-SECURITY-TOKEN")
         self.last_login = time.time()
 
-        print("FULL login successful. CST/XST refreshed.")
+        print(f"[AUTH] CST: {self.cst}")
+        print(f"[AUTH] XST: {self.xst}")
+        print("[AUTH] FULL login successful.")
+        print("="*60 + "\n")
 
     # ---------------------------------------------------------
-    # SAFE REFRESH (fallback to full login if metadata degrades)
+    # REFRESH TOKEN
     # ---------------------------------------------------------
     def refresh(self):
-        print("Attempting token refresh...")
+        print("\n" + "="*60)
+        print("[AUTH] Attempting token refresh...")
+        print(f"[AUTH] Endpoint: {API_REFRESH}")
+        print("="*60)
 
         headers = {
             "X-CAP-API-KEY": CAPITAL_API_KEY,
@@ -60,34 +72,37 @@ class CapitalAuth:
 
         r = self.session.post(API_REFRESH, headers=headers)
 
-        # If refresh fails → full login
+        print(f"[AUTH] Status: {r.status_code}")
+        print(f"[AUTH] Raw response: {r.text}")
+
         if r.status_code != 200:
-            print("Refresh failed → performing FULL login")
+            print("[AUTH] Refresh failed → FULL login required")
             return self.login()
 
-        # If refresh succeeds → update tokens
         self.cst = r.headers.get("CST")
         self.xst = r.headers.get("X-SECURITY-TOKEN")
         self.last_login = time.time()
 
-        print("Token refreshed successfully.")
+        print(f"[AUTH] New CST: {self.cst}")
+        print(f"[AUTH] New XST: {self.xst}")
+        print("[AUTH] Token refreshed successfully.")
+        print("="*60 + "\n")
 
     # ---------------------------------------------------------
-    # TOKEN MANAGEMENT (aggressive refresh to prevent metadata loss)
+    # TOKEN MANAGEMENT
     # ---------------------------------------------------------
     def ensure_token(self):
-        # If no token → login
-        if self.cst is None or self.xst is None:
-            print("No token found → FULL login")
+        if not self.cst or not self.xst:
+            print("[AUTH] No token found → FULL login")
             return self.login()
 
-        # Force full login every 10 minutes (prevents metadata downgrade)
-        if time.time() - self.last_login > 600:
-            print("Token older than 10 minutes → FULL login")
-            return self.login()
+        # Refresh every 20 minutes (safer)
+        if time.time() - self.last_login > 1200:
+            print("[AUTH] Token older than 20 minutes → refreshing")
+            return self.refresh()
 
     # ---------------------------------------------------------
-    # REQUEST WRAPPER (auto-relogin on metadata loss)
+    # REQUEST WRAPPER
     # ---------------------------------------------------------
     def request(self, method, url, **kwargs):
         self.ensure_token()
@@ -99,11 +114,19 @@ class CapitalAuth:
             "X-SECURITY-TOKEN": self.xst
         })
 
+        print("\n" + "="*60)
+        print(f"[AUTH REQUEST] {method} {url}")
+        print(f"[AUTH REQUEST] Headers: {headers}")
+        print("="*60)
+
         r = self.session.request(method, url, headers=headers, **kwargs)
 
-        # If unauthorized → refresh then retry
+        print(f"[AUTH REQUEST] Status: {r.status_code}")
+        print(f"[AUTH REQUEST] Raw response: {r.text}")
+        print("="*60 + "\n")
+
         if r.status_code == 401:
-            print("401 detected → refreshing token")
+            print("[AUTH REQUEST] 401 detected → refreshing token")
             self.refresh()
 
             headers.update({
@@ -112,6 +135,11 @@ class CapitalAuth:
             })
 
             r = self.session.request(method, url, headers=headers, **kwargs)
+
+            print("[AUTH REQUEST] Retried request:")
+            print(f"[AUTH REQUEST] Status: {r.status_code}")
+            print(f"[AUTH REQUEST] Raw response: {r.text}")
+            print("="*60 + "\n")
 
         return r
 

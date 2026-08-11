@@ -15,7 +15,9 @@ API_ACCOUNTS = f"{API_BASE}/api/v1/accounts"
 
 # --- POSITIONS & MARKET DATA ---
 API_POSITIONS = f"{API_BASE}/api/v1/positions"
-API_MARKET = f"{API_BASE}/api/v1/marketdata/instruments"
+
+# EPIC / instrument search endpoint (used by verify_epic)
+API_MARKET = f"{API_BASE}/api/v1/markets"
 
 # --- USER CREDENTIALS ---
 CAPITAL_API_KEY = os.getenv("CAPITAL_API_KEY")

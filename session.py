@@ -1,3 +1,7 @@
+# ============================
+# SESSION MODULE (Debug Version)
+# ============================
+
 from auth import auth
 from config import (
     CAPITAL_API_KEY,
@@ -6,7 +10,6 @@ from config import (
     API_MARKET
 )
 import utils
-import market
 from trade_log import load_log
 import requests
 
@@ -23,31 +26,31 @@ shared_state = {
 }
 
 # ---------------------------------------------------------
-# AUTHENTICATED REQUEST WRAPPER
+# AUTHENTICATED REQUEST WRAPPER (uses auth.request for debug)
 # ---------------------------------------------------------
 
 def request(method, url, **kwargs):
-    auth.ensure_token()
-
-    headers = kwargs.pop("headers", {})
-    headers.update({
-        "X-CAP-API-KEY": CAPITAL_API_KEY,
-        "CST": auth.cst,
-        "X-SECURITY-TOKEN": auth.xst
-    })
-
-    return auth.session.request(method, url, headers=headers, **kwargs)
+    return auth.request(method, url, **kwargs)
 
 
 # ---------------------------------------------------------
-# ACCOUNT FETCHING + ENRICHMENT
+# ACCOUNT FETCHING
 # ---------------------------------------------------------
 
 def get_account():
     global shared_state
 
     try:
+        print("\n" + "="*60)
+        print("[SESSION] Fetching account...")
+        print("="*60)
+
         r = request("GET", API_ACCOUNTS)
+
+        print("[SESSION] Account raw response:")
+        print(r.text)
+        print("="*60)
+
         raw = r.json() if r.status_code == 200 else {}
 
         account = utils.parse_account(raw)
@@ -55,34 +58,33 @@ def get_account():
         return account
 
     except Exception as e:
-        print("Account fetch error:", e)
+        print("[SESSION] Account fetch error:", e)
         return shared_state["account"]
 
 
-def enrich_account(raw_account):
-    """Enrich account data with balance, equity, margin."""
-    if not raw_account:
-        return raw_account
-
-    return {
-        "balance": raw_account.get("balance"),
-        "equity": raw_account.get("equity"),
-        "margin": raw_account.get("margin")
-    }
-
-
 # ---------------------------------------------------------
-# POSITION FETCHING (RAW)
+# POSITION FETCHING
 # ---------------------------------------------------------
 
 def fetch_positions_from(endpoint):
     try:
+        print("\n" + "="*60)
+        print(f"[SESSION] Fetching positions from: {endpoint}")
+        print("="*60)
+
         r = request("GET", endpoint + "?includeProfitLoss=true")
+
+        print("[SESSION] Raw positions response:")
+        print(r.text)
+        print("="*60)
+
         if r.status_code != 200:
             return []
+
         return r.json().get("positions", [])
+
     except Exception as e:
-        print(f"Position fetch error ({endpoint}):", e)
+        print(f"[SESSION] Position fetch error ({endpoint}):", e)
         return []
 
 
@@ -103,51 +105,56 @@ def get_positions():
         return parsed
 
     except Exception as e:
-        print("Position fetch error:", e)
+        print("[SESSION] Position fetch error:", e)
         return shared_state["positions"]
 
 
 # ---------------------------------------------------------
-# EPIC LOOKUP
+# EPIC LOOKUP (FULL DEBUG)
 # ---------------------------------------------------------
 
 def verify_epic(ticker):
-    try:
-        # Capital.com search endpoint
-        url = f"{API_MARKET}?search={ticker}"
+    print("\n" + "="*60)
+    print(f"[EPIC LOOKUP] Looking up ticker: {ticker}")
+    url = f"{API_MARKET}?search={ticker}"
+    print(f"[EPIC LOOKUP] URL: {url}")
+    print("="*60)
 
+    try:
         r = request("GET", url)
+
+        print("[EPIC LOOKUP] Status:", r.status_code)
+        print("[EPIC LOOKUP] Raw response:")
+        print(r.text)
+        print("="*60)
+
         data = r.json()
 
-        # The correct structure is: {"markets": [ ... ]}
         markets = data.get("markets", [])
+        print("[EPIC LOOKUP] Parsed markets:")
+        print(markets)
+        print("="*60)
 
         if not markets:
+            print("[EPIC LOOKUP] No markets found for ticker.")
             return {}
 
-        # Take the first matching instrument
+        print("[EPIC LOOKUP] Returning first market entry.")
         return markets[0]
 
     except Exception as e:
-        print("EPIC lookup error:", e)
+        print("[EPIC LOOKUP] ERROR:", e)
         return {}
 
 
 # ---------------------------------------------------------
-# POSITION ENRICHMENT PIPELINE
+# POSITION ENRICHMENT
 # ---------------------------------------------------------
 
 def enrich_position(p):
     if not p:
         return p
 
-    # ticker already parsed from market.symbol
-    epic = p.get("epic")
-
-    # instrument metadata already included
-    instrument = p.get("instrument", {})
-
-    # calculate profit/loss using correct fields
     p["profitLoss"] = utils.calculate_profit_loss(
         direction=p.get("direction"),
         open_price=p.get("price"),
@@ -158,9 +165,7 @@ def enrich_position(p):
     return p
 
 
-
 def enrich_positions(raw_positions):
-    """Enrich all positions returned by the API."""
     enriched = []
     for p in raw_positions:
         enriched.append(enrich_position(p))

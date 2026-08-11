@@ -9,12 +9,10 @@ from trade_log import load_log
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS
 
-# NEW IMPORT
 from parser import parse_tradingview_alert
 
 app = Flask(__name__)
 app.register_blueprint(dashboard_blueprint)
-
 
 # ---------------------------------------------------------
 # STARTUP
@@ -23,7 +21,6 @@ app.register_blueprint(dashboard_blueprint)
 print("[Webhook] Starting scheduler...")
 start_scheduler()
 print("[Webhook] Scheduler started.")
-
 
 # ---------------------------------------------------------
 # RAW DEBUG ENDPOINTS
@@ -39,7 +36,6 @@ def raw_account():
     raw = session.request("GET", API_ACCOUNTS).json()
     return jsonify(raw)
 
-
 # ---------------------------------------------------------
 # WEBHOOK ENDPOINT
 # ---------------------------------------------------------
@@ -48,7 +44,6 @@ def raw_account():
 def webhook():
     session.update_last_webhook()
 
-    # Read raw body safely (does NOT consume the stream)
     raw = request.get_data(as_text=True)
     print("\n" + "="*60)
     print("[Webhook] RAW BODY RECEIVED:")
@@ -58,7 +53,6 @@ def webhook():
     if not raw.strip():
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
-    # Parse JSON normally
     try:
         data = request.get_json(force=True)
     except Exception as e:
@@ -68,34 +62,34 @@ def webhook():
     try:
         alert = parse_tradingview_alert(data)
 
-        # Extract ticker (NVDA, MU, TSLA, etc.)
         ticker = alert["symbol"]
-
-        # Convert ticker → EPIC for logging/debug only
-        epic_preview = utils.map_symbol_to_epic(ticker)
-        if epic_preview is None:
-            print(f"[Webhook] WARNING: No EPIC mapping found for ticker {ticker}")
-        else:
-            print(f"[Webhook] EPIC preview: {epic_preview}")
-
         action = alert["action"]
         size = alert["quantity"]
         sl = alert["sl"]
         tp = alert["tp"]
 
-        print(f"[Webhook] Parsed alert: {ticker} {action} {size} SL={sl} TP={tp}")
+        print(f"[Webhook] Parsed alert: ticker={ticker}, action={action}, size={size}, SL={sl}, TP={tp}")
 
-        # IMPORTANT:
-        # place_order() expects the TICKER, not the EPIC
+        # EPIC preview (local mapping)
+        epic_preview = utils.map_symbol_to_epic(ticker)
+        print(f"[Webhook] Local EPIC preview: {epic_preview}")
+
+        # REAL EPIC lookup from Capital.com
+        print("[Webhook] Performing REAL EPIC lookup...")
+        epic_data = session.verify_epic(ticker)
+        print("[Webhook] EPIC lookup result:")
+        print(epic_data)
+
         result = order.place_order(ticker, action, size, sl, tp)
+
+        print("[Webhook] Order result:")
+        print(result)
 
         return jsonify({"status": "ok", "result": result}), 200
 
     except Exception as e:
         print("[Webhook] ERROR:", e)
         return jsonify({"status": "error", "message": str(e)}), 200
-
-
 
 # ---------------------------------------------------------
 # DASHBOARD ROUTES
@@ -121,7 +115,6 @@ def dashboard():
         daily_report=daily_report,
         system_status=session.shared_state.get("system_status", {})
     )
-
 
 # ---------------------------------------------------------
 # CLOSE POSITION
@@ -154,17 +147,6 @@ def close_position(position_id):
     session.update_last_trade()
     return jsonify({"status": "ok", "result": result})
 
-
-# ---------------------------------------------------------
-# MANUAL DAILY REPORT
-# ---------------------------------------------------------
-
-@app.route("/daily-report", methods=["POST"])
-def manual_daily_report():
-    report_data = report.generate_daily_report()
-    return jsonify(report_data)
-
-
 # ---------------------------------------------------------
 # RUN APP
 # ---------------------------------------------------------
@@ -174,4 +156,3 @@ import os
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
