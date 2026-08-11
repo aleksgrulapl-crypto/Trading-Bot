@@ -48,34 +48,34 @@ def raw_account():
 def webhook():
     session.update_last_webhook()
 
-    # Read raw body directly from the stream BEFORE Flask processes it
+    # Read raw body directly from the WSGI stream BEFORE Flask parses anything
     try:
-        raw_body = request.stream.read().decode("utf-8", errors="ignore")
+        raw = request.environ['wsgi.input'].read().decode('utf-8', errors='ignore')
     except Exception as e:
-        raw_body = f"[ERROR reading raw body: {e}]"
+        raw = f"[ERROR reading raw body: {e}]"
 
     print("\n" + "="*60)
-    print("[Webhook] RAW BODY RECEIVED FROM TRADINGVIEW:")
-    print(raw_body)
+    print("[Webhook] RAW BODY RECEIVED:")
+    print(raw)
     print("="*60 + "\n")
 
-    if not raw_body.strip():
+    # If raw body is empty, return debug info
+    if not raw.strip():
         return jsonify({
             "status": "error",
             "message": "TradingView sent an empty body",
-            "debug": "Render may be stripping the request body"
-        }), 400
+            "debug": "Render may be stripping the body"
+        }), 200  # <-- IMPORTANT: return 200 so Render does NOT strip the body next time
 
-    # Extract JSON
+    # Extract JSON block
     try:
-        json_start = raw_body.find("{")
-        json_end = raw_body.rfind("}") + 1
-        json_text = raw_body[json_start:json_end]
-
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        json_text = raw[start:end]
         data = json.loads(json_text)
     except Exception as e:
-        print("[Webhook] ERROR parsing JSON:", e)
-        return jsonify({"status": "error", "message": "Invalid JSON"}), 400
+        print("[Webhook] JSON PARSE ERROR:", e)
+        return jsonify({"status": "error", "message": "Invalid JSON"}), 200
 
     try:
         alert = parse_tradingview_alert(data)
@@ -93,7 +93,7 @@ def webhook():
 
     except Exception as e:
         print("[Webhook] ERROR:", e)
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 200
 
 
 # ---------------------------------------------------------
