@@ -102,38 +102,40 @@ def parse_raw_alert(raw: str):
 # PAYLOAD PARSER (JSON alerts)
 # ---------------------------------------------------------
 
-def parse_payload(payload: str):
+def parse_json_alert(data):
     """
-    Payload format (JSON alerts):
-    BUY|NVDA|SL:123.45|TP:130.22
+    JSON TradingView alert format:
+    {
+        "symbol": "NVDA",
+        "action": "buy",
+        "quantity": 1,
+        "payload": "BUY|NVDA|SL:123|TP:130"
+    }
     """
 
-    parts = payload.split("|")
+    symbol = normalise_symbol(data.get("symbol"))
+    if not symbol:
+        raise ValueError("Missing symbol")
 
-    if len(parts) < 4:
-        raise ValueError(f"Invalid payload format: {payload}")
+    payload_raw = data.get("payload")
+    if not payload_raw:
+        raise ValueError("Missing payload")
 
-    direction = parts[0].lower()
-    symbol = normalise_symbol(parts[1])
+    payload = parse_payload(payload_raw)
 
-    sl = None
-    tp = None
+    # Use direction from payload (more reliable)
+    action = payload["direction"]
 
-    for part in parts:
-        if part.startswith("SL:"):
-            sl = safe_float(part.replace("SL:", ""))
-        if part.startswith("TP:"):
-            tp = safe_float(part.replace("TP:", ""))
-
-    if sl is None or tp is None:
-        raise ValueError(f"Missing SL/TP in payload: {payload}")
+    quantity = float(data.get("quantity", 1))
 
     return {
-        "direction": direction,
         "symbol": symbol,
-        "sl": sl,
-        "tp": tp
+        "action": action,
+        "quantity": quantity,
+        "sl": payload["sl"],
+        "tp": payload["tp"]
     }
+
 
 
 # ---------------------------------------------------------
