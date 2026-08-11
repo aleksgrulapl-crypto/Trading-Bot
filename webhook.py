@@ -68,7 +68,14 @@ def webhook():
     try:
         alert = parse_tradingview_alert(data)
 
-        symbol = alert["symbol"]
+        # Convert ticker → EPIC
+        symbol = utils.map_symbol_to_epic(alert["symbol"])
+        if symbol is None:
+            return jsonify({
+                "status": "error",
+                "message": f"EPIC not found for symbol {alert['symbol']}"
+            }), 200
+
         action = alert["action"]
         size = alert["quantity"]
         sl = alert["sl"]
@@ -82,7 +89,6 @@ def webhook():
     except Exception as e:
         print("[Webhook] ERROR:", e)
         return jsonify({"status": "error", "message": str(e)}), 200
-
 
 
 # ---------------------------------------------------------

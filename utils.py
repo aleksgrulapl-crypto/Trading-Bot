@@ -151,3 +151,40 @@ def parse_account(raw):
         "available_color": available_color(available, deposit),
         "margin_warning": margin_warning(available, deposit)
     }
+
+# ---------------------------------------------------------
+# EPIC MAPPING (Capital.com symbols)
+# ---------------------------------------------------------
+
+EPIC_MAP = {
+    # US Stocks
+    "AAPL": "US.AAPL",
+    "TSLA": "US.TSLA",
+    "MSFT": "US.MSFT",
+    "NVDA": "US.NVDA",
+    "MU": "US.MU",
+    "AMD": "US.AMD",
+    "META": "US.META",
+    "GOOGL": "US.GOOGL",
+    "AMZN": "US.AMZN",
+
+    # FX (examples)
+    "EURUSD": "CS.D.EURUSD.MINI.IP",
+    "GBPUSD": "CS.D.GBPUSD.MINI.IP",
+    "USDJPY": "CS.D.USDJPY.MINI.IP",
+
+    # Indices
+    "SPX": "IX.D.SPTRD.IP",
+    "NAS100": "IX.D.NASDAQ.100.IP",
+
+    # Crypto (Capital.com CFD symbols)
+    "BTCUSD": "CRYPTO.BTCUSD",
+    "ETHUSD": "CRYPTO.ETHUSD"
+}
+
+def map_symbol_to_epic(symbol: str):
+    if not symbol:
+        return None
+    symbol = symbol.upper()
+    return EPIC_MAP.get(symbol)
+
