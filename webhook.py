@@ -34,28 +34,30 @@ def webhook():
     if not raw or not raw.strip():
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
+    # ---------------------------------------------------------
+    # JSON FIRST (correct behaviour)
+    # ---------------------------------------------------------
     try:
-        # RAW alert
-        if "|" in raw:
-            alert = parse_tradingview_alert(raw)
+        # Proper JSON
+        data = request.get_json(force=True)
+        alert = parse_tradingview_alert(data)
 
-        else:
+    except:
+        try:
+            # JSON wrapped inside a string
+            data = json.loads(raw)
+            alert = parse_tradingview_alert(data)
+
+        except:
             try:
-                # Proper JSON
-                data = request.get_json(force=True)
-                alert = parse_tradingview_alert(data)
-
+                # RAW fallback
+                alert = parse_tradingview_alert(raw)
             except:
-                try:
-                    # JSON wrapped inside a string
-                    data = json.loads(raw)
-                    alert = parse_tradingview_alert(data)
-                except:
-                    return jsonify({"status": "error", "message": "Invalid alert"}), 200
+                return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
-    except Exception:
-        return jsonify({"status": "error", "message": "Invalid alert"}), 200
-
+    # ---------------------------------------------------------
+    # Extract fields
+    # ---------------------------------------------------------
     ticker = alert["symbol"]
     action = alert["action"]
     size = alert["quantity"]
