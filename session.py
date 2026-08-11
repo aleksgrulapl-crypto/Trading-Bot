@@ -111,10 +111,23 @@ def get_positions():
 # EPIC LOOKUP
 # ---------------------------------------------------------
 
-def verify_epic(symbol):
+def verify_epic(ticker):
     try:
-        r = request("GET", f"{API_MARKET}/{symbol}")
-        return r.json()
+        # Capital.com search endpoint
+        url = f"{API_MARKET}?search={ticker}"
+
+        r = request("GET", url)
+        data = r.json()
+
+        # The correct structure is: {"markets": [ ... ]}
+        markets = data.get("markets", [])
+
+        if not markets:
+            return {}
+
+        # Take the first matching instrument
+        return markets[0]
+
     except Exception as e:
         print("EPIC lookup error:", e)
         return {}
