@@ -48,31 +48,19 @@ def raw_account():
 def webhook():
     session.update_last_webhook()
 
-    # Read raw body directly from the WSGI stream BEFORE Flask parses anything
-    try:
-        raw = request.environ['wsgi.input'].read().decode('utf-8', errors='ignore')
-    except Exception as e:
-        raw = f"[ERROR reading raw body: {e}]"
-
+    # Read raw body safely (does NOT consume the stream)
+    raw = request.get_data(as_text=True)
     print("\n" + "="*60)
     print("[Webhook] RAW BODY RECEIVED:")
     print(raw)
     print("="*60 + "\n")
 
-    # If raw body is empty, return debug info
     if not raw.strip():
-        return jsonify({
-            "status": "error",
-            "message": "TradingView sent an empty body",
-            "debug": "Render may be stripping the body"
-        }), 200  # <-- IMPORTANT: return 200 so Render does NOT strip the body next time
+        return jsonify({"status": "error", "message": "Empty body received"}), 200
 
-    # Extract JSON block
+    # Parse JSON normally
     try:
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        json_text = raw[start:end]
-        data = json.loads(json_text)
+        data = request.get_json(force=True)
     except Exception as e:
         print("[Webhook] JSON PARSE ERROR:", e)
         return jsonify({"status": "error", "message": "Invalid JSON"}), 200
@@ -94,6 +82,7 @@ def webhook():
     except Exception as e:
         print("[Webhook] ERROR:", e)
         return jsonify({"status": "error", "message": str(e)}), 200
+
 
 
 # ---------------------------------------------------------
