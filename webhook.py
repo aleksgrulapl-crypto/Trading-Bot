@@ -46,25 +46,31 @@ def raw_account():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.json
+    # FIX: Accept TradingView's text/plain content-type
+    data = request.get_json(force=True, silent=True)
     session.update_last_webhook()
 
     if not data:
-        return jsonify({"status": "error", "message": "No JSON received"})
+        print("[Webhook] ERROR: No JSON received or invalid format")
+        return jsonify({"status": "error", "message": "Invalid or missing JSON"}), 400
 
-    # Parse TradingView alert using new parser
-    alert = parse_tradingview_alert(data)
+    try:
+        alert = parse_tradingview_alert(data)
 
-    symbol = alert["symbol"]
-    action = alert["action"]
-    size = alert["quantity"]
-    sl = alert["sl"]
-    tp = alert["tp"]
+        symbol = alert["symbol"]
+        action = alert["action"]
+        size = alert["quantity"]
+        sl = alert["sl"]
+        tp = alert["tp"]
 
-    print(f"[Webhook] Received: {symbol} {action} {size} SL={sl} TP={tp}")
+        print(f"[Webhook] Received: {symbol} {action} {size} SL={sl} TP={tp}")
 
-    result = order.place_order(symbol, action, size, sl, tp)
-    return jsonify({"status": "ok", "result": result})
+        result = order.place_order(symbol, action, size, sl, tp)
+        return jsonify({"status": "ok", "result": result}), 200
+
+    except Exception as e:
+        print(f"[Webhook] ERROR: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # ---------------------------------------------------------
