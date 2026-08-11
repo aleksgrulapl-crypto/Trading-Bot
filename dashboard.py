@@ -63,6 +63,21 @@ def load_available_log():
 
 
 # ---------------------------------------------------------
+# LOAD EQUITY LOG
+# ---------------------------------------------------------
+
+def load_equity_log():
+    data = []
+    try:
+        with open("equity_log.json") as f:
+            for line in f:
+                data.append(json.loads(line))
+    except:
+        pass
+    return data
+
+
+# ---------------------------------------------------------
 # DASHBOARD HOME
 # ---------------------------------------------------------
 
@@ -78,8 +93,9 @@ def dashboard_home():
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
 
-    # Load available balance trend data
+    # Load trend logs
     available_log = load_available_log()
+    equity_log = load_equity_log()
 
     return render_template(
         "dashboard.html",
@@ -89,7 +105,8 @@ def dashboard_home():
         trade_log=load_log(),
         daily_report=session.shared_state.get("daily_report", {}),
         system_status=session.shared_state.get("system_status", {}),
-        available_log=available_log
+        available_log=available_log,
+        equity_log=equity_log
     )
 
 
@@ -108,6 +125,7 @@ def dashboard_data():
     session.shared_state["positions"] = positions
 
     available_log = load_available_log()
+    equity_log = load_equity_log()
 
     html = render_template(
         "dashboard_partial.html",
@@ -116,7 +134,8 @@ def dashboard_data():
         trade_log=load_log(),
         daily_report=session.shared_state.get("daily_report", {}),
         system_status=session.shared_state.get("system_status", {}),
-        available_log=available_log
+        available_log=available_log,
+        equity_log=equity_log
     )
 
     return jsonify({"html": html})
@@ -153,5 +172,6 @@ def dashboard_debug():
         "trade_log": load_log(),
         "system_status": session.shared_state.get("system_status", {}),
         "daily_report": session.shared_state.get("daily_report", {}),
-        "available_log": load_available_log()
+        "available_log": load_available_log(),
+        "equity_log": load_equity_log()
     })

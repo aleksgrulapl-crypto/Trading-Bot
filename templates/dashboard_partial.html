@@ -21,6 +21,76 @@
 </div>
 
 
+<!-- AVAILABLE BALANCE TREND -->
+<div class="section">
+    <h2>Available Balance Trend</h2>
+    <canvas id="availableChart"></canvas>
+
+    <script>
+    const avCtx = document.getElementById('availableChart').getContext('2d');
+
+    const avData = {
+        labels: [
+            {% for entry in available_log %}
+                "{{ entry.timestamp }}",
+            {% endfor %}
+        ],
+        datasets: [{
+            label: 'Available Balance (£)',
+            data: [
+                {% for entry in available_log %}
+                    {{ entry.available }},
+                {% endfor %}
+            ],
+            borderColor: 'lime',
+            backgroundColor: 'rgba(0,255,0,0.2)',
+            tension: 0.3
+        }]
+    };
+
+    new Chart(avCtx, {
+        type: 'line',
+        data: avData,
+    });
+    </script>
+</div>
+
+
+<!-- EQUITY CURVE -->
+<div class="section">
+    <h2>Equity Curve</h2>
+    <canvas id="equityChart"></canvas>
+
+    <script>
+    const eqCtx = document.getElementById('equityChart').getContext('2d');
+
+    const eqData = {
+        labels: [
+            {% for entry in equity_log %}
+                "{{ entry.timestamp }}",
+            {% endfor %}
+        ],
+        datasets: [{
+            label: 'Daily Equity (£)',
+            data: [
+                {% for entry in equity_log %}
+                    {{ entry.equity }},
+                {% endfor %}
+            ],
+            borderColor: 'cyan',
+            backgroundColor: 'rgba(0,255,255,0.2)',
+            tension: 0.3
+        }]
+    };
+
+    new Chart(eqCtx, {
+        type: 'line',
+        data: eqData,
+    });
+    </script>
+</div>
+
+
 <!-- OPEN POSITIONS -->
 <div class="section">
     <h2>Positions</h2>

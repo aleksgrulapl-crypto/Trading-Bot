@@ -127,5 +127,28 @@ def start_scheduler():
     # Log available balance every hour at HH:00
     scheduler.add_hourly_job(0, log_available)
 
+    # Log equity balance chart at 21.00 UK time
+    scheduler.add_daily_job(21, 0, log_equity)
+
     scheduler.start()
     print("[Scheduler] Started background scheduler.")
+
+# ---------------------------------------------------------
+# LOG EQUITY
+# ---------------------------------------------------------
+
+def log_equity():
+    try:
+        account = session.get_account()
+        entry = {
+            "timestamp": timestamp(),
+            "equity": account["equity"]
+        }
+
+        with open("equity_log.json", "a") as f:
+            f.write(json.dumps(entry) + "\n")
+
+        print(f"[Scheduler] Logged daily equity: £{account['equity']}")
+
+    except Exception as e:
+        print(f"[Scheduler] Error logging equity: {e}")
