@@ -44,22 +44,40 @@ def raw_account():
 # WEBHOOK ENDPOINT
 # ---------------------------------------------------------
 
+import json
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     session.update_last_webhook()
 
-    # Dump EVERYTHING TradingView sends
-    raw_body = request.data.decode("utf-8", errors="ignore")
+    # Read raw body using the WSGI input stream directly
+    try:
+        raw_body = request.environ['wsgi.input'].read().decode('utf-8', errors='ignore')
+    except Exception as e:
+        raw_body = f"[ERROR reading raw body: {e}]"
+
     print("\n" + "="*60)
     print("[Webhook] RAW BODY RECEIVED FROM TRADINGVIEW:")
     print(raw_body)
     print("="*60 + "\n")
 
-    # Try to parse JSON normally first
-    data = request.get_json(force=True, silent=True)
+    # If raw_body is empty, return debug info
+    if not raw_body.strip():
+        return jsonify({
+            "status": "error",
+            "message": "TradingView sent an empty body",
+            "debug": "Check content-type and webhook message formatting"
+        }), 400
 
-    if not data:
-        print("[Webhook] JSON PARSE FAILED — RAW BODY ABOVE")
+    # Try to extract JSON from raw body
+    try:
+        json_start = raw_body.find("{")
+        json_end = raw_body.rfind("}") + 1
+        json_text = raw_body[json_start:json_end]
+
+        data = json.loads(json_text)
+    except Exception as e:
+        print("[Webhook] ERROR parsing JSON:", e)
         return jsonify({"status": "error", "message": "Invalid JSON"}), 400
 
     try:
