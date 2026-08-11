@@ -51,9 +51,8 @@ def webhook():
     raw_body = request.data.decode("utf-8", errors="ignore")
     print("[Webhook] RAW BODY:", raw_body)
 
-    # Try to extract JSON from the raw body
+    # Extract JSON block manually
     try:
-        # JSON is always the first {...} block
         json_start = raw_body.find("{")
         json_end = raw_body.rfind("}") + 1
         json_text = raw_body[json_start:json_end]
@@ -80,6 +79,7 @@ def webhook():
     except Exception as e:
         print("[Webhook] ERROR:", e)
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 
 
