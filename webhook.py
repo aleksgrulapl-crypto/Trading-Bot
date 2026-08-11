@@ -4,7 +4,6 @@ from dashboard import dashboard as dashboard_blueprint
 
 import session
 import order
-import utils
 from trade_log import load_log
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS
@@ -17,6 +16,10 @@ print("[Webhook] Starting scheduler...")
 start_scheduler()
 print("[Webhook] Scheduler started.")
 
+# ---------------------------------------------------------
+# RAW DEBUG ENDPOINTS
+# ---------------------------------------------------------
+
 @app.route("/raw")
 def raw_positions():
     return jsonify(session.fetch_positions_from(API_POSITIONS))
@@ -25,19 +28,31 @@ def raw_positions():
 def raw_account():
     return jsonify(session.request("GET", API_ACCOUNTS).json())
 
+# ---------------------------------------------------------
+# WEBHOOK ENDPOINT (FINAL RESTORED + STABLE)
+# ---------------------------------------------------------
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     session.update_last_webhook()
 
     raw = request.get_data(as_text=True)
-    if not raw.strip():
+
+    if not raw or not raw.strip():
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
-    if "|" in raw:
-        alert = parse_tradingview_alert(raw)
-    else:
-        data = request.get_json(force=True)
-        alert = parse_tradingview_alert(data)
+    try:
+        # RAW alert
+        if "|" in raw:
+            alert = parse_tradingview_alert(raw)
+
+        # JSON alert
+        else:
+            data = request.get_json(force=True)
+            alert = parse_tradingview_alert(data)
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
     ticker = alert["symbol"]
     action = alert["action"]
@@ -48,9 +63,16 @@ def webhook():
     epic_data = session.verify_epic(ticker)
     epic = epic_data.get("epic")
 
+    if not epic:
+        return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
+
     result = order.place_order(epic, action, size, sl, tp)
 
     return jsonify({"status": "ok", "result": result}), 200
+
+# ---------------------------------------------------------
+# DASHBOARD ROUTES
+# ---------------------------------------------------------
 
 @app.route("/")
 @app.route("/dashboard")
@@ -73,6 +95,10 @@ def dashboard():
         system_status=session.shared_state.get("system_status", {})
     )
 
+# ---------------------------------------------------------
+# CLOSE POSITION
+# ---------------------------------------------------------
+
 @app.route("/close/<position_id>", methods=["POST"])
 def close_position(position_id):
     auth.ensure_token()
@@ -81,6 +107,10 @@ def close_position(position_id):
     result = r.json()
     session.update_last_trade()
     return jsonify({"status": "ok", "result": result})
+
+# ---------------------------------------------------------
+# RUN APP
+# ---------------------------------------------------------
 
 import os
 

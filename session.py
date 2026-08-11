@@ -1,11 +1,12 @@
 # ============================
-# SESSION MODULE (FINAL CLEAN)
+# SESSION MODULE (RESTORED + MODERNISED)
 # ============================
 
 import requests
 from auth import auth
-from config import API_POSITIONS, API_ACCOUNT
+from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
 from utils import timestamp
+import report
 
 # Shared state for dashboard
 shared_state = {
@@ -33,7 +34,7 @@ def get_headers():
     }
 
 # ---------------------------------------------------------
-# REQUEST WRAPPER (CLEAN LOGGING)
+# REQUEST WRAPPER
 # ---------------------------------------------------------
 
 def request(method, url, json=None):
@@ -42,7 +43,6 @@ def request(method, url, json=None):
     try:
         response = auth.session.request(method, url, headers=headers, json=json)
 
-        # Only log errors
         if response.status_code >= 400:
             print(f"[ERROR] {method} {url} → {response.status_code}")
             print(f"[ERROR] Response: {response.text}")
@@ -54,7 +54,7 @@ def request(method, url, json=None):
         return None
 
 # ---------------------------------------------------------
-# GET POSITIONS (RAW)
+# GET POSITIONS
 # ---------------------------------------------------------
 
 def get_positions():
@@ -71,7 +71,7 @@ def get_positions():
         return []
 
 # ---------------------------------------------------------
-# GET ACCOUNT (RAW)
+# GET ACCOUNT
 # ---------------------------------------------------------
 
 def get_account():
@@ -88,7 +88,7 @@ def get_account():
         return {}
 
 # ---------------------------------------------------------
-# ENRICH POSITIONS (CORRECT PnL LOGIC)
+# ENRICH POSITIONS
 # ---------------------------------------------------------
 
 def enrich_positions(raw_positions):
@@ -98,7 +98,6 @@ def enrich_positions(raw_positions):
         pos = item["position"]
         market = item["market"]
 
-        # Correct PnL: use UPL (unrealised PnL)
         profit = pos.get("upl", 0)
 
         enriched.append({
@@ -143,29 +142,20 @@ def enrich_account(raw):
     }
 
 # ---------------------------------------------------------
-# EPIC LOOKUP (FINAL CLEAN VERSION)
+# EPIC LOOKUP (RESTORED)
 # ---------------------------------------------------------
 
-from config import EPIC_MAP, API_MARKET
-from auth import auth
-
 def verify_epic(symbol):
-    """
-    Resolves a ticker into an EPIC using:
-    1. Your EPIC_MAP (fast local mapping)
-    2. Capital.com /markets endpoint (fallback)
-    """
-
     symbol = symbol.upper()
 
-    # 1. Fast local mapping
+    # 1. Local mapping
     if symbol in EPIC_MAP:
         return {"epic": EPIC_MAP[symbol], "source": "local"}
 
-    # 2. Fallback: query Capital.com markets endpoint
+    # 2. API lookup
     try:
         url = f"{API_MARKET}/{symbol}"
-        r = auth.request("GET", url)
+        r = request("GET", url)
 
         if not r or r.status_code != 200:
             print(f"[EPIC] API lookup failed for {symbol}")
@@ -185,28 +175,27 @@ def verify_epic(symbol):
         return {"epic": None, "source": "exception"}
 
 # ---------------------------------------------------------
-# DAILY REPORT (RESTORED FROM WORKING COMMIT)
+# DAILY REPORT (RESTORED)
 # ---------------------------------------------------------
-
-import report
 
 def get_daily_report():
     try:
-        return report.get_daily_report()
+        report_data = report.get_daily_report()
+        shared_state["daily_report"] = report_data
+        return report_data
     except Exception as e:
         print(f"[REPORT] Failed to load daily report: {e}")
         return {}
 
-
 # ---------------------------------------------------------
-# UPDATE LAST TRADE TIMESTAMP
+# UPDATE LAST TRADE
 # ---------------------------------------------------------
 
 def update_last_trade():
     shared_state["system_status"]["last_trade"] = timestamp()
 
 # ---------------------------------------------------------
-# UPDATE LAST WEBHOOK TIMESTAMP
+# UPDATE LAST WEBHOOK
 # ---------------------------------------------------------
 
 def update_last_webhook():

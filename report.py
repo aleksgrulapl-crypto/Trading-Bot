@@ -1,5 +1,5 @@
 # ============================
-# DAILY REPORT MODULE (FINAL CLEAN)
+# DAILY REPORT MODULE (RESTORED + MODERNISED)
 # ============================
 
 import json
@@ -37,14 +37,23 @@ def save_daily_report(report):
 
 def filter_today_trades(trades):
     today = datetime.now().strftime("%Y-%m-%d")
-    return [t for t in trades if t["time"].startswith(today)]
+    safe = []
+
+    for t in trades:
+        try:
+            if t.get("time", "").startswith(today):
+                safe.append(t)
+        except:
+            continue
+
+    return safe
 
 # ---------------------------------------------------------
 # CLOSED PNL
 # ---------------------------------------------------------
 
 def calculate_closed_pnl(trades_today):
-    closed = [t for t in trades_today if t["side"] == "CLOSE"]
+    closed = [t for t in trades_today if t.get("side") == "CLOSE"]
     return sum(float(t.get("pnl", 0)) for t in closed)
 
 # ---------------------------------------------------------
@@ -52,12 +61,8 @@ def calculate_closed_pnl(trades_today):
 # ---------------------------------------------------------
 
 def calculate_open_pnl():
-    """
-    Uses enriched positions → correct PnL (upl).
-    """
     raw_positions = session.get_positions()
     enriched = session.enrich_positions(raw_positions)
-
     return sum(float(p.get("profit", 0)) for p in enriched)
 
 # ---------------------------------------------------------
@@ -65,7 +70,7 @@ def calculate_open_pnl():
 # ---------------------------------------------------------
 
 def calculate_win_rate(trades_today):
-    closed = [t for t in trades_today if t["side"] == "CLOSE"]
+    closed = [t for t in trades_today if t.get("side") == "CLOSE"]
     if not closed:
         return 0
     wins = sum(1 for t in closed if float(t.get("pnl", 0)) > 0)
@@ -76,14 +81,24 @@ def calculate_win_rate(trades_today):
 # ---------------------------------------------------------
 
 def best_and_worst_ticker(trades_today):
-    closed = [t for t in trades_today if t["side"] == "CLOSE"]
+    closed = [t for t in trades_today if t.get("side") == "CLOSE"]
     if not closed:
         return None, None
 
     pnl_by_ticker = {}
+
     for t in closed:
-        pnl_by_ticker.setdefault(t["ticker"], 0)
-        pnl_by_ticker[t["ticker"]] += float(t.get("pnl", 0))
+        ticker = t.get("ticker")
+        pnl = float(t.get("pnl", 0))
+
+        if not ticker:
+            continue
+
+        pnl_by_ticker.setdefault(ticker, 0)
+        pnl_by_ticker[ticker] += pnl
+
+    if not pnl_by_ticker:
+        return None, None
 
     best = max(pnl_by_ticker, key=pnl_by_ticker.get)
     worst = min(pnl_by_ticker, key=pnl_by_ticker.get)
@@ -99,19 +114,18 @@ def generate_daily_report():
     Creates a detailed daily report at 21:00 UK time.
     """
 
-    # Load all trades
-    all_trades = load_log()
+    try:
+        all_trades = load_log()
+    except:
+        all_trades = []
 
-    # Filter today's trades
     trades_today = filter_today_trades(all_trades)
 
-    # Metrics
     closed_pnl = calculate_closed_pnl(trades_today)
     open_pnl = calculate_open_pnl()
     win_rate = calculate_win_rate(trades_today)
     best_ticker, worst_ticker = best_and_worst_ticker(trades_today)
 
-    # Build report
     report = {
         "date": datetime.now().strftime("%Y-%m-%d"),
         "generated_at": timestamp(),
@@ -124,12 +138,13 @@ def generate_daily_report():
         "trades": trades_today
     }
 
-    # Save to file
     save_daily_report(report)
 
     # Update shared state
     session.shared_state["daily_report"] = report
     session.shared_state["trade_log"] = all_trades
+    session.shared_state["positions"] = session.enrich_positions(session.get_positions())
+    session.shared_state["account"] = session.enrich_account(session.get_account())
 
     print(f"[Daily Report] Generated report for {report['date']}")
     return report

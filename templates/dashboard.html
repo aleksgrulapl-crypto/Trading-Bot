@@ -18,27 +18,25 @@
 
         header {
             background-color: #161b22;
-            padding: 20px;
+            padding: 20px 30px;
             border-bottom: 1px solid #21262d;
-            text-align: center;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         header h1 {
             margin: 0;
-            font-size: 28px;
+            font-size: 26px;
+            font-weight: bold;
             color: #c9d1d9;
-        }
-
-        nav {
-            text-align: center;
-            margin-top: 10px;
         }
 
         nav a {
             color: #58a6ff;
             text-decoration: none;
             font-weight: bold;
-            margin: 0 10px;
+            margin-left: 20px;
         }
 
         nav a.logout {
@@ -46,25 +44,28 @@
         }
 
         #dashboard-content {
-            padding: 20px;
+            padding: 25px;
         }
 
         /* Loading indicator */
         #loading {
             text-align: center;
-            padding: 20px;
+            padding: 15px;
             color: #8b949e;
             display: none;
+            font-size: 14px;
         }
 
         /* Error banner */
         #error-banner {
             background: #3b0000;
             color: #ff6b6b;
-            padding: 10px;
+            padding: 12px;
             text-align: center;
             display: none;
-            margin-bottom: 10px;
+            margin: 10px 25px;
+            border-radius: 6px;
+            font-size: 14px;
         }
     </style>
 </head>

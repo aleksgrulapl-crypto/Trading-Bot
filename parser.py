@@ -1,8 +1,6 @@
 # ============================
-# TradingView Alert Parser (FULLY TOLERANT VERSION)
+# TradingView Alert Parser (RESTORED + MODERNISED)
 # ============================
-
-import session
 
 # ---------------------------------------------------------
 # MAIN ENTRY POINT
@@ -13,37 +11,26 @@ def parse_tradingview_alert(data):
     Accepts:
     - RAW string alerts
     - JSON alerts
-    - Alerts with extra fields
-    - Alerts with lowercase sl/tp
-    - Alerts missing quantity
-    - Alerts missing action (infers from payload)
     """
 
-    session.update_last_webhook()
+    # RAW alert
+    if isinstance(data, str):
+        return parse_raw_alert(data)
 
-    try:
-        # RAW alert (contains |)
-        if isinstance(data, str):
-            return tolerant_parse_raw(data)
+    # JSON alert
+    if isinstance(data, dict):
+        return parse_json_alert(data)
 
-        # JSON alert
-        if isinstance(data, dict):
-            return tolerant_parse_json(data)
-
-        raise ValueError("Unsupported alert format")
-
-    except Exception as e:
-        print(f"[PARSER ERROR] {e}")
-        raise ValueError("Invalid alert")
+    raise ValueError("Invalid alert format")
 
 
 # ---------------------------------------------------------
-# TOLERANT JSON PARSER
+# JSON ALERT PARSER (RESTORED)
 # ---------------------------------------------------------
 
-def tolerant_parse_json(data):
+def parse_json_alert(data):
     """
-    JSON alert format (tolerant):
+    JSON TradingView alert format:
     {
         "symbol": "NVDA",
         "action": "buy",
@@ -60,11 +47,9 @@ def tolerant_parse_json(data):
     if not payload_raw:
         raise ValueError("Missing payload")
 
-    payload = tolerant_parse_payload(payload_raw)
+    payload = parse_payload(payload_raw)
 
-    # Prefer direction from payload (more reliable)
-    action = payload.get("direction") or data.get("action", "").lower() or "buy"
-
+    action = data.get("action", "").lower() or payload["direction"]
     quantity = safe_float(data.get("quantity", 1))
 
     return {
@@ -77,19 +62,19 @@ def tolerant_parse_json(data):
 
 
 # ---------------------------------------------------------
-# TOLERANT RAW PARSER
+# RAW ALERT PARSER (RESTORED)
 # ---------------------------------------------------------
 
-def tolerant_parse_raw(raw: str):
+def parse_raw_alert(raw: str):
     """
-    RAW alert format (tolerant):
-    BUY|NVDA|AutoTrader15M|SL:123|TP:130|EMA:xxx|ST:xxx
+    RAW TradingView alert format:
+    BUY|NVDA|AutoTrader15M|SL:123.45|TP:130.22|EMA:xxx|ST:xxx
     """
 
-    parts = [p.strip() for p in raw.split("|") if p.strip()]
+    parts = raw.split("|")
 
-    if len(parts) < 2:
-        raise ValueError("Invalid raw alert")
+    if len(parts) < 4:
+        raise ValueError("Invalid raw alert format")
 
     direction = parts[0].lower()
     symbol = normalise_symbol(parts[1])
@@ -99,13 +84,13 @@ def tolerant_parse_raw(raw: str):
     tp = None
 
     for part in parts:
-        p = part.strip().upper()
+        part = part.strip()
 
-        if p.startswith("SL:"):
-            sl = safe_float(p.replace("SL:", "").strip())
+        if part.upper().startswith("SL:"):
+            sl = safe_float(part.replace("SL:", "").strip())
 
-        if p.startswith("TP:"):
-            tp = safe_float(p.replace("TP:", "").strip())
+        if part.upper().startswith("TP:"):
+            tp = safe_float(part.replace("TP:", "").strip())
 
     if sl is None or tp is None:
         raise ValueError("Missing SL/TP")
@@ -120,20 +105,19 @@ def tolerant_parse_raw(raw: str):
 
 
 # ---------------------------------------------------------
-# TOLERANT PAYLOAD PARSER
+# PAYLOAD PARSER (RESTORED)
 # ---------------------------------------------------------
 
-def tolerant_parse_payload(payload: str):
+def parse_payload(payload: str):
     """
-    Payload format (tolerant):
-    BUY|NVDA|SL:123|TP:130
-    BUY|NVDA|AutoTrader15M|SL:123|TP:130
+    Payload format:
+    BUY|NVDA|SL:123.45|TP:130.22
     """
 
-    parts = [p.strip() for p in payload.split("|") if p.strip()]
+    parts = payload.split("|")
 
-    if len(parts) < 2:
-        raise ValueError("Invalid payload")
+    if len(parts) < 4:
+        raise ValueError("Invalid payload format")
 
     direction = parts[0].lower()
     symbol = normalise_symbol(parts[1])
@@ -142,13 +126,13 @@ def tolerant_parse_payload(payload: str):
     tp = None
 
     for part in parts:
-        p = part.strip().upper()
+        part = part.strip()
 
-        if p.startswith("SL:"):
-            sl = safe_float(p.replace("SL:", "").strip())
+        if part.upper().startswith("SL:"):
+            sl = safe_float(part.replace("SL:", "").strip())
 
-        if p.startswith("TP:"):
-            tp = safe_float(p.replace("TP:", "").strip())
+        if part.upper().startswith("TP:"):
+            tp = safe_float(part.replace("TP:", "").strip())
 
     if sl is None or tp is None:
         raise ValueError("Missing SL/TP")
@@ -175,4 +159,4 @@ def safe_float(value):
     try:
         return float(value)
     except:
-        return None
+        raise ValueError("Invalid numeric value")

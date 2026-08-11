@@ -1,5 +1,5 @@
 # ============================
-# CLOSE POSITION MODULE (FINAL CLEAN)
+# CLOSE POSITION MODULE (RESTORED + MODERNISED)
 # ============================
 
 import session
@@ -11,17 +11,14 @@ from config import API_POSITIONS
 def close_position(position_id):
     """
     Close a position using Capital.com API + log closed trade.
-    Clean logging, correct PnL, correct bid/offer logic.
+    Restored behaviour from dd25e77 + modern improvements.
     """
 
-    # Ensure CST/XST are valid
     auth.ensure_token()
 
     try:
-        # Correct endpoint
         url = f"{API_POSITIONS}/{position_id}/close"
 
-        # Send close request
         response = session.request("POST", url, json={})
 
         if not response or response.status_code != 200:
@@ -35,7 +32,7 @@ def close_position(position_id):
         raw_positions = session.get_positions()
         enriched_positions = session.enrich_positions(raw_positions)
 
-        # Find closed position details
+        # Find closed position
         closed = None
         for p in enriched_positions:
             if str(p["id"]) == str(position_id):
@@ -44,6 +41,7 @@ def close_position(position_id):
 
         if not closed:
             print(f"[WARN] Closed position {position_id} not found in updated list.")
+            session.update_last_trade()
             return {
                 "status": "success",
                 "message": f"Position {position_id} closed (details unavailable)."
@@ -63,14 +61,23 @@ def close_position(position_id):
             timestamp=timestamp()
         )
 
-        # Clean confirmation
         print(f"[TRADE CLOSED] {ticker} @ {close_price} → PnL £{pnl}")
+
+        # Update shared state
+        session.shared_state["positions"] = enriched_positions
+        session.shared_state["account"] = session.enrich_account(session.get_account())
+        session.shared_state["trade_log"] = session.shared_state["trade_log"]  # already updated by log_close
+        session.shared_state["daily_report"] = session.get_daily_report()
 
         # Update system status
         session.update_last_trade()
 
         return {
             "status": "success",
+            "ticker": ticker,
+            "size": size,
+            "price": close_price,
+            "pnl": pnl,
             "message": f"Position {position_id} closed."
         }
 

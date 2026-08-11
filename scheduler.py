@@ -1,5 +1,5 @@
 # ============================
-# SCHEDULER MODULE (FINAL CLEAN)
+# SCHEDULER MODULE (RESTORED + MODERNISED)
 # ============================
 
 import threading
@@ -19,10 +19,6 @@ UK_TZ = pytz.timezone("Europe/London")
 # ---------------------------------------------------------
 
 def append_json_line(filename, entry):
-    """
-    Safely appends a JSON line to a log file.
-    Prevents corruption if the process is interrupted.
-    """
     try:
         with open(filename, "a") as f:
             f.write(json.dumps(entry) + "\n")
@@ -44,7 +40,6 @@ def log_available():
         }
 
         append_json_line("available_log.json", entry)
-
         print(f"[Scheduler] Logged available balance: £{entry['available']}")
 
     except Exception as e:
@@ -65,11 +60,22 @@ def log_equity():
         }
 
         append_json_line("equity_log.json", entry)
-
         print(f"[Scheduler] Logged daily equity: £{entry['equity']}")
 
     except Exception as e:
         print(f"[Scheduler] Error logging equity: {e}")
+
+# ---------------------------------------------------------
+# DAILY REPORT (RESTORED)
+# ---------------------------------------------------------
+
+def run_daily_report():
+    try:
+        report.generate_daily_report()
+        session.shared_state["daily_report"] = session.get_daily_report()
+        print("[Scheduler] Daily report generated.")
+    except Exception as e:
+        print(f"[Scheduler] Error generating daily report: {e}")
 
 # ---------------------------------------------------------
 # SCHEDULER CLASS
@@ -105,11 +111,6 @@ class Scheduler:
         thread.start()
 
     def run(self):
-        """
-        Main scheduler loop.
-        Checks every 30 seconds.
-        Prevents double-triggering by sleeping 60 seconds after a job.
-        """
         while self.running:
             now_uk = datetime.now(UK_TZ)
 
@@ -135,6 +136,9 @@ class Scheduler:
                             print(f"[Scheduler] Error running hourly job {job['func'].__name__}: {e}")
                         time.sleep(60)
 
+            # Update scheduler heartbeat
+            session.shared_state["system_status"]["last_scheduler"] = timestamp()
+
             time.sleep(30)
 
 # ---------------------------------------------------------
@@ -153,7 +157,7 @@ def start_scheduler():
     """
 
     # Daily report at 21:00 UK time
-    scheduler.add_daily_job(21, 0, report.generate_daily_report)
+    scheduler.add_daily_job(21, 0, run_daily_report)
 
     # Log equity at 21:00 UK time
     scheduler.add_daily_job(21, 0, log_equity)

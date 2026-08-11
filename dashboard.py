@@ -1,5 +1,5 @@
 # ============================
-# DASHBOARD MODULE (FINAL CLEAN)
+# DASHBOARD MODULE (RESTORED + MODERNISED)
 # ============================
 
 import json
@@ -50,7 +50,7 @@ def dashboard_logout():
     return resp
 
 # ---------------------------------------------------------
-# LOAD TREND LOGS
+# TREND LOGS
 # ---------------------------------------------------------
 
 def load_available_log():
@@ -82,23 +82,26 @@ def dashboard_home():
     # Enrich data
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
-
-    # Update shared state
-    session.shared_state["account"] = account
-    session.shared_state["positions"] = positions
-    session.shared_state["trade_log"] = load_log()
+    trade_log = load_log()
+    daily_report = session.get_daily_report()
 
     # Trend logs
     available_log = load_available_log()
     equity_log = load_equity_log()
+
+    # Update shared state
+    session.shared_state["account"] = account
+    session.shared_state["positions"] = positions
+    session.shared_state["trade_log"] = trade_log
+    session.shared_state["daily_report"] = daily_report
 
     return render_template(
         "dashboard.html",
         title=config.DASHBOARD_TITLE,
         account=account,
         positions=positions,
-        trade_log=session.shared_state["trade_log"],
-        daily_report=session.shared_state.get("daily_report", {}),
+        trade_log=trade_log,
+        daily_report=daily_report,
         system_status=session.shared_state.get("system_status", {}),
         available_log=available_log,
         equity_log=equity_log
@@ -117,10 +120,13 @@ def dashboard_data():
 
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
+    trade_log = load_log()
+    daily_report = session.get_daily_report()
 
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
-    session.shared_state["trade_log"] = load_log()
+    session.shared_state["trade_log"] = trade_log
+    session.shared_state["daily_report"] = daily_report
 
     available_log = load_available_log()
     equity_log = load_equity_log()
@@ -129,8 +135,8 @@ def dashboard_data():
         "dashboard_partial.html",
         account=account,
         positions=positions,
-        trade_log=session.shared_state["trade_log"],
-        daily_report=session.shared_state.get("daily_report", {}),
+        trade_log=trade_log,
+        daily_report=daily_report,
         system_status=session.shared_state.get("system_status", {}),
         available_log=available_log,
         equity_log=equity_log
@@ -149,7 +155,6 @@ def dashboard_close(position_id):
 
     close_position(position_id)
 
-    # Refresh state
     raw_positions = session.get_positions() or []
     raw_account = session.get_account() or {}
 
