@@ -39,26 +39,26 @@ def raw_account():
 def webhook():
     session.update_last_webhook()
 
+    # Always normalize raw input
     raw = request.get_data(as_text=True)
+    raw = raw.strip().replace("\n", "").replace("\r", "")
 
     print("[WEBHOOK] RAW:", raw)
 
-    if not raw or not raw.strip():
+    if not raw:
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
-    # Parse alert (JSON → raw → text)
+    # Try JSON first
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
     except:
+        # Fallback: treat as raw string
         try:
-            data = json.loads(raw)
-            alert = parse_tradingview_alert(data)
-        except:
-            try:
-                alert = parse_tradingview_alert(raw)
-            except:
-                return jsonify({"status": "error", "message": "Invalid alert"}), 200
+            alert = parse_tradingview_alert(raw)
+        except Exception as e:
+            print("[WEBHOOK] PARSE ERROR:", e)
+            return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
     ticker = alert["symbol"]
     action = alert["action"]
@@ -79,11 +79,11 @@ def webhook():
     account = session.get_account()
     available = account.get("available", 0)
 
-    # Calculate SL/TP from alert
+    # SL/TP from alert
     sl_price = alert.get("sl")
     tp_price = alert.get("tp")
 
-    # Sizing (NEW MODULE)
+    # Sizing
     size_info = calculate_size(
         available=available,
         entry_price=entry_price,
