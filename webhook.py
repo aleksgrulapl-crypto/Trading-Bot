@@ -39,7 +39,6 @@ def raw_account():
 def webhook():
     session.update_last_webhook()
 
-    # Always normalize raw input
     raw = request.get_data(as_text=True)
     raw = raw.strip().replace("\n", "").replace("\r", "")
 
@@ -48,17 +47,12 @@ def webhook():
     if not raw:
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
-    # Try JSON first
+    # ALWAYS parse raw alerts first
     try:
-        data = request.get_json(force=True)
-        alert = parse_tradingview_alert(data)
-    except:
-        # Fallback: treat as raw string
-        try:
-            alert = parse_tradingview_alert(raw)
-        except Exception as e:
-            print("[WEBHOOK] PARSE ERROR:", e)
-            return jsonify({"status": "error", "message": "Invalid alert"}), 200
+        alert = parse_tradingview_alert(raw)
+    except Exception as e:
+        print("[WEBHOOK] PARSE ERROR:", e)
+        return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
     ticker = alert["symbol"]
     action = alert["action"]
@@ -70,16 +64,15 @@ def webhook():
     if not epic:
         return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
 
-    # Get entry price from market data
+    # Market price
     entry_price = session.get_market_price(epic)
     if not entry_price:
         return jsonify({"status": "error", "message": "Entry price unavailable"}), 200
 
-    # Get available balance
+    # Account balance
     account = session.get_account()
     available = account.get("available", 0)
 
-    # SL/TP from alert
     sl_price = alert.get("sl")
     tp_price = alert.get("tp")
 
