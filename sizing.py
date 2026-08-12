@@ -1,97 +1,100 @@
 # ============================
-# POSITION SIZING MODULE (FINAL)
+# SIZING MODULE (FINAL CLEAN)
 # ============================
 
-from session import auth
-from config import (
-    API_POSITIONS,
-    API_ACCOUNTS,
-    API_MARKET,
-    EQUITY_PERCENT,
-    LEVERAGE,
-    SL_PERCENT,
-    TP_PERCENT,
-    MAX_POSITIONS_PER_TICKER
-)
+from config import RISK_PER_TRADE, LEVERAGE
+from utils import timestamp
 
-class PositionSizing:
+def calculate_size(available, entry_price, sl_price, tp_price, direction):
+    """
+    Returns a safe, validated position size.
+    Blocks trades when:
+    - available balance is negative
+    - entry price invalid
+    - SL/TP invalid
+    - calculated size is too small
+    """
 
-    @staticmethod
-    def get_available_balance():
-        r = auth.request("GET", API_ACCOUNTS)
+    # -----------------------------------------
+    # BLOCK NEGATIVE BALANCE
+    # -----------------------------------------
+    if available <= 0:
+        print("[SIZING] Blocked: available balance is negative.")
+        return {
+            "size": 0,
+            "blocked": True,
+            "reason": "negative_balance"
+        }
 
-        if r.status_code != 200:
-            raise Exception(f"Account fetch failed: {r.text}")
+    # -----------------------------------------
+    # VALIDATE ENTRY PRICE
+    # -----------------------------------------
+    if not entry_price or entry_price <= 0:
+        print("[SIZING] Blocked: invalid entry price.")
+        return {
+            "size": 0,
+            "blocked": True,
+            "reason": "invalid_entry"
+        }
 
-        data = r.json()
-        account = data["accounts"][0]
+    # -----------------------------------------
+    # VALIDATE SL/TP
+    # -----------------------------------------
+    if not sl_price or not tp_price:
+        print("[SIZING] Blocked: SL/TP missing.")
+        return {
+            "size": 0,
+            "blocked": True,
+            "reason": "missing_sl_tp"
+        }
 
-        if "balance" in account and "available" in account["balance"]:
-            return float(account["balance"]["available"])
+    # -----------------------------------------
+    # ALLOCATION
+    # -----------------------------------------
+    allocation = available * RISK_PER_TRADE
+    print(f"[SIZING] Allocation: {allocation}")
 
-        raise Exception("Available balance field missing in account JSON")
+    # -----------------------------------------
+    # LEVERAGE
+    # -----------------------------------------
+    print(f"[SIZING] Leverage: {LEVERAGE}")
 
-    @staticmethod
-    def count_positions(epic):
-        r = auth.request("GET", API_POSITIONS)
+    # -----------------------------------------
+    # RAW SIZE
+    # -----------------------------------------
+    raw_size = allocation / entry_price
+    print(f"[SIZING] Raw size: {raw_size}")
 
-        if r.status_code != 200:
-            raise Exception(f"Position count failed: {r.text}")
+    # -----------------------------------------
+    # BLOCK NEGATIVE SIZE
+    # -----------------------------------------
+    if raw_size <= 0:
+        print("[SIZING] Blocked: raw size is negative or zero.")
+        return {
+            "size": 0,
+            "blocked": True,
+            "reason": "negative_size"
+        }
 
-        positions = r.json().get("positions", [])
+    # -----------------------------------------
+    # MINIMUM SIZE CHECK
+    # -----------------------------------------
+    if raw_size < 0.1:
+        print("[SIZING] Blocked: size too small (<0.1).")
+        return {
+            "size": 0,
+            "blocked": True,
+            "reason": "too_small"
+        }
 
-        count = 0
-        for p in positions:
-            pos_epic = p.get("market", {}).get("epic")
-            if pos_epic and pos_epic.upper() == epic.upper():
-                count += 1
+    # -----------------------------------------
+    # FINAL SIZE
+    # -----------------------------------------
+    final_size = round(raw_size, 2)
+    print(f"[SIZING] Final size: {final_size}")
 
-        return count
-
-    @staticmethod
-    def get_entry_price(epic, side):
-        r = auth.request("GET", f"{API_MARKET}/{epic}")
-
-        snapshot = r.json().get("snapshot", {})
-
-        if side.lower() == "buy":
-            return float(snapshot.get("offer"))
-        else:
-            return float(snapshot.get("bid"))
-
-    @staticmethod
-    def calculate_size(epic, side):
-        if PositionSizing.count_positions(epic) >= MAX_POSITIONS_PER_TICKER:
-            print(f"[SIZING] Max positions reached for {epic}. Skipping trade.")
-            return None
-
-        available = PositionSizing.get_available_balance()
-        allocation = available * EQUITY_PERCENT
-
-        entry_price = PositionSizing.get_entry_price(epic, side)
-
-        exposure = allocation * LEVERAGE
-        raw_size = exposure / entry_price
-
-        print("[SIZING] Available:", available)
-        print("[SIZING] Allocation:", allocation)
-        print("[SIZING] Leverage:", LEVERAGE)
-        print("[SIZING] Entry price:", entry_price)
-        print("[SIZING] Raw size:", raw_size)
-
-        return round(raw_size, 2)
-
-    @staticmethod
-    def calculate_sl_tp(entry_price, size, allocation):
-        sl_cash = allocation * SL_PERCENT
-        tp_cash = allocation * TP_PERCENT
-
-        sl_price = entry_price - (sl_cash / size)
-        tp_price = entry_price + (tp_cash / size)
-
-        print("[RISK] SL cash:", sl_cash)
-        print("[RISK] TP cash:", tp_cash)
-        print("[RISK] SL price:", sl_price)
-        print("[RISK] TP price:", tp_price)
-
-        return round(sl_price, 2), round(tp_price, 2)
+    return {
+        "size": final_size,
+        "blocked": False,
+        "reason": None
+    }
