@@ -6,37 +6,54 @@ import os
 
 API_BASE = "https://api-capital.backend-capital.com"
 
-# --- AUTH ---
+# -----------------------------------------
+# AUTH & SESSION
+# -----------------------------------------
 API_LOGIN = f"{API_BASE}/api/v1/session"
 API_REFRESH = None   # CFD accounts do not support refresh tokens
 
-# --- ACCOUNT & BALANCE ---
+# -----------------------------------------
+# ACCOUNT & BALANCE
+# -----------------------------------------
 API_ACCOUNTS = f"{API_BASE}/api/v1/accounts"
 API_ACCOUNT = f"{API_BASE}/api/v1/accounts"
 
-# --- POSITIONS & MARKET DATA ---
+# -----------------------------------------
+# POSITIONS & MARKET DATA
+# -----------------------------------------
 API_POSITIONS = f"{API_BASE}/api/v1/positions"
 API_MARKET = f"{API_BASE}/api/v1/markets"
 
-# --- USER CREDENTIALS ---
+# -----------------------------------------
+# USER CREDENTIALS
+# -----------------------------------------
 CAPITAL_API_KEY = os.getenv("CAPITAL_API_KEY")
 CAPITAL_USERNAME = os.getenv("CAPITAL_USERNAME")
 CAPITAL_PASSWORD = os.getenv("CAPITAL_PASSWORD")
 
-# --- RISK SETTINGS ---
+# -----------------------------------------
+# RISK SETTINGS (FULLY UPDATED)
+# -----------------------------------------
+
+# Max positions per ticker
 MAX_POSITIONS_PER_TICKER = 3
 
-# 50% of available balance per trade
+# Fraction of available balance used per trade (required by sizing.py)
+RISK_PER_TRADE = 0.50   # 50%
+
+# Legacy equity percent (still used by some modules)
 EQUITY_PERCENT = 0.50
 
 # Leverage (Capital.com US stocks = 5:1)
 LEVERAGE = 5
 
-# Cash-based SL/TP (Option A)
+# Cash-based SL/TP (legacy mode)
 SL_PERCENT = 0.10   # 10% of allocated capital
 TP_PERCENT = 0.20   # 20% of allocated capital
 
-# --- TICKER SETTINGS ---
+# -----------------------------------------
+# TICKER SETTINGS
+# -----------------------------------------
 TICKER_SETTINGS = {
     "NVDA": {"min_size": 0.1},
     "TSLA": {"min_size": 0.1},
@@ -57,7 +74,9 @@ TICKER_SETTINGS = {
     "PLUG": {"min_size": 0.1},
 }
 
-# --- DASHBOARD SETTINGS ---
+# -----------------------------------------
+# DASHBOARD SETTINGS
+# -----------------------------------------
 DASHBOARD_TITLE = "AG Capital Trader"
 DASHBOARD_PASSWORD = "Killen123%"
 TIMEZONE = "Europe/London"
@@ -70,7 +89,9 @@ TRADE_LOG_FILE = "/tmp/trade_log.json"
 DAILY_REPORT_FILE = "/tmp/daily_report.json"
 CACHE_TTL_SECONDS = 10
 
-# --- EPIC MAPPING ---
+# -----------------------------------------
+# EPIC MAPPING (RAW TICKERS)
+# -----------------------------------------
 EPIC_MAP = {
     "NVDA": "NVDA",
     "MU": "MU",
