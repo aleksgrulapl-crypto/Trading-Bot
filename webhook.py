@@ -41,6 +41,8 @@ def webhook():
 
     raw = request.get_data(as_text=True)
 
+    print("[WEBHOOK] RAW:", raw)
+
     if not raw or not raw.strip():
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
