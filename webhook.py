@@ -10,7 +10,7 @@ from trade_log import load_log
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS, EQUITY_PERCENT
 from parser import parse_tradingview_alert
-from sizing import PositionSizing
+from sizing import calculate_size
 
 app = Flask(__name__)
 app.register_blueprint(dashboard_blueprint)
@@ -44,10 +44,10 @@ def webhook():
     if not raw or not raw.strip():
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
+    # Parse alert (JSON → raw → text)
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
-
     except:
         try:
             data = json.loads(raw)
@@ -61,26 +61,45 @@ def webhook():
     ticker = alert["symbol"]
     action = alert["action"]
 
+    # EPIC lookup
     epic_data = session.verify_epic(ticker)
     epic = epic_data.get("epic")
 
     if not epic:
         return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
 
-    entry_price = PositionSizing.get_entry_price(epic, action)
+    # Get entry price from market data
+    entry_price = session.get_market_price(epic)
+    if not entry_price:
+        return jsonify({"status": "error", "message": "Entry price unavailable"}), 200
 
-    size = PositionSizing.calculate_size(epic, action)
-    if size is None:
-        return jsonify({"status": "skipped", "message": "Max positions reached"}), 200
+    # Get available balance
+    account = session.get_account()
+    available = account.get("available", 0)
 
-    available = PositionSizing.get_available_balance()
-    allocation = available * EQUITY_PERCENT
+    # Calculate SL/TP from alert
+    sl_price = alert.get("sl")
+    tp_price = alert.get("tp")
 
-    sl_price, tp_price = PositionSizing.calculate_sl_tp(entry_price, size, allocation)
+    # Sizing (NEW MODULE)
+    size_info = calculate_size(
+        available=available,
+        entry_price=entry_price,
+        sl_price=sl_price,
+        tp_price=tp_price,
+        direction=action
+    )
+
+    if size_info["blocked"]:
+        print(f"[ORDER] Skipped due to sizing block: {size_info['reason']}")
+        return jsonify({"status": "blocked", "reason": size_info["reason"]}), 200
+
+    size = size_info["size"]
 
     print("[WEBHOOK] Final SL:", sl_price)
     print("[WEBHOOK] Final TP:", tp_price)
 
+    # Place order
     result = order.place_order(epic, action, size, sl_price, tp_price)
 
     session.update_last_trade()
