@@ -13,6 +13,7 @@ from parser import parse_tradingview_alert
 from sizing import calculate_size
 
 app = Flask(__name__)
+app.url_map.strict_slashes = False
 app.register_blueprint(dashboard_blueprint)
 
 print("[Webhook] Starting scheduler...")
@@ -62,11 +63,13 @@ def webhook():
     epic = epic_data.get("epic")
 
     if not epic:
+        print("[WEBHOOK] EPIC lookup failed:", ticker)
         return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
 
     # Market price
     entry_price = session.get_market_price(epic)
     if not entry_price:
+        print("[WEBHOOK] Entry price unavailable for:", epic)
         return jsonify({"status": "error", "message": "Entry price unavailable"}), 200
 
     # Account balance

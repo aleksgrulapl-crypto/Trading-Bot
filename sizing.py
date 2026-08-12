@@ -1,8 +1,8 @@
 # ============================
-# SIZING MODULE (FINAL CLEAN)
+# SIZING MODULE (FINAL — RESTORED PRE‑TIMEFRAME LOGIC)
 # ============================
 
-from config import RISK_PER_TRADE, LEVERAGE
+from config import EQUITY_PERCENT, LEVERAGE
 from utils import timestamp
 
 def calculate_size(available, entry_price, sl_price, tp_price, direction):
@@ -40,7 +40,7 @@ def calculate_size(available, entry_price, sl_price, tp_price, direction):
     # -----------------------------------------
     # VALIDATE SL/TP
     # -----------------------------------------
-    if not sl_price or not tp_price:
+    if sl_price is None or tp_price is None:
         print("[SIZING] Blocked: SL/TP missing.")
         return {
             "size": 0,
@@ -49,20 +49,21 @@ def calculate_size(available, entry_price, sl_price, tp_price, direction):
         }
 
     # -----------------------------------------
-    # ALLOCATION
+    # ALLOCATION (RESTORED)
     # -----------------------------------------
-    allocation = available * RISK_PER_TRADE
+    allocation = available * EQUITY_PERCENT
     print(f"[SIZING] Allocation: {allocation}")
 
     # -----------------------------------------
-    # LEVERAGE
+    # LEVERAGE (RESTORED)
     # -----------------------------------------
-    print(f"[SIZING] Leverage: {LEVERAGE}")
+    exposure = allocation * LEVERAGE
+    print(f"[SIZING] Exposure (allocation * leverage): {exposure}")
 
     # -----------------------------------------
-    # RAW SIZE
+    # RAW SIZE (RESTORED)
     # -----------------------------------------
-    raw_size = allocation / entry_price
+    raw_size = exposure / entry_price
     print(f"[SIZING] Raw size: {raw_size}")
 
     # -----------------------------------------

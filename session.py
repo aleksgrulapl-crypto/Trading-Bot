@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (FINAL CLEAN + TIMEFRAME SUPPORT)
+# SESSION MODULE (FINAL — NO TIMEFRAME)
 # ============================
 
 import requests
@@ -50,6 +50,19 @@ def request(method, url, json=None):
         return None
 
 # ---------------------------------------------------------
+# FETCH POSITIONS (RAW)
+# ---------------------------------------------------------
+
+def fetch_positions_from(url):
+    response = request("GET", url)
+    if not response or response.status_code != 200:
+        return []
+    try:
+        return response.json()
+    except:
+        return []
+
+# ---------------------------------------------------------
 # GET POSITIONS
 # ---------------------------------------------------------
 
@@ -80,15 +93,10 @@ def get_account():
         return {}
 
 # ---------------------------------------------------------
-# MARKET PRICE LOOKUP (NEW — REQUIRED BY WEBHOOK)
+# MARKET PRICE LOOKUP
 # ---------------------------------------------------------
 
 def get_market_price(epic):
-    """
-    Fetches the current market price for the given EPIC.
-    Returns midpoint (bid+offer)/2 or fallback values.
-    """
-
     try:
         r = request("GET", f"{API_MARKET}/{epic}")
         if not r or r.status_code != 200:
@@ -122,7 +130,7 @@ def get_market_price(epic):
         return None
 
 # ---------------------------------------------------------
-# ENRICH POSITIONS (NOW INCLUDES TIMEFRAME)
+# ENRICH POSITIONS (NO TIMEFRAME)
 # ---------------------------------------------------------
 
 def enrich_positions(raw_positions):
@@ -145,24 +153,10 @@ def enrich_positions(raw_positions):
             "profit": round(profit, 2),
             "stopLevel": pos.get("stopLevel"),
             "limitLevel": pos.get("profitLevel"),
-            "currency": pos.get("currency"),
-
-            # NEW: timeframe support
-            "timeframe": extract_timeframe_from_log(market.get("symbol"))
+            "currency": pos.get("currency")
         })
 
     return enriched
-
-# ---------------------------------------------------------
-# TIMEFRAME LOOKUP FROM TRADE LOG
-# ---------------------------------------------------------
-
-def extract_timeframe_from_log(ticker):
-    log = load_log()
-    for entry in reversed(log):
-        if entry.get("ticker") == ticker and entry.get("timeframe"):
-            return entry.get("timeframe")
-    return None
 
 # ---------------------------------------------------------
 # ENRICH ACCOUNT
@@ -228,8 +222,7 @@ def get_daily_report():
         report_data = report.get_daily_report()
         shared_state["daily_report"] = report_data
         return report_data
-    except Exception as e:
-        # Silenced spam
+    except Exception:
         return {}
 
 # ---------------------------------------------------------
