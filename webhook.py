@@ -1,15 +1,11 @@
-# ============================
-# WEBHOOK MODULE (FINAL RESTORED + ROUTING FIX)
-# ============================
-
 from flask import Flask, request, jsonify, render_template
-from scheduler import start_scheduler
-from dashboard import dashboard as dashboard_blueprint
-
-import json
 import time
+import os
+
 import session
 import order
+from scheduler import start_scheduler
+from dashboard import dashboard as dashboard_blueprint
 from trade_log import load_log
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS
@@ -36,7 +32,6 @@ def webhook():
         print("[WEBHOOK] ERROR: Empty body received")
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
-    # Parse raw alert
     try:
         alert = parse_tradingview_alert(raw)
     except Exception as e:
@@ -48,7 +43,6 @@ def webhook():
     sl_price = alert.get("sl")
     tp_price = alert.get("tp")
 
-    # EPIC lookup
     epic_data = session.verify_epic(ticker)
     epic = epic_data.get("epic")
 
@@ -56,17 +50,14 @@ def webhook():
         print("[WEBHOOK] EPIC lookup failed:", ticker)
         return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
 
-    # Market price
     entry_price = session.get_market_price(epic)
     if not entry_price:
         print("[WEBHOOK] Entry price unavailable for:", epic)
         return jsonify({"status": "error", "message": "Entry price unavailable"}), 200
 
-    # Account balance
     account = session.get_account()
     available = account.get("available", 0)
 
-    # Sizing
     size_info = calculate_size(
         available=available,
         entry_price=entry_price,
@@ -85,7 +76,6 @@ def webhook():
     print("[WEBHOOK] Final TP:", tp_price)
     print("[WEBHOOK] Final SIZE:", size)
 
-    # Place order
     result = order.place_order(epic, action, size, sl_price, tp_price)
 
     session.update_last_trade()
@@ -93,7 +83,7 @@ def webhook():
     return jsonify({"status": "ok", "result": result}), 200
 
 # ---------------------------------------------------------
-# REGISTER DASHBOARD AFTER WEBHOOK (CRITICAL)
+# REGISTER DASHBOARD AFTER WEBHOOK
 # ---------------------------------------------------------
 
 app.register_blueprint(dashboard_blueprint)
@@ -157,8 +147,6 @@ def close_position(position_id):
 print("[Webhook] Starting scheduler...")
 start_scheduler()
 print("[Webhook] Scheduler started.")
-
-import os
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
