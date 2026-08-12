@@ -1,3 +1,7 @@
+# ============================
+# WEBHOOK MODULE (FINAL RESTORED + ROUTING FIX)
+# ============================
+
 from flask import Flask, request, jsonify, render_template
 from scheduler import start_scheduler
 from dashboard import dashboard as dashboard_blueprint
@@ -8,32 +12,15 @@ import session
 import order
 from trade_log import load_log
 from auth import auth
-from config import API_POSITIONS, API_ACCOUNTS, EQUITY_PERCENT
+from config import API_POSITIONS, API_ACCOUNTS
 from parser import parse_tradingview_alert
 from sizing import calculate_size
 
 app = Flask(__name__)
 app.url_map.strict_slashes = False
-app.register_blueprint(dashboard_blueprint)
-
-print("[Webhook] Starting scheduler...")
-start_scheduler()
-print("[Webhook] Scheduler started.")
 
 # ---------------------------------------------------------
-# RAW DEBUG ENDPOINTS
-# ---------------------------------------------------------
-
-@app.route("/raw")
-def raw_positions():
-    return jsonify(session.fetch_positions_from(API_POSITIONS))
-
-@app.route("/raw/account")
-def raw_account():
-    return jsonify(session.request("GET", API_ACCOUNTS).json())
-
-# ---------------------------------------------------------
-# WEBHOOK ENDPOINT
+# WEBHOOK ENDPOINT (REGISTER FIRST — CRITICAL)
 # ---------------------------------------------------------
 
 @app.route("/webhook", methods=["POST"])
@@ -46,9 +33,10 @@ def webhook():
     print("[WEBHOOK] RAW:", raw)
 
     if not raw:
+        print("[WEBHOOK] ERROR: Empty body received")
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
-    # ALWAYS parse raw alerts first
+    # Parse raw alert
     try:
         alert = parse_tradingview_alert(raw)
     except Exception as e:
@@ -57,6 +45,8 @@ def webhook():
 
     ticker = alert["symbol"]
     action = alert["action"]
+    sl_price = alert.get("sl")
+    tp_price = alert.get("tp")
 
     # EPIC lookup
     epic_data = session.verify_epic(ticker)
@@ -76,9 +66,6 @@ def webhook():
     account = session.get_account()
     available = account.get("available", 0)
 
-    sl_price = alert.get("sl")
-    tp_price = alert.get("tp")
-
     # Sizing
     size_info = calculate_size(
         available=available,
@@ -89,13 +76,14 @@ def webhook():
     )
 
     if size_info["blocked"]:
-        print(f"[ORDER] Skipped due to sizing block: {size_info['reason']}")
+        print(f"[WEBHOOK] SIZING BLOCKED: {size_info['reason']}")
         return jsonify({"status": "blocked", "reason": size_info["reason"]}), 200
 
     size = size_info["size"]
 
     print("[WEBHOOK] Final SL:", sl_price)
     print("[WEBHOOK] Final TP:", tp_price)
+    print("[WEBHOOK] Final SIZE:", size)
 
     # Place order
     result = order.place_order(epic, action, size, sl_price, tp_price)
@@ -103,6 +91,24 @@ def webhook():
     session.update_last_trade()
 
     return jsonify({"status": "ok", "result": result}), 200
+
+# ---------------------------------------------------------
+# REGISTER DASHBOARD AFTER WEBHOOK (CRITICAL)
+# ---------------------------------------------------------
+
+app.register_blueprint(dashboard_blueprint)
+
+# ---------------------------------------------------------
+# RAW DEBUG ENDPOINTS
+# ---------------------------------------------------------
+
+@app.route("/raw")
+def raw_positions():
+    return jsonify(session.fetch_positions_from(API_POSITIONS))
+
+@app.route("/raw/account")
+def raw_account():
+    return jsonify(session.request("GET", API_ACCOUNTS).json())
 
 # ---------------------------------------------------------
 # DASHBOARD ROUTE
@@ -145,8 +151,12 @@ def close_position(position_id):
     return jsonify({"status": "ok", "result": result})
 
 # ---------------------------------------------------------
-# RUN APP
+# START SCHEDULER + RUN APP
 # ---------------------------------------------------------
+
+print("[Webhook] Starting scheduler...")
+start_scheduler()
+print("[Webhook] Scheduler started.")
 
 import os
 
