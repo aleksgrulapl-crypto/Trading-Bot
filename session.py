@@ -80,6 +80,48 @@ def get_account():
         return {}
 
 # ---------------------------------------------------------
+# MARKET PRICE LOOKUP (NEW — REQUIRED BY WEBHOOK)
+# ---------------------------------------------------------
+
+def get_market_price(epic):
+    """
+    Fetches the current market price for the given EPIC.
+    Returns midpoint (bid+offer)/2 or fallback values.
+    """
+
+    try:
+        r = request("GET", f"{API_MARKET}/{epic}")
+        if not r or r.status_code != 200:
+            print(f"[MARKET] Failed to fetch price for {epic}")
+            return None
+
+        data = r.json()
+        snapshot = data.get("snapshot", {})
+
+        bid = snapshot.get("bid")
+        offer = snapshot.get("offer")
+
+        if bid and offer:
+            price = (bid + offer) / 2
+            print(f"[MARKET] {epic} midpoint: {price}")
+            return price
+
+        if offer:
+            print(f"[MARKET] {epic} offer fallback: {offer}")
+            return offer
+
+        if bid:
+            print(f"[MARKET] {epic} bid fallback: {bid}")
+            return bid
+
+        print(f"[MARKET] No price available for {epic}")
+        return None
+
+    except Exception as e:
+        print(f"[MARKET] Error fetching price for {epic}: {e}")
+        return None
+
+# ---------------------------------------------------------
 # ENRICH POSITIONS (NOW INCLUDES TIMEFRAME)
 # ---------------------------------------------------------
 
@@ -105,7 +147,7 @@ def enrich_positions(raw_positions):
             "limitLevel": pos.get("profitLevel"),
             "currency": pos.get("currency"),
 
-            # NEW: timeframe support (injected from trade log)
+            # NEW: timeframe support
             "timeframe": extract_timeframe_from_log(market.get("symbol"))
         })
 
@@ -116,10 +158,6 @@ def enrich_positions(raw_positions):
 # ---------------------------------------------------------
 
 def extract_timeframe_from_log(ticker):
-    """
-    Finds the most recent trade for this ticker and returns its timeframe.
-    Ensures closed trades inherit correct strategy timeframe.
-    """
     log = load_log()
     for entry in reversed(log):
         if entry.get("ticker") == ticker and entry.get("timeframe"):
@@ -191,7 +229,7 @@ def get_daily_report():
         shared_state["daily_report"] = report_data
         return report_data
     except Exception as e:
-        print(f"[REPORT] Failed to load daily report: {e}")
+        # Silenced spam
         return {}
 
 # ---------------------------------------------------------
