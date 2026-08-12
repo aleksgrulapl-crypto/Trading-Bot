@@ -1,8 +1,14 @@
 # ============================
-# TradingView Alert Parser (FINAL)
+# TradingView Alert Parser (CLEAN + TIMEFRAME TAG SUPPORT)
 # ============================
 
 def parse_tradingview_alert(data):
+    """
+    Accepts:
+    - Raw TradingView alert string: "BUY|NVDA|AutoTrader5M|SL:123|TP:130"
+    - JSON TradingView alert dict: {"symbol": "NVDA", "action": "buy", "payload": "..."}
+    """
+
     if isinstance(data, str):
         return parse_raw_alert(data)
 
@@ -12,6 +18,10 @@ def parse_tradingview_alert(data):
     raise ValueError("Invalid alert format")
 
 
+# ============================
+# JSON ALERT PARSER
+# ============================
+
 def parse_json_alert(data):
     symbol = normalise_symbol(data.get("symbol"))
     if not symbol:
@@ -20,12 +30,14 @@ def parse_json_alert(data):
     payload_raw = data.get("payload")
     sl = None
     tp = None
+    timeframe = None
 
     if payload_raw:
         payload = parse_payload(payload_raw)
         sl = payload["sl"]
         tp = payload["tp"]
         direction = payload["direction"]
+        timeframe = payload.get("timeframe")
     else:
         direction = data.get("action", "").lower()
 
@@ -36,16 +48,30 @@ def parse_json_alert(data):
         "action": direction,
         "quantity": quantity,
         "sl": sl,
-        "tp": tp
+        "tp": tp,
+        "timeframe": timeframe
     }
 
 
+# ============================
+# RAW ALERT PARSER
+# ============================
+
 def parse_raw_alert(raw: str):
+    """
+    Expected clean format:
+    BUY|NVDA|AutoTrader5M|SL:123|TP:130
+    SELL|MSFT|AutoTrader30M|SL:321|TP:300
+    """
+
     parts = raw.split("|")
+
+    if len(parts) < 3:
+        raise ValueError(f"Invalid raw alert format: {raw}")
 
     direction = parts[0].lower()
     symbol = normalise_symbol(parts[1])
-    quantity = 1
+    timeframe = parts[2] if parts[2].startswith("AutoTrader") else None
 
     sl = None
     tp = None
@@ -62,17 +88,31 @@ def parse_raw_alert(raw: str):
     return {
         "symbol": symbol,
         "action": direction,
-        "quantity": quantity,
+        "quantity": 1,
         "sl": sl,
-        "tp": tp
+        "tp": tp,
+        "timeframe": timeframe
     }
 
 
+# ============================
+# PAYLOAD PARSER (JSON alerts)
+# ============================
+
 def parse_payload(payload: str):
+    """
+    Expected clean format:
+    BUY|NVDA|AutoTrader5M|SL:123|TP:130
+    """
+
     parts = payload.split("|")
+
+    if len(parts) < 3:
+        raise ValueError(f"Invalid payload format: {payload}")
 
     direction = parts[0].lower()
     symbol = normalise_symbol(parts[1])
+    timeframe = parts[2] if parts[2].startswith("AutoTrader") else None
 
     sl = None
     tp = None
@@ -90,9 +130,14 @@ def parse_payload(payload: str):
         "direction": direction,
         "symbol": symbol,
         "sl": sl,
-        "tp": tp
+        "tp": tp,
+        "timeframe": timeframe
     }
 
+
+# ============================
+# HELPERS
+# ============================
 
 def normalise_symbol(symbol: str):
     if not symbol:
@@ -104,4 +149,4 @@ def safe_float(value):
     try:
         return float(value)
     except:
-        raise ValueError("Invalid numeric value")
+        raise ValueError(f"Invalid numeric value: {value}")

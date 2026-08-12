@@ -1,5 +1,5 @@
 # ============================
-# TRADE LOG MODULE (FINAL CLEAN)
+# TRADE LOG MODULE (FINAL CLEAN + TIMEFRAME SUPPORT)
 # ============================
 
 import json
@@ -51,20 +51,23 @@ def save_log(log):
 # LOG OPEN TRADE
 # ---------------------------------------------------------
 
-def log_trade(ticker, side, size, price, pnl=None, timestamp=None):
+def log_trade(ticker, side, size, price, timestamp=None, timeframe=None):
     """
     Logs an OPEN trade.
     pnl = None for open trades.
+    timeframe = AutoTrader5M / AutoTrader15M / AutoTrader30M / AutoTrader1H
     """
     log = load_log()
 
     entry = {
         "time": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "ticker": ticker,
-        "side": side.upper(),
+        "side": side.upper(),          # BUY or SELL
         "size": float(size),
-        "price": float(price),
-        "pnl": pnl  # None for open trades
+        "entry_price": float(price),   # renamed for clarity
+        "exit_price": None,            # open trades have no exit yet
+        "pnl": None,                   # open trades have no PnL yet
+        "timeframe": timeframe         # NEW: strategy timeframe tag
     }
 
     log.append(entry)
@@ -75,7 +78,7 @@ def log_trade(ticker, side, size, price, pnl=None, timestamp=None):
 # LOG CLOSED TRADE
 # ---------------------------------------------------------
 
-def log_close(ticker, size, close_price, pnl, timestamp=None):
+def log_close(ticker, size, close_price, pnl, timestamp=None, timeframe=None):
     """
     Logs a CLOSED trade with final PnL.
     """
@@ -86,8 +89,10 @@ def log_close(ticker, size, close_price, pnl, timestamp=None):
         "ticker": ticker,
         "side": "CLOSE",
         "size": float(size),
-        "price": float(close_price),
-        "pnl": float(pnl)
+        "entry_price": None,           # closed trades do not need entry price here
+        "exit_price": float(close_price),
+        "pnl": float(pnl),
+        "timeframe": timeframe         # NEW: strategy timeframe tag
     }
 
     log.append(entry)

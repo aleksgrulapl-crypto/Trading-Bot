@@ -1,5 +1,5 @@
 # ============================
-# CLOSE POSITION MODULE (RESTORED + MODERNISED)
+# CLOSE POSITION MODULE (FINAL CLEAN + TIMEFRAME SUPPORT)
 # ============================
 
 import session
@@ -8,17 +8,24 @@ from trade_log import log_close
 from utils import timestamp
 from config import API_POSITIONS
 
+
 def close_position(position_id):
     """
     Close a position using Capital.com API + log closed trade.
-    Restored behaviour from dd25e77 + modern improvements.
+    Includes:
+    - Correct exit price
+    - Correct PnL
+    - Timeframe tagging
+    - Dashboard state refresh
     """
 
     auth.ensure_token()
 
     try:
+        # -----------------------------
+        # Send close request
+        # -----------------------------
         url = f"{API_POSITIONS}/{position_id}/close"
-
         response = session.request("POST", url, json={})
 
         if not response or response.status_code != 200:
@@ -28,11 +35,15 @@ def close_position(position_id):
                 "message": f"Failed to close position: {response.text if response else 'No response'}"
             }
 
+        # -----------------------------
         # Fetch updated positions
+        # -----------------------------
         raw_positions = session.get_positions()
         enriched_positions = session.enrich_positions(raw_positions)
 
+        # -----------------------------
         # Find closed position
+        # -----------------------------
         closed = None
         for p in enriched_positions:
             if str(p["id"]) == str(position_id):
@@ -52,24 +63,36 @@ def close_position(position_id):
         close_price = closed["current_price"]
         pnl = closed["profit"]
 
+        # -----------------------------
+        # Extract timeframe (NEW)
+        # -----------------------------
+        timeframe = closed.get("timeframe")  # enriched_positions should include this
+
+        # -----------------------------
         # Log closed trade
+        # -----------------------------
         log_close(
             ticker=ticker,
             size=size,
             close_price=close_price,
             pnl=pnl,
-            timestamp=timestamp()
+            timestamp=timestamp(),
+            timeframe=timeframe
         )
 
         print(f"[TRADE CLOSED] {ticker} @ {close_price} → PnL £{pnl}")
 
-        # Update shared state
+        # -----------------------------
+        # Update shared dashboard state
+        # -----------------------------
         session.shared_state["positions"] = enriched_positions
         session.shared_state["account"] = session.enrich_account(session.get_account())
-        session.shared_state["trade_log"] = session.shared_state["trade_log"]  # already updated by log_close
+        session.shared_state["trade_log"] = session.shared_state["trade_log"]  # already updated
         session.shared_state["daily_report"] = session.get_daily_report()
 
+        # -----------------------------
         # Update system status
+        # -----------------------------
         session.update_last_trade()
 
         return {
@@ -78,6 +101,7 @@ def close_position(position_id):
             "size": size,
             "price": close_price,
             "pnl": pnl,
+            "timeframe": timeframe,
             "message": f"Position {position_id} closed."
         }
 

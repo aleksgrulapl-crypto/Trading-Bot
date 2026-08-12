@@ -28,24 +28,6 @@
 
 
 <!-- ============================
-     AVAILABLE BALANCE TREND
-============================= -->
-<div class="section card">
-    <h2 class="section-title">Available Balance Trend</h2>
-    <canvas id="availableChart"></canvas>
-</div>
-
-
-<!-- ============================
-     EQUITY CURVE
-============================= -->
-<div class="section card">
-    <h2 class="section-title">Equity Curve</h2>
-    <canvas id="equityChart"></canvas>
-</div>
-
-
-<!-- ============================
      OPEN POSITIONS (CARD VIEW)
 ============================= -->
 <div class="section card">
@@ -62,6 +44,7 @@
                 </div>
 
                 <div class="pos-body">
+                    <div><strong>Timeframe:</strong> {{ p.timeframe or "N/A" }}</div>
                     <div><strong>Size:</strong> {{ p.size }}</div>
                     <div><strong>Entry:</strong> £{{ p.price }}</div>
                     <div><strong>Current:</strong> £{{ p.current_price }}</div>
@@ -93,7 +76,7 @@
 
 
 <!-- ============================
-     TRADE LOG
+     TRADE LOG (MODERNISED)
 ============================= -->
 <div class="section card">
     <h2 class="section-title">Trade Log</h2>
@@ -106,8 +89,10 @@
                 <th>Ticker</th>
                 <th>Side</th>
                 <th>Size</th>
-                <th>Price</th>
+                <th>Entry</th>
+                <th>Exit</th>
                 <th>PnL</th>
+                <th>Timeframe</th>
             </tr>
         </thead>
 
@@ -119,7 +104,22 @@
             <td>{{ t.ticker }}</td>
             <td>{{ t.side }}</td>
             <td>{{ t.size }}</td>
-            <td>{{ t.price }}</td>
+
+            <td>
+                {% if t.entry_price %}
+                    £{{ t.entry_price }}
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+
+            <td>
+                {% if t.exit_price %}
+                    £{{ t.exit_price }}
+                {% else %}
+                    -
+                {% endif %}
+            </td>
 
             <td>
                 {% if t.side == "CLOSE" %}
@@ -130,6 +130,8 @@
                     -
                 {% endif %}
             </td>
+
+            <td>{{ t.timeframe or "N/A" }}</td>
         </tr>
         {% endfor %}
         </tbody>
