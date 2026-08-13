@@ -1,7 +1,3 @@
-# ============================
-# WEBHOOK MODULE (RESTORED + UPDATED + FIXED)
-# ============================
-
 from flask import Flask, request, jsonify, render_template
 import json
 import time
@@ -12,7 +8,7 @@ from sizing import calculate_size
 from order import place_order
 from trade_log import load_log
 from auth import auth
-from config import API_POSITIONS, API_ACCOUNTS
+from config import API_POSITIONS, API_ACCOUNTS, API_MARKET
 from dashboard import dashboard as dashboard_blueprint
 from scheduler import start_scheduler
 
@@ -39,17 +35,14 @@ def webhook():
     # PARSE ALERT (supports raw + JSON)
     # ---------------------------------------------------------
     try:
-        # Try JSON first
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
     except:
         try:
-            # Try JSON via raw
             data = json.loads(raw)
             alert = parse_tradingview_alert(data)
         except:
             try:
-                # Try raw string
                 alert = parse_tradingview_alert(raw)
             except Exception as e:
                 print("[WEBHOOK] PARSE ERROR:", e)
@@ -71,7 +64,7 @@ def webhook():
         return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
 
     # ---------------------------------------------------------
-    # ENTRY PRICE (midpoint)
+    # MARKET SNAPSHOT (FIXED URL)
     # ---------------------------------------------------------
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
