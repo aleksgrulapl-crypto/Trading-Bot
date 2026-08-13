@@ -1,5 +1,5 @@
 # ============================
-# DASHBOARD MODULE (RESTORED + MODERNISED)
+# DASHBOARD MODULE (FINAL VERSION — SL/TP + TRAIL SUPPORT)
 # ============================
 
 import json
@@ -75,21 +75,17 @@ def load_equity_log():
 @login_required
 def dashboard_home():
 
-    # Fetch raw data
     raw_positions = session.get_positions() or []
     raw_account = session.get_account() or {}
 
-    # Enrich data
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
     trade_log = load_log()
     daily_report = session.get_daily_report()
 
-    # Trend logs
     available_log = load_available_log()
     equity_log = load_equity_log()
 
-    # Update shared state
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
     session.shared_state["trade_log"] = trade_log

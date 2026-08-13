@@ -1,3 +1,7 @@
+# ============================
+# WEBHOOK MODULE (STRICT + CLEAN + FULLY COMPATIBLE)
+# ============================
+
 from flask import Flask, request, jsonify, render_template
 import json
 import time
@@ -6,14 +10,16 @@ import session
 from parser import parse_tradingview_alert
 from sizing import calculate_size
 from order import place_order
-from trade_log import load_log
+from trade_log import log_trade, load_log
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS, API_MARKET
 from dashboard import dashboard as dashboard_blueprint
 from scheduler import start_scheduler
+from utils import timestamp  # correct timestamp source
 
 app = Flask(__name__)
 app.url_map.strict_slashes = False
+
 
 # ---------------------------------------------------------
 # WEBHOOK ENDPOINT
@@ -34,6 +40,8 @@ def webhook():
     # ---------------------------------------------------------
     # PARSE ALERT (raw or JSON)
     # ---------------------------------------------------------
+    alert = None
+
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
@@ -48,10 +56,33 @@ def webhook():
                 print("[WEBHOOK] PARSE ERROR:", e)
                 return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
+    # ---------------------------------------------------------
+    # BLOCKED ALERT HANDLING
+    # ---------------------------------------------------------
+    if alert.get("blocked"):
+        print(f"[WEBHOOK] ALERT BLOCKED: {alert.get('reason')}")
+
+        # Minimal blocked trade entry (Option B1)
+        log_trade(
+            ticker=alert.get("symbol") or "UNKNOWN",
+            side="BLOCKED",
+            size=0,
+            price=0,
+            sl=None,
+            tp=None,
+            timestamp=timestamp(),
+            timeframe=None
+        )
+
+        return jsonify({"status": "blocked", "reason": alert.get("reason")}), 200
+
+    # ---------------------------------------------------------
+    # VALID ALERT — EXTRACT FIELDS
+    # ---------------------------------------------------------
     symbol = alert["symbol"]
     action = alert["action"]
-    sl_price = alert.get("sl")
-    tp_price = alert.get("tp")
+    sl_price = alert["sl"]
+    tp_price = alert["tp"]
 
     # ---------------------------------------------------------
     # EPIC LOOKUP
@@ -61,7 +92,19 @@ def webhook():
 
     if not epic:
         print("[WEBHOOK] EPIC lookup failed:", symbol)
-        return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
+
+        log_trade(
+            ticker=symbol,
+            side="BLOCKED",
+            size=0,
+            price=0,
+            sl=None,
+            tp=None,
+            timestamp=timestamp(),
+            timeframe=None
+        )
+
+        return jsonify({"status": "blocked", "reason": "epic_lookup_failed"}), 200
 
     # ---------------------------------------------------------
     # MARKET SNAPSHOT
@@ -69,7 +112,19 @@ def webhook():
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
         print("[WEBHOOK] Market snapshot unavailable for:", epic)
-        return jsonify({"status": "error", "message": "Market snapshot unavailable"}), 200
+
+        log_trade(
+            ticker=symbol,
+            side="BLOCKED",
+            size=0,
+            price=0,
+            sl=None,
+            tp=None,
+            timestamp=timestamp(),
+            timeframe=None
+        )
+
+        return jsonify({"status": "blocked", "reason": "market_snapshot_unavailable"}), 200
 
     snapshot = market.json().get("snapshot", {})
     bid = snapshot.get("bid")
@@ -77,12 +132,24 @@ def webhook():
 
     if bid is None or offer is None:
         print("[WEBHOOK] Market prices unavailable for:", epic)
-        return jsonify({"status": "error", "message": "Price unavailable"}), 200
+
+        log_trade(
+            ticker=symbol,
+            side="BLOCKED",
+            size=0,
+            price=0,
+            sl=None,
+            tp=None,
+            timestamp=timestamp(),
+            timeframe=None
+        )
+
+        return jsonify({"status": "blocked", "reason": "price_unavailable"}), 200
 
     entry_price = (bid + offer) / 2
 
     # ---------------------------------------------------------
-    # SIZING (legacy equity × leverage logic)
+    # SIZING
     # ---------------------------------------------------------
     size_info = calculate_size(
         entry_price=entry_price,
@@ -93,6 +160,19 @@ def webhook():
 
     if size_info["blocked"]:
         print(f"[WEBHOOK] SIZING BLOCKED: {size_info['reason']}")
+
+        # Option Q: log mid-price if available
+        log_trade(
+            ticker=symbol,
+            side="BLOCKED",
+            size=0,
+            price=entry_price,
+            sl=None,
+            tp=None,
+            timestamp=timestamp(),
+            timeframe=None
+        )
+
         return jsonify({"status": "blocked", "reason": size_info["reason"]}), 200
 
     size = size_info["size"]
@@ -117,6 +197,7 @@ def webhook():
 
 app.register_blueprint(dashboard_blueprint)
 
+
 # ---------------------------------------------------------
 # RAW DEBUG ENDPOINTS
 # ---------------------------------------------------------
@@ -128,6 +209,7 @@ def raw_positions():
 @app.route("/raw/account")
 def raw_account():
     return jsonify(session.request("GET", API_ACCOUNTS).json())
+
 
 # ---------------------------------------------------------
 # DASHBOARD ROUTE
@@ -156,6 +238,7 @@ def dashboard():
         system_status=session.shared_state.get("system_status", {})
     )
 
+
 # ---------------------------------------------------------
 # CLOSE POSITION
 # ---------------------------------------------------------
@@ -168,6 +251,7 @@ def close_position(position_id):
     result = r.json()
     session.update_last_trade()
     return jsonify({"status": "ok", "result": result})
+
 
 # ---------------------------------------------------------
 # START SCHEDULER + RUN APP

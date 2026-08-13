@@ -1,5 +1,5 @@
 # ============================
-# TRADE LOG MODULE (FINAL CLEAN + TIMEFRAME SUPPORT)
+# TRADE LOG MODULE (FINAL VERSION — SL/TP + TRAIL SUPPORT)
 # ============================
 
 import json
@@ -51,11 +51,10 @@ def save_log(log):
 # LOG OPEN TRADE
 # ---------------------------------------------------------
 
-def log_trade(ticker, side, size, price, timestamp=None, timeframe=None):
+def log_trade(ticker, side, size, price, sl=None, tp=None, timestamp=None, timeframe=None):
     """
     Logs an OPEN trade.
-    pnl = None for open trades.
-    timeframe = AutoTrader5M / AutoTrader15M / AutoTrader30M / AutoTrader1H
+    Includes SL/TP and timeframe.
     """
     log = load_log()
 
@@ -64,10 +63,13 @@ def log_trade(ticker, side, size, price, timestamp=None, timeframe=None):
         "ticker": ticker,
         "side": side.upper(),          # BUY or SELL
         "size": float(size),
-        "entry_price": float(price),   # renamed for clarity
-        "exit_price": None,            # open trades have no exit yet
-        "pnl": None,                   # open trades have no PnL yet
-        "timeframe": timeframe         # NEW: strategy timeframe tag
+        "entry_price": float(price),
+        "exit_price": None,
+        "pnl": None,
+        "sl": sl,
+        "tp": tp,
+        "trail": None,                 # future trailing stop updates
+        "timeframe": timeframe
     }
 
     log.append(entry)
@@ -78,9 +80,10 @@ def log_trade(ticker, side, size, price, timestamp=None, timeframe=None):
 # LOG CLOSED TRADE
 # ---------------------------------------------------------
 
-def log_close(ticker, size, close_price, pnl, timestamp=None, timeframe=None):
+def log_close(ticker, size, close_price, pnl, sl=None, tp=None, timestamp=None, timeframe=None):
     """
     Logs a CLOSED trade with final PnL.
+    Includes SL/TP and timeframe.
     """
     log = load_log()
 
@@ -89,10 +92,44 @@ def log_close(ticker, size, close_price, pnl, timestamp=None, timeframe=None):
         "ticker": ticker,
         "side": "CLOSE",
         "size": float(size),
-        "entry_price": None,           # closed trades do not need entry price here
+        "entry_price": None,
         "exit_price": float(close_price),
         "pnl": float(pnl),
-        "timeframe": timeframe         # NEW: strategy timeframe tag
+        "sl": sl,
+        "tp": tp,
+        "trail": None,
+        "timeframe": timeframe
+    }
+
+    log.append(entry)
+    save_log(log)
+
+
+# ---------------------------------------------------------
+# LOG TRAILING STOP UPDATE
+# ---------------------------------------------------------
+
+def log_trail_update(ticker, new_sl, price, timestamp=None, timeframe=None):
+    """
+    Logs a trailing stop adjustment event.
+    """
+    log = load_log()
+
+    entry = {
+        "time": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "ticker": ticker,
+        "side": "TRAIL",
+        "size": None,
+        "entry_price": None,
+        "exit_price": None,
+        "pnl": None,
+        "sl": new_sl,
+        "tp": None,
+        "trail": {
+            "new_sl": new_sl,
+            "price": price
+        },
+        "timeframe": timeframe
     }
 
     log.append(entry)
