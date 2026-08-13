@@ -73,7 +73,7 @@ def webhook():
     # ---------------------------------------------------------
     # ENTRY PRICE (midpoint)
     # ---------------------------------------------------------
-    market = session.request("GET", f"{API_POSITIONS}/../market/{epic}")
+    market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
         print("[WEBHOOK] Market snapshot unavailable for:", epic)
         return jsonify({"status": "error", "message": "Market snapshot unavailable"}), 200
