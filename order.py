@@ -1,5 +1,5 @@
 # ============================
-# ORDER MODULE (RESTORED + UPDATED + FIXED)
+# ORDER MODULE (FINAL VERSION — FULLY ALIGNED)
 # ============================
 
 import session
@@ -11,7 +11,7 @@ from trade_log import log_trade
 def place_order(epic, direction, size, sl=None, tp=None):
     """
     Places a BUY or SELL order with optional SL/TP.
-    Fully compatible with restored parser, sizing, session, and webhook.
+    Fully compatible with restored sizing, parser, session, and webhook.
     """
 
     # ---------------------------------------------------------
@@ -30,7 +30,7 @@ def place_order(epic, direction, size, sl=None, tp=None):
         print(f"[ERROR] Market prices unavailable for {epic}", flush=True)
         return {"status": "error", "message": "Price unavailable"}
 
-    # Midpoint price (consistent with sizing)
+    # Midpoint price (consistent with sizing + logging)
     midpoint = (bid + offer) / 2
 
     # ---------------------------------------------------------
@@ -73,7 +73,7 @@ def place_order(epic, direction, size, sl=None, tp=None):
         print(f"[TRADE] dealReference: {deal_ref}", flush=True)
 
         # ---------------------------------------------------------
-        # LOG TRADE (FIXED)
+        # LOG TRADE (FULLY RESTORED)
         # ---------------------------------------------------------
         log_trade(
             ticker=epic,            # epic is correct for Capital.com

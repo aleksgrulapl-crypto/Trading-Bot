@@ -16,7 +16,7 @@ app = Flask(__name__)
 app.url_map.strict_slashes = False
 
 # ---------------------------------------------------------
-# WEBHOOK ENDPOINT (REGISTER FIRST — CRITICAL)
+# WEBHOOK ENDPOINT
 # ---------------------------------------------------------
 
 @app.route("/webhook", methods=["POST"])
@@ -32,7 +32,7 @@ def webhook():
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
     # ---------------------------------------------------------
-    # PARSE ALERT (supports raw + JSON)
+    # PARSE ALERT (raw or JSON)
     # ---------------------------------------------------------
     try:
         data = request.get_json(force=True)
@@ -64,7 +64,7 @@ def webhook():
         return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
 
     # ---------------------------------------------------------
-    # MARKET SNAPSHOT (FIXED URL)
+    # MARKET SNAPSHOT
     # ---------------------------------------------------------
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
@@ -82,16 +82,9 @@ def webhook():
     entry_price = (bid + offer) / 2
 
     # ---------------------------------------------------------
-    # ACCOUNT BALANCE (correct cash balance)
-    # ---------------------------------------------------------
-    account = session.get_account()
-    cash_balance = account.get("balance", {}).get("balance", 0)
-
-    # ---------------------------------------------------------
-    # SIZING
+    # SIZING (legacy equity × leverage logic)
     # ---------------------------------------------------------
     size_info = calculate_size(
-        available=cash_balance,
         entry_price=entry_price,
         sl_price=sl_price,
         tp_price=tp_price,
@@ -119,7 +112,7 @@ def webhook():
 
 
 # ---------------------------------------------------------
-# REGISTER DASHBOARD AFTER WEBHOOK
+# REGISTER DASHBOARD
 # ---------------------------------------------------------
 
 app.register_blueprint(dashboard_blueprint)

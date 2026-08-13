@@ -1,24 +1,40 @@
 # ============================
-# POSITION SIZING MODULE (RESTORED + UPDATED + FIXED)
+# POSITION SIZING MODULE (LEGACY LOGIC RESTORED + UPDATED)
 # ============================
 
 import session
-from config import MAX_POSITIONS_PER_TICKER
+from config import (
+    MAX_POSITIONS_PER_TICKER,
+    EQUITY_PERCENT,
+    LEVERAGE
+)
 
-def calculate_size(available, entry_price, sl_price, tp_price, direction):
+def calculate_size(entry_price, sl_price, tp_price, direction):
     """
-    New sizing logic:
-    - Uses correct cash balance (not available)
-    - Uses SL/TP from TradingView
-    - Uses risk-based sizing (2% of cash balance)
-    - Validates SL distance
+    Restored legacy sizing logic (proven stable):
+    - Uses equity (cash + PnL)
+    - Uses EQUITY_PERCENT allocation
+    - Uses LEVERAGE multiplier
+    - Uses entry_price for size calculation
+    - Validates SL/TP
     - Enforces max positions per ticker
+    - Negative balance logic preserved (block only if cash <= 0)
     """
 
-    # -----------------------------------------
-    # BLOCK NEGATIVE BALANCE (corrected)
-    # -----------------------------------------
-    if available <= 0:
+    # ---------------------------------------------------------
+    # ACCOUNT DATA
+    # ---------------------------------------------------------
+    account = session.get_account()
+    bal = account.get("balance", {})
+
+    cash = bal.get("balance", 0)
+    pnl = bal.get("profitLoss", 0)
+    equity = cash + pnl
+
+    # ---------------------------------------------------------
+    # NEGATIVE BALANCE BLOCK (SAFE)
+    # ---------------------------------------------------------
+    if cash <= 0:
         print("[SIZING] Blocked: cash balance is zero or negative.")
         return {
             "size": 0,
@@ -26,9 +42,9 @@ def calculate_size(available, entry_price, sl_price, tp_price, direction):
             "reason": "negative_balance"
         }
 
-    # -----------------------------------------
+    # ---------------------------------------------------------
     # POSITION LIMIT PER TICKER
-    # -----------------------------------------
+    # ---------------------------------------------------------
     positions = session.get_positions()
     count = 0
     for p in positions:
@@ -44,10 +60,16 @@ def calculate_size(available, entry_price, sl_price, tp_price, direction):
             "reason": "max_positions"
         }
 
-    # -----------------------------------------
-    # RISK-BASED SIZING (2% of cash balance)
-    # -----------------------------------------
-    risk_per_trade = available * 0.02  # 2% risk
+    # ---------------------------------------------------------
+    # VALIDATE SL/TP
+    # ---------------------------------------------------------
+    if sl_price is None or tp_price is None:
+        print("[SIZING] Blocked: SL/TP missing.")
+        return {
+            "size": 0,
+            "blocked": True,
+            "reason": "missing_sl_tp"
+        }
 
     sl_distance = abs(entry_price - sl_price)
 
@@ -59,17 +81,37 @@ def calculate_size(available, entry_price, sl_price, tp_price, direction):
             "reason": "invalid_sl"
         }
 
-    size = risk_per_trade / sl_distance
+    # ---------------------------------------------------------
+    # LEGACY SIZING LOGIC (RESTORED)
+    # ---------------------------------------------------------
+    allocation = equity * EQUITY_PERCENT
+    exposure = allocation * LEVERAGE
+    raw_size = exposure / entry_price
 
-    print("[SIZING] Cash balance:", available)
+    print("[SIZING] Cash:", cash)
+    print("[SIZING] PnL:", pnl)
+    print("[SIZING] Equity:", equity)
+    print("[SIZING] Allocation:", allocation)
+    print("[SIZING] Leverage:", LEVERAGE)
+    print("[SIZING] Exposure:", exposure)
     print("[SIZING] Entry price:", entry_price)
-    print("[SIZING] SL price:", sl_price)
-    print("[SIZING] SL distance:", sl_distance)
-    print("[SIZING] Risk per trade:", risk_per_trade)
-    print("[SIZING] Final size:", size)
+    print("[SIZING] Raw size:", raw_size)
+
+    # ---------------------------------------------------------
+    # FINAL SIZE
+    # ---------------------------------------------------------
+    final_size = round(raw_size, 2)
+
+    if final_size <= 0:
+        print("[SIZING] Blocked: final size <= 0.")
+        return {
+            "size": 0,
+            "blocked": True,
+            "reason": "invalid_size"
+        }
 
     return {
-        "size": round(size, 2),
+        "size": final_size,
         "blocked": False,
         "reason": None
     }

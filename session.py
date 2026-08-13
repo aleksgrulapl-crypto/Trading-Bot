@@ -1,10 +1,10 @@
 # ============================
-# SESSION MODULE (RESTORED + FIXED + UPDATED)
+# SESSION MODULE (FINAL RESTORED + UPDATED)
 # ============================
 
 import requests
 from auth import auth
-from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
+from config import API_POSITIONS, API_ACCOUNTS, API_MARKET, EPIC_MAP
 from utils import timestamp
 import report
 from trade_log import load_log
@@ -50,6 +50,19 @@ def request(method, url, json=None):
         return None
 
 # ---------------------------------------------------------
+# RAW FETCH (USED BY /raw ENDPOINT)
+# ---------------------------------------------------------
+
+def fetch_positions_from(url):
+    response = request("GET", url)
+    if not response or response.status_code != 200:
+        return {}
+    try:
+        return response.json()
+    except Exception:
+        return {}
+
+# ---------------------------------------------------------
 # GET POSITIONS
 # ---------------------------------------------------------
 
@@ -60,12 +73,14 @@ def get_positions():
         return []
     try:
         data = response.json()
-        return data.get("positions", [])
-    except:
+        positions = data.get("positions", [])
+        shared_state["positions"] = positions
+        return positions
+    except Exception:
         return []
 
 # ---------------------------------------------------------
-# GET ACCOUNT (FIXED)
+# GET ACCOUNT (USES API_ACCOUNTS)
 # ---------------------------------------------------------
 
 def get_account():
@@ -75,19 +90,21 @@ def get_account():
     - balance.profitLoss = running PnL
     - balance.available = equity - margin
     """
-    response = request("GET", API_ACCOUNT)
+    response = request("GET", API_ACCOUNTS)
     if not response or response.status_code != 200:
         return {}
 
     try:
         data = response.json()
         accounts = data.get("accounts", [])
-        return accounts[0] if accounts else {}
-    except:
+        account = accounts[0] if accounts else {}
+        shared_state["account"] = account
+        return account
+    except Exception:
         return {}
 
 # ---------------------------------------------------------
-# ENRICH ACCOUNT (FIXED)
+# ENRICH ACCOUNT
 # ---------------------------------------------------------
 
 def enrich_account(raw):

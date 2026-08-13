@@ -1,5 +1,5 @@
 # ============================
-# TradingView Alert Parser (RESTORED + CLEANED)
+# TradingView Alert Parser (FINAL VERSION)
 # ============================
 
 def parse_tradingview_alert(data):
@@ -9,9 +9,11 @@ def parse_tradingview_alert(data):
     - JSON TradingView alert dict: {"symbol": "NVDA", "action": "buy", "payload": "..."}
     """
 
+    # RAW STRING ALERT
     if isinstance(data, str):
         return parse_raw_alert(data)
 
+    # JSON ALERT
     if isinstance(data, dict):
         return parse_json_alert(data)
 
