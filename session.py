@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (FINAL — NO TIMEFRAME)
+# SESSION MODULE (RESTORED + FIXED + UPDATED)
 # ============================
 
 import requests
@@ -50,19 +50,6 @@ def request(method, url, json=None):
         return None
 
 # ---------------------------------------------------------
-# FETCH POSITIONS (RAW)
-# ---------------------------------------------------------
-
-def fetch_positions_from(url):
-    response = request("GET", url)
-    if not response or response.status_code != 200:
-        return []
-    try:
-        return response.json()
-    except:
-        return []
-
-# ---------------------------------------------------------
 # GET POSITIONS
 # ---------------------------------------------------------
 
@@ -78,13 +65,20 @@ def get_positions():
         return []
 
 # ---------------------------------------------------------
-# GET ACCOUNT
+# GET ACCOUNT (FIXED)
 # ---------------------------------------------------------
 
 def get_account():
+    """
+    Returns correct Capital.com account structure:
+    - balance.balance = cash
+    - balance.profitLoss = running PnL
+    - balance.available = equity - margin
+    """
     response = request("GET", API_ACCOUNT)
     if not response or response.status_code != 200:
         return {}
+
     try:
         data = response.json()
         accounts = data.get("accounts", [])
@@ -93,73 +87,7 @@ def get_account():
         return {}
 
 # ---------------------------------------------------------
-# MARKET PRICE LOOKUP
-# ---------------------------------------------------------
-
-def get_market_price(epic):
-    try:
-        r = request("GET", f"{API_MARKET}/{epic}")
-        if not r or r.status_code != 200:
-            print(f"[MARKET] Failed to fetch price for {epic}")
-            return None
-
-        data = r.json()
-        snapshot = data.get("snapshot", {})
-
-        bid = snapshot.get("bid")
-        offer = snapshot.get("offer")
-
-        if bid and offer:
-            price = (bid + offer) / 2
-            print(f"[MARKET] {epic} midpoint: {price}")
-            return price
-
-        if offer:
-            print(f"[MARKET] {epic} offer fallback: {offer}")
-            return offer
-
-        if bid:
-            print(f"[MARKET] {epic} bid fallback: {bid}")
-            return bid
-
-        print(f"[MARKET] No price available for {epic}")
-        return None
-
-    except Exception as e:
-        print(f"[MARKET] Error fetching price for {epic}: {e}")
-        return None
-
-# ---------------------------------------------------------
-# ENRICH POSITIONS (NO TIMEFRAME)
-# ---------------------------------------------------------
-
-def enrich_positions(raw_positions):
-    enriched = []
-
-    for item in raw_positions:
-        pos = item["position"]
-        market = item["market"]
-
-        profit = pos.get("upl", 0)
-
-        enriched.append({
-            "id": pos.get("dealId"),
-            "ticker": market.get("symbol"),
-            "epic": market.get("epic"),
-            "size": pos.get("size"),
-            "price": pos.get("level"),
-            "current_price": market.get("bid") if pos.get("direction") == "SELL" else market.get("offer"),
-            "direction": pos.get("direction"),
-            "profit": round(profit, 2),
-            "stopLevel": pos.get("stopLevel"),
-            "limitLevel": pos.get("profitLevel"),
-            "currency": pos.get("currency")
-        })
-
-    return enriched
-
-# ---------------------------------------------------------
-# ENRICH ACCOUNT
+# ENRICH ACCOUNT (FIXED)
 # ---------------------------------------------------------
 
 def enrich_account(raw):
@@ -167,16 +95,21 @@ def enrich_account(raw):
         return {}
 
     bal = raw.get("balance", {})
-    available = bal.get("available", 0)
-    margin_warning = None
 
+    cash = bal.get("balance", 0)
+    pnl = bal.get("profitLoss", 0)
+    available = bal.get("available", 0)
+
+    equity = cash + pnl
+
+    margin_warning = None
     if available < 0:
         margin_warning = "⚠ Margin Warning: Available balance is negative."
 
     return {
-        "balance": round(bal.get("balance", 0), 2),
-        "equity": round(bal.get("balance", 0) + bal.get("profitLoss", 0), 2),
-        "margin": round(bal.get("profitLoss", 0), 2),
+        "balance": round(cash, 2),
+        "equity": round(equity, 2),
+        "margin": round(pnl, 2),
         "available": round(available, 2),
         "available_color": "red" if available < 0 else "lime",
         "margin_warning": margin_warning
@@ -214,6 +147,35 @@ def verify_epic(symbol):
         return {"epic": None, "source": "exception"}
 
 # ---------------------------------------------------------
+# ENRICH POSITIONS
+# ---------------------------------------------------------
+
+def enrich_positions(raw_positions):
+    enriched = []
+
+    for item in raw_positions:
+        pos = item["position"]
+        market = item["market"]
+
+        profit = pos.get("upl", 0)
+
+        enriched.append({
+            "id": pos.get("dealId"),
+            "ticker": market.get("symbol"),
+            "epic": market.get("epic"),
+            "size": pos.get("size"),
+            "price": pos.get("level"),
+            "current_price": market.get("bid") if pos.get("direction") == "SELL" else market.get("offer"),
+            "direction": pos.get("direction"),
+            "profit": round(profit, 2),
+            "stopLevel": pos.get("stopLevel"),
+            "limitLevel": pos.get("profitLevel"),
+            "currency": pos.get("currency")
+        })
+
+    return enriched
+
+# ---------------------------------------------------------
 # DAILY REPORT
 # ---------------------------------------------------------
 
@@ -222,7 +184,8 @@ def get_daily_report():
         report_data = report.get_daily_report()
         shared_state["daily_report"] = report_data
         return report_data
-    except Exception:
+    except Exception as e:
+        print(f"[REPORT] Failed to load daily report: {e}")
         return {}
 
 # ---------------------------------------------------------

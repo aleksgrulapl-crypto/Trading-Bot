@@ -1,16 +1,20 @@
+# ============================
+# WEBHOOK MODULE (RESTORED + UPDATED + FIXED)
+# ============================
+
 from flask import Flask, request, jsonify, render_template
+import json
 import time
-import os
 
 import session
-import order
-from scheduler import start_scheduler
-from dashboard import dashboard as dashboard_blueprint
+from parser import parse_tradingview_alert
+from sizing import calculate_size
+from order import place_order
 from trade_log import load_log
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS
-from parser import parse_tradingview_alert
-from sizing import calculate_size
+from dashboard import dashboard as dashboard_blueprint
+from scheduler import start_scheduler
 
 app = Flask(__name__)
 app.url_map.strict_slashes = False
@@ -24,42 +28,77 @@ def webhook():
     session.update_last_webhook()
 
     raw = request.get_data(as_text=True)
-    raw = raw.strip().replace("\n", "").replace("\r", "")
+    raw = raw.strip() if raw else ""
 
     print("[WEBHOOK] RAW:", raw)
 
     if not raw:
-        print("[WEBHOOK] ERROR: Empty body received")
         return jsonify({"status": "error", "message": "Empty body received"}), 200
 
+    # ---------------------------------------------------------
+    # PARSE ALERT (supports raw + JSON)
+    # ---------------------------------------------------------
     try:
-        alert = parse_tradingview_alert(raw)
-    except Exception as e:
-        print("[WEBHOOK] PARSE ERROR:", e)
-        return jsonify({"status": "error", "message": "Invalid alert"}), 200
+        # Try JSON first
+        data = request.get_json(force=True)
+        alert = parse_tradingview_alert(data)
+    except:
+        try:
+            # Try JSON via raw
+            data = json.loads(raw)
+            alert = parse_tradingview_alert(data)
+        except:
+            try:
+                # Try raw string
+                alert = parse_tradingview_alert(raw)
+            except Exception as e:
+                print("[WEBHOOK] PARSE ERROR:", e)
+                return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
-    ticker = alert["symbol"]
+    symbol = alert["symbol"]
     action = alert["action"]
     sl_price = alert.get("sl")
     tp_price = alert.get("tp")
 
-    epic_data = session.verify_epic(ticker)
+    # ---------------------------------------------------------
+    # EPIC LOOKUP
+    # ---------------------------------------------------------
+    epic_data = session.verify_epic(symbol)
     epic = epic_data.get("epic")
 
     if not epic:
-        print("[WEBHOOK] EPIC lookup failed:", ticker)
+        print("[WEBHOOK] EPIC lookup failed:", symbol)
         return jsonify({"status": "error", "message": "EPIC lookup failed"}), 200
 
-    entry_price = session.get_market_price(epic)
-    if not entry_price:
-        print("[WEBHOOK] Entry price unavailable for:", epic)
-        return jsonify({"status": "error", "message": "Entry price unavailable"}), 200
+    # ---------------------------------------------------------
+    # ENTRY PRICE (midpoint)
+    # ---------------------------------------------------------
+    market = session.request("GET", f"{API_POSITIONS}/../market/{epic}")
+    if not market or market.status_code != 200:
+        print("[WEBHOOK] Market snapshot unavailable for:", epic)
+        return jsonify({"status": "error", "message": "Market snapshot unavailable"}), 200
 
+    snapshot = market.json().get("snapshot", {})
+    bid = snapshot.get("bid")
+    offer = snapshot.get("offer")
+
+    if bid is None or offer is None:
+        print("[WEBHOOK] Market prices unavailable for:", epic)
+        return jsonify({"status": "error", "message": "Price unavailable"}), 200
+
+    entry_price = (bid + offer) / 2
+
+    # ---------------------------------------------------------
+    # ACCOUNT BALANCE (correct cash balance)
+    # ---------------------------------------------------------
     account = session.get_account()
-    available = account.get("available", 0)
+    cash_balance = account.get("balance", {}).get("balance", 0)
 
+    # ---------------------------------------------------------
+    # SIZING
+    # ---------------------------------------------------------
     size_info = calculate_size(
-        available=available,
+        available=cash_balance,
         entry_price=entry_price,
         sl_price=sl_price,
         tp_price=tp_price,
@@ -76,11 +115,15 @@ def webhook():
     print("[WEBHOOK] Final TP:", tp_price)
     print("[WEBHOOK] Final SIZE:", size)
 
-    result = order.place_order(epic, action, size, sl_price, tp_price)
+    # ---------------------------------------------------------
+    # PLACE ORDER
+    # ---------------------------------------------------------
+    result = place_order(epic, action, size, sl_price, tp_price)
 
     session.update_last_trade()
 
     return jsonify({"status": "ok", "result": result}), 200
+
 
 # ---------------------------------------------------------
 # REGISTER DASHBOARD AFTER WEBHOOK
@@ -147,6 +190,8 @@ def close_position(position_id):
 print("[Webhook] Starting scheduler...")
 start_scheduler()
 print("[Webhook] Scheduler started.")
+
+import os
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

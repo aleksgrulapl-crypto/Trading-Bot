@@ -1,5 +1,5 @@
 # ============================
-# ORDER MODULE (RESTORED + TP FIXED + LOGGING)
+# ORDER MODULE (RESTORED + UPDATED + FIXED)
 # ============================
 
 import session
@@ -11,22 +11,31 @@ from trade_log import log_trade
 def place_order(epic, direction, size, sl=None, tp=None):
     """
     Places a BUY or SELL order with optional SL/TP.
+    Fully compatible with restored parser, sizing, session, and webhook.
     """
 
-    # Fetch market snapshot
+    # ---------------------------------------------------------
+    # FETCH MARKET SNAPSHOT
+    # ---------------------------------------------------------
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
         print(f"[ERROR] Failed to fetch market snapshot for {epic}", flush=True)
         return {"status": "error", "message": "Market snapshot unavailable"}
 
     snapshot = market.json().get("snapshot", {})
-    price = snapshot.get("offer") if direction.upper() == "BUY" else snapshot.get("bid")
+    bid = snapshot.get("bid")
+    offer = snapshot.get("offer")
 
-    if price is None:
-        print(f"[ERROR] Market price unavailable for {epic}", flush=True)
+    if bid is None or offer is None:
+        print(f"[ERROR] Market prices unavailable for {epic}", flush=True)
         return {"status": "error", "message": "Price unavailable"}
 
-    # Build order payload
+    # Midpoint price (consistent with sizing)
+    midpoint = (bid + offer) / 2
+
+    # ---------------------------------------------------------
+    # BUILD ORDER PAYLOAD
+    # ---------------------------------------------------------
     payload = {
         "epic": epic,
         "direction": direction.upper(),
@@ -40,13 +49,15 @@ def place_order(epic, direction, size, sl=None, tp=None):
     if sl is not None:
         payload["stopLevel"] = float(sl)
 
-    # TAKE PROFIT (FIXED)
+    # TAKE PROFIT
     if tp is not None:
-        payload["profitLevel"] = float(tp)   # <-- Correct Capital.com TP field
+        payload["profitLevel"] = float(tp)
 
     print("[ORDER] Sending payload:", payload, flush=True)
 
-    # Send order
+    # ---------------------------------------------------------
+    # SEND ORDER
+    # ---------------------------------------------------------
     response = session.request("POST", API_POSITIONS, json=payload)
 
     if not response or response.status_code >= 400:
@@ -58,15 +69,19 @@ def place_order(epic, direction, size, sl=None, tp=None):
         data = response.json()
         deal_ref = data.get("dealReference")
 
-        print(f"[TRADE] {direction.upper()} {epic} @ {price} (size {size}) → SUCCESS", flush=True)
+        print(f"[TRADE] {direction.upper()} {epic} @ {midpoint} (size {size}) → SUCCESS", flush=True)
         print(f"[TRADE] dealReference: {deal_ref}", flush=True)
 
-        # Log trade
+        # ---------------------------------------------------------
+        # LOG TRADE (FIXED)
+        # ---------------------------------------------------------
         log_trade(
-            ticker=epic,
+            ticker=epic,            # epic is correct for Capital.com
             side=direction.upper(),
             size=size,
-            price=price,
+            price=midpoint,
+            sl=sl,
+            tp=tp,
             timestamp=timestamp()
         )
 
@@ -76,7 +91,7 @@ def place_order(epic, direction, size, sl=None, tp=None):
         return {
             "status": "ok",
             "dealReference": deal_ref,
-            "price": price
+            "price": midpoint
         }
 
     except Exception as e:

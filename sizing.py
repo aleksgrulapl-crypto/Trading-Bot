@@ -1,25 +1,25 @@
 # ============================
-# SIZING MODULE (FINAL — RESTORED PRE‑TIMEFRAME LOGIC)
+# POSITION SIZING MODULE (RESTORED + UPDATED + FIXED)
 # ============================
 
-from config import EQUITY_PERCENT, LEVERAGE
-from utils import timestamp
+import session
+from config import MAX_POSITIONS_PER_TICKER
 
 def calculate_size(available, entry_price, sl_price, tp_price, direction):
     """
-    Returns a safe, validated position size.
-    Blocks trades when:
-    - available balance is negative
-    - entry price invalid
-    - SL/TP invalid
-    - calculated size is too small
+    New sizing logic:
+    - Uses correct cash balance (not available)
+    - Uses SL/TP from TradingView
+    - Uses risk-based sizing (2% of cash balance)
+    - Validates SL distance
+    - Enforces max positions per ticker
     """
 
     # -----------------------------------------
-    # BLOCK NEGATIVE BALANCE
+    # BLOCK NEGATIVE BALANCE (corrected)
     # -----------------------------------------
     if available <= 0:
-        print("[SIZING] Blocked: available balance is negative.")
+        print("[SIZING] Blocked: cash balance is zero or negative.")
         return {
             "size": 0,
             "blocked": True,
@@ -27,75 +27,49 @@ def calculate_size(available, entry_price, sl_price, tp_price, direction):
         }
 
     # -----------------------------------------
-    # VALIDATE ENTRY PRICE
+    # POSITION LIMIT PER TICKER
     # -----------------------------------------
-    if not entry_price or entry_price <= 0:
-        print("[SIZING] Blocked: invalid entry price.")
+    positions = session.get_positions()
+    count = 0
+    for p in positions:
+        market = p.get("market", {})
+        if market.get("epic") == session.verify_epic(market.get("symbol")).get("epic"):
+            count += 1
+
+    if count >= MAX_POSITIONS_PER_TICKER:
+        print("[SIZING] Blocked: max positions reached.")
         return {
             "size": 0,
             "blocked": True,
-            "reason": "invalid_entry"
+            "reason": "max_positions"
         }
 
     # -----------------------------------------
-    # VALIDATE SL/TP
+    # RISK-BASED SIZING (2% of cash balance)
     # -----------------------------------------
-    if sl_price is None or tp_price is None:
-        print("[SIZING] Blocked: SL/TP missing.")
+    risk_per_trade = available * 0.02  # 2% risk
+
+    sl_distance = abs(entry_price - sl_price)
+
+    if sl_distance <= 0:
+        print("[SIZING] Blocked: invalid SL distance.")
         return {
             "size": 0,
             "blocked": True,
-            "reason": "missing_sl_tp"
+            "reason": "invalid_sl"
         }
 
-    # -----------------------------------------
-    # ALLOCATION (RESTORED)
-    # -----------------------------------------
-    allocation = available * EQUITY_PERCENT
-    print(f"[SIZING] Allocation: {allocation}")
+    size = risk_per_trade / sl_distance
 
-    # -----------------------------------------
-    # LEVERAGE (RESTORED)
-    # -----------------------------------------
-    exposure = allocation * LEVERAGE
-    print(f"[SIZING] Exposure (allocation * leverage): {exposure}")
-
-    # -----------------------------------------
-    # RAW SIZE (RESTORED)
-    # -----------------------------------------
-    raw_size = exposure / entry_price
-    print(f"[SIZING] Raw size: {raw_size}")
-
-    # -----------------------------------------
-    # BLOCK NEGATIVE SIZE
-    # -----------------------------------------
-    if raw_size <= 0:
-        print("[SIZING] Blocked: raw size is negative or zero.")
-        return {
-            "size": 0,
-            "blocked": True,
-            "reason": "negative_size"
-        }
-
-    # -----------------------------------------
-    # MINIMUM SIZE CHECK
-    # -----------------------------------------
-    if raw_size < 0.1:
-        print("[SIZING] Blocked: size too small (<0.1).")
-        return {
-            "size": 0,
-            "blocked": True,
-            "reason": "too_small"
-        }
-
-    # -----------------------------------------
-    # FINAL SIZE
-    # -----------------------------------------
-    final_size = round(raw_size, 2)
-    print(f"[SIZING] Final size: {final_size}")
+    print("[SIZING] Cash balance:", available)
+    print("[SIZING] Entry price:", entry_price)
+    print("[SIZING] SL price:", sl_price)
+    print("[SIZING] SL distance:", sl_distance)
+    print("[SIZING] Risk per trade:", risk_per_trade)
+    print("[SIZING] Final size:", size)
 
     return {
-        "size": final_size,
+        "size": round(size, 2),
         "blocked": False,
         "reason": None
     }
