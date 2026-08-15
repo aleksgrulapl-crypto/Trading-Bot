@@ -242,10 +242,10 @@ def close_position(position_id):
     return jsonify(result), 200
 
 
-print("[Webhook] Starting scheduler...", flush=True)
-start_scheduler()
-print("[Webhook] Scheduler started.", flush=True)
-
 if __name__ == "__main__":
+    print("[Webhook] Starting scheduler...", flush=True)
+    start_scheduler()
+    print("[Webhook] Scheduler started.", flush=True)
+
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
