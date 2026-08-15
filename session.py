@@ -87,10 +87,10 @@ def enrich_account(raw):
     Capital.com mapping:
 
     - Funds      = balance.balance
-    - Balance    = balance.equity
+    - Balance    = balance.equity  (or Funds + PnL if equity missing)
     - PnL        = balance.profitLoss
-    - Available  = balance.available
-    - Margin     = balance.margin
+    - Available  = balance.available (or Balance - Margin if missing)
+    - Margin     = balance.margin   (or Balance - Available if missing)
     """
     if not raw:
         return {}
@@ -98,10 +98,28 @@ def enrich_account(raw):
     bal = raw.get("balance", {})
 
     funds = bal.get("balance", 0)
-    equity = bal.get("equity", funds)
     pnl = bal.get("profitLoss", 0)
-    available = bal.get("available", 0)
-    margin = bal.get("margin", 0)
+
+    equity_raw = bal.get("equity")
+    if equity_raw is None:
+        equity = funds + pnl
+    else:
+        equity = equity_raw
+
+    available_raw = bal.get("available")
+    margin_raw = bal.get("margin")
+
+    if margin_raw is None and available_raw is not None:
+        margin = equity - available_raw
+    elif margin_raw is not None:
+        margin = margin_raw
+    else:
+        margin = 0
+
+    if available_raw is None:
+        available = equity - margin
+    else:
+        available = available_raw
 
     margin_warning = None
     if available < 0:
