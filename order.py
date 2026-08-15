@@ -11,7 +11,7 @@ from trade_log import log_trade
 def clamp_price(value):
     try:
         return round(float(value), 2)
-    except:
+    except Exception:
         return None
 
 
@@ -38,7 +38,6 @@ def validate_and_correct_levels(direction, midpoint, sl, tp):
 
 
 def place_order(epic, direction, size, sl=None, tp=None):
-    # Fetch market snapshot
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
         print(f"[ERROR] Market snapshot unavailable for {epic}", flush=True)
@@ -54,13 +53,11 @@ def place_order(epic, direction, size, sl=None, tp=None):
 
     midpoint = (bid + offer) / 2
 
-    # Correct SL/TP
     sl_fixed, tp_fixed = validate_and_correct_levels(direction, midpoint, sl, tp)
 
     print(f"[ORDER] Corrected SL: {sl_fixed}", flush=True)
     print(f"[ORDER] Corrected TP: {tp_fixed}", flush=True)
 
-    # Build payload
     payload = {
         "epic": epic,
         "direction": direction.upper(),
@@ -77,7 +74,6 @@ def place_order(epic, direction, size, sl=None, tp=None):
 
     print("[ORDER] Sending payload:", payload, flush=True)
 
-    # Send order
     response = session.request("POST", API_POSITIONS, json=payload)
 
     if not response or response.status_code >= 400:
@@ -91,11 +87,10 @@ def place_order(epic, direction, size, sl=None, tp=None):
     print(f"[TRADE] {direction.upper()} {epic} @ {midpoint} (size {size}) → SUCCESS", flush=True)
     print(f"[TRADE] dealReference: {deal_ref}", flush=True)
 
-    # FIXED LOGGING — correct signature
     log_trade(
-        ticker=epic,          # symbol or epic label
-        epic=epic,            # correct epic
-        deal_id=deal_ref,     # dealReference from Capital.com
+        ticker=epic,
+        epic=epic,
+        deal_id=deal_ref,
         side=direction.upper(),
         size=size,
         price=midpoint,

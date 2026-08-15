@@ -21,16 +21,13 @@ shared_state = {
     "daily_report": {}
 }
 
-# ---------------------------------------------------------
-# HEADERS
-# ---------------------------------------------------------
 
 def get_headers():
     try:
         auth.ensure_token()
         shared_state["system_status"]["auth"] = "OK"
     except Exception as e:
-        print(f"[AUTH] ensure_token failed: {e}")
+        print(f"[AUTH] ensure_token failed: {e}", flush=True)
         shared_state["system_status"]["auth"] = "ERROR"
 
     return {
@@ -39,25 +36,19 @@ def get_headers():
         "X-SECURITY-TOKEN": auth.xst
     }
 
-# ---------------------------------------------------------
-# REQUEST WRAPPER
-# ---------------------------------------------------------
 
 def request(method, url, json=None):
     headers = get_headers()
     try:
         response = auth.session.request(method, url, headers=headers, json=json)
         if response.status_code >= 400:
-            print(f"[ERROR] {method} {url} → {response.status_code}")
-            print(f"[ERROR] Response: {response.text}")
+            print(f"[ERROR] {method} {url} → {response.status_code}", flush=True)
+            print(f"[ERROR] Response: {response.text}", flush=True)
         return response
     except Exception as e:
-        print(f"[ERROR] Request failed: {e}")
+        print(f"[ERROR] Request failed: {e}", flush=True)
         return None
 
-# ---------------------------------------------------------
-# RAW FETCH (USED BY /raw ENDPOINT)
-# ---------------------------------------------------------
 
 def fetch_positions_from(url):
     response = request("GET", url)
@@ -68,9 +59,6 @@ def fetch_positions_from(url):
     except Exception:
         return {}
 
-# ---------------------------------------------------------
-# GET POSITIONS
-# ---------------------------------------------------------
 
 def get_positions():
     url = f"{API_POSITIONS}?includeProfitLoss=true"
@@ -84,20 +72,11 @@ def get_positions():
         shared_state["positions"] = positions
         return positions
     except Exception as e:
-        print(f"[POSITIONS] Failed to parse positions: {e}")
+        print(f"[POSITIONS] Failed to parse positions: {e}", flush=True)
         return shared_state.get("positions", [])
 
-# ---------------------------------------------------------
-# GET ACCOUNT (USES API_ACCOUNTS)
-# ---------------------------------------------------------
 
 def get_account():
-    """
-    Returns correct Capital.com account structure:
-    - balance.balance = cash
-    - balance.profitLoss = running PnL
-    - balance.available = equity - margin
-    """
     response = request("GET", API_ACCOUNTS)
     if not response or response.status_code != 200:
         return shared_state.get("account", {})
@@ -109,12 +88,9 @@ def get_account():
         shared_state["account"] = account
         return account
     except Exception as e:
-        print(f"[ACCOUNT] Failed to parse account: {e}")
+        print(f"[ACCOUNT] Failed to parse account: {e}", flush=True)
         return shared_state.get("account", {})
 
-# ---------------------------------------------------------
-# ENRICH ACCOUNT
-# ---------------------------------------------------------
 
 def enrich_account(raw):
     if not raw:
@@ -141,43 +117,41 @@ def enrich_account(raw):
         "margin_warning": margin_warning
     }
 
-# ---------------------------------------------------------
-# EPIC LOOKUP
-# ---------------------------------------------------------
 
 def verify_epic(symbol):
     if not symbol:
         return {"epic": None, "source": "invalid_symbol"}
 
     symbol = symbol.upper()
+    print(f"[EPIC] verify_epic called with symbol={symbol}", flush=True)
 
     if symbol in EPIC_MAP:
-        return {"epic": EPIC_MAP[symbol], "source": "local"}
+        epic = EPIC_MAP[symbol]
+        print(f"[EPIC] Local EPIC map hit: {symbol} → {epic}", flush=True)
+        return {"epic": epic, "source": "local"}
 
     try:
         url = f"{API_MARKET}/{symbol}"
         r = request("GET", url)
 
         if not r or r.status_code != 200:
-            print(f"[EPIC] API lookup failed for {symbol}")
+            print(f"[EPIC] API lookup failed for {symbol}", flush=True)
             return {"epic": None, "source": "api_error"}
 
         data = r.json()
         epic = data.get("instrument", {}).get("epic")
 
         if epic:
+            print(f"[EPIC] API EPIC resolved: {symbol} → {epic}", flush=True)
             return {"epic": epic, "source": "api"}
 
-        print(f"[EPIC] No EPIC found for {symbol}")
+        print(f"[EPIC] No EPIC found for {symbol}", flush=True)
         return {"epic": None, "source": "not_found"}
 
     except Exception as e:
-        print(f"[EPIC] Exception during lookup: {e}")
+        print(f"[EPIC] Exception during lookup: {e}", flush=True)
         return {"epic": None, "source": "exception"}
 
-# ---------------------------------------------------------
-# ENRICH POSITIONS
-# ---------------------------------------------------------
 
 def enrich_positions(raw_positions):
     enriched = []
@@ -204,9 +178,6 @@ def enrich_positions(raw_positions):
 
     return enriched
 
-# ---------------------------------------------------------
-# DAILY REPORT
-# ---------------------------------------------------------
 
 def get_daily_report():
     try:
@@ -214,15 +185,13 @@ def get_daily_report():
         shared_state["daily_report"] = report_data
         return report_data
     except Exception as e:
-        print(f"[REPORT] Failed to load daily report: {e}")
+        print(f"[REPORT] Failed to load daily report: {e}", flush=True)
         return shared_state.get("daily_report", {})
 
-# ---------------------------------------------------------
-# SYSTEM STATUS UPDATES
-# ---------------------------------------------------------
 
 def update_last_trade():
     shared_state["system_status"]["last_trade"] = timestamp()
+
 
 def update_last_webhook():
     shared_state["system_status"]["last_webhook"] = timestamp()
