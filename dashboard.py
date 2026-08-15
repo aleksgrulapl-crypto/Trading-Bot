@@ -13,7 +13,6 @@ import config
 from trade_log import load_log
 from excel_import import load_excel_trades
 
-
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
 # ---------------------------------------------------------
@@ -29,36 +28,7 @@ def login_required(view):
     return wrapper
 
 # ---------------------------------------------------------
-# EXCEL IMPORT
-# ---------------------------------------------------------
-
-def load_excel_trades(path="Trading Log 2026.xlsx"):
-    try:
-        df = pd.read_excel(path, sheet_name="Trade Log")
-    except Exception:
-        return []
-
-    trades = []
-    for _, row in df.iterrows():
-        trades.append({
-            "trade_id": row.get("Trade ID"),
-            "ticker": row.get("Ticker"),
-            "side": row.get("Direction"),
-            "size": row.get("Position Size"),
-            "entry_price": row.get("Entry Price"),
-            "exit_price": row.get("Exit Price"),
-            "pnl": row.get("Outcome (P/L)"),
-            "sl": row.get("SL"),
-            "tp": row.get("TP"),
-            "open_timestamp": row.get("Open Timestamp (UTC)"),
-            "close_timestamp": row.get("Close Timestamp (UTC)"),
-            "notes": row.get("Notes"),
-            "checklist_passed": row.get("Checklist Passed?"),
-        })
-    return trades
-
-# ---------------------------------------------------------
-# ANALYTICS COMPUTATION
+# ANALYTICS COMPUTATION (CRASH-PROOF)
 # ---------------------------------------------------------
 
 def compute_analytics(trades):
@@ -74,8 +44,24 @@ def compute_analytics(trades):
             "story": None
         }
 
-    wins = [t.get("pnl", 0) for t in trades if t.get("pnl", 0) > 0]
-    losses = [t.get("pnl", 0) for t in trades if t.get("pnl", 0) < 0]
+    # --- SANITIZE PNL VALUES ---
+    cleaned = []
+    for t in trades:
+        pnl = t.get("pnl")
+
+        try:
+            pnl = float(pnl)
+        except (TypeError, ValueError):
+            pnl = 0.0
+
+        t["pnl"] = pnl
+        cleaned.append(t)
+
+    trades = cleaned
+
+    # --- ANALYTICS ---
+    wins = [t["pnl"] for t in trades if t["pnl"] > 0]
+    losses = [t["pnl"] for t in trades if t["pnl"] < 0]
 
     trade_count = len(trades)
     win_rate = round(len(wins) / trade_count * 100, 2) if trade_count else None
@@ -92,7 +78,7 @@ def compute_analytics(trades):
     max_drawdown = 0
 
     for t in trades:
-        running += t.get("pnl", 0)
+        running += t["pnl"]
         cumulative.append(running)
         max_peak = max(max_peak, running)
         max_drawdown = min(max_drawdown, running - max_peak)
