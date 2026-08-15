@@ -1,6 +1,10 @@
 import pandas as pd
 
+
 def load_excel_trades(path="Trading Log 2026.xlsx"):
+    """
+    Load trades from Excel 'Trade Log' sheet into unified trade dicts.
+    """
     try:
         df = pd.read_excel(path, sheet_name="Trade Log")
     except Exception:

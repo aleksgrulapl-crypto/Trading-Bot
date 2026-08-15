@@ -50,16 +50,6 @@ def request(method, url, json=None):
         return None
 
 
-def fetch_positions_from(url):
-    response = request("GET", url)
-    if not response or response.status_code != 200:
-        return {}
-    try:
-        return response.json()
-    except Exception:
-        return {}
-
-
 def get_positions():
     url = f"{API_POSITIONS}?includeProfitLoss=true"
     response = request("GET", url)
@@ -93,14 +83,20 @@ def get_account():
 
 
 def enrich_account(raw):
+    """
+    Map Capital.com balance fields to dashboard fields:
+
+    - Funds  = balance.balance
+    - Balance (Equity) = balance.equity
+    - PnL    = balance.profitLoss
+    """
     if not raw:
         return {}
 
     bal = raw.get("balance", {})
 
-    # Capital.com: balance = Funds, equity = Equity, profitLoss = PnL
-    funds = bal.get("balance", 0)
-    equity = bal.get("equity", funds + bal.get("profitLoss", 0))
+    funds = bal.get("balance", 0)          # Capital "Funds"
+    equity = bal.get("equity", funds)      # Capital "Equity"
     pnl = bal.get("profitLoss", 0)
     available = bal.get("available", 0)
 
@@ -110,8 +106,7 @@ def enrich_account(raw):
 
     return {
         "funds": round(funds, 2),
-        "balance": round(equity, 2),   # Balance = Equity (what you want in the corner)
-        "equity": round(equity, 2),
+        "balance": round(equity, 2),       # label "Balance" shows Equity
         "pnl": round(pnl, 2),
         "available": round(available, 2),
         "available_color": "red" if available < 0 else "lime",

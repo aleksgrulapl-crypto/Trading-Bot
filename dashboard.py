@@ -1,5 +1,5 @@
 # ============================
-# DASHBOARD MODULE (TradingView Dashboard + Excel Import)
+# DASHBOARD MODULE
 # ============================
 
 import json
@@ -13,6 +13,7 @@ from trade_log import load_log
 from excel_import import load_excel_trades
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
+
 
 def login_required(view):
     @functools.wraps(view)
@@ -118,8 +119,10 @@ def compute_analytics(trades):
     avg_loss = round(sum(losses) / len(losses), 2) if losses else None
 
     expectancy = None
-    if avg_win is not None and avg_loss is not None:
-        expectancy = round((win_rate/100) * avg_win + (1 - win_rate/100) * avg_loss, 2)
+    if avg_win is not None and avg_loss is not None and win_rate is not None:
+        p_win = win_rate / 100
+        p_loss = 1 - p_win
+        expectancy = round(p_win * avg_win + p_loss * avg_loss, 2)
 
     cumulative = []
     running = 0
