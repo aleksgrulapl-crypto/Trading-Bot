@@ -11,6 +11,8 @@ from trade_log import log_trade, load_log
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS, API_MARKET
 from dashboard import dashboard as dashboard_blueprint
+from excel_import import import_excel_into_log
+import_excel_into_log("Trading Log 2026.xlsx")
 from scheduler import start_scheduler
 from utils import timestamp
 from close_position import close_position as close_position_module
