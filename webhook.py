@@ -57,6 +57,9 @@ def webhook():
                 print("[WEBHOOK] PARSE ERROR:", e3, flush=True)
                 return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
+    # ============================
+    # BLOCKED ALERT HANDLING
+    # ============================
     if alert.get("blocked"):
         print(f"[WEBHOOK] ALERT BLOCKED: {alert.get('reason')}", flush=True)
 
@@ -67,14 +70,17 @@ def webhook():
             side="BLOCKED",
             size=0,
             price=0,
-            sl=None,
-            tp=None,
+            sl=alert.get("sl"),
+            tp=alert.get("tp"),
             timestamp=timestamp(),
             timeframe=alert.get("timeframe")
         )
 
         return jsonify({"status": "blocked", "reason": alert.get("reason")}), 200
 
+    # ============================
+    # NORMAL TRADE FLOW
+    # ============================
     symbol = alert["symbol"]
     action = alert["action"]
     sl_price = alert["sl"]
@@ -181,9 +187,43 @@ def webhook():
     print("[WEBHOOK] Final TP:", tp_price, flush=True)
     print("[WEBHOOK] Final SIZE:", size, flush=True)
 
+    # ============================
+    # PLACE ORDER
+    # ============================
     result = place_order(epic, action, size, sl_price, tp_price)
 
     session.update_last_trade()
+
+    # ============================
+    # 🔥 NEW: LOG SUCCESSFUL OPEN TRADE
+    # ============================
+    try:
+        deal_id = None
+
+        if isinstance(result, dict):
+            deal_id = (
+                result.get("dealId")
+                or result.get("dealReference")
+                or result.get("deal_id")
+            )
+
+        log_trade(
+            ticker=symbol,
+            epic=epic,
+            deal_id=deal_id,
+            side=action,
+            size=size,
+            price=entry_price,
+            sl=sl_price,
+            tp=tp_price,
+            timestamp=timestamp(),
+            timeframe=timeframe
+        )
+
+        print(f"[WEBHOOK] OPEN TRADE LOGGED → {symbol} {action} size={size} dealId={deal_id}", flush=True)
+
+    except Exception as e:
+        print(f"[WEBHOOK] log_trade failed: {e}", flush=True)
 
     return jsonify({"status": "ok", "result": result}), 200
 
