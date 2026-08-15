@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, redirect
 import json
 import time
 import os
@@ -9,7 +9,7 @@ from sizing import calculate_size
 from order import place_order
 from trade_log import log_trade, load_log
 from auth import auth
-from config import API_POSITIONS, API_ACCOUNTS, API_MARKET, DASHBOARD_TITLE
+from config import API_POSITIONS, API_ACCOUNTS, API_MARKET
 from dashboard import dashboard as dashboard_blueprint
 from scheduler import start_scheduler
 from utils import timestamp
@@ -41,7 +41,6 @@ def webhook():
 
     alert = None
 
-    # Try JSON first
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
@@ -58,7 +57,6 @@ def webhook():
                 print("[WEBHOOK] PARSE ERROR:", e3, flush=True)
                 return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
-    # BLOCKED ALERT
     if alert.get("blocked"):
         print(f"[WEBHOOK] ALERT BLOCKED: {alert.get('reason')}", flush=True)
 
@@ -77,7 +75,6 @@ def webhook():
 
         return jsonify({"status": "blocked", "reason": alert.get("reason")}), 200
 
-    # VALID ALERT
     symbol = alert["symbol"]
     action = alert["action"]
     sl_price = alert["sl"]
@@ -86,7 +83,6 @@ def webhook():
 
     print(f"[WEBHOOK] Parsed alert → symbol={symbol}, action={action}, SL={sl_price}, TP={tp_price}, TF={timeframe}", flush=True)
 
-    # EPIC LOOKUP
     epic_data = session.verify_epic(symbol)
     epic = epic_data.get("epic")
 
@@ -110,7 +106,6 @@ def webhook():
 
         return jsonify({"status": "blocked", "reason": "epic_lookup_failed"}), 200
 
-    # MARKET SNAPSHOT
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
         print("[WEBHOOK] Market snapshot unavailable for:", epic, flush=True)
@@ -155,7 +150,6 @@ def webhook():
     entry_price = (bid + offer) / 2
     print(f"[WEBHOOK] Entry price midpoint: {entry_price}", flush=True)
 
-    # SIZING
     size_info = calculate_size(
         entry_price=entry_price,
         sl_price=sl_price,
@@ -187,7 +181,6 @@ def webhook():
     print("[WEBHOOK] Final TP:", tp_price, flush=True)
     print("[WEBHOOK] Final SIZE:", size, flush=True)
 
-    # PLACE ORDER
     result = place_order(epic, action, size, sl_price, tp_price)
 
     session.update_last_trade()
@@ -210,30 +203,8 @@ def raw_account():
 
 
 @app.route("/")
-@app.route("/dashboard")
-def dashboard():
-    raw_positions = session.get_positions() or []
-    positions = session.enrich_positions(raw_positions)
-
-    raw_account = session.get_account() or {}
-    account = session.enrich_account(raw_account)
-
-    trade_log = load_log()
-    daily_report = session.get_daily_report() or {}
-
-    # ⭐ Cache-busting token for dashboard.html + CSS
-    cache_bust = str(time.time())
-
-    return render_template(
-        "dashboard.html",
-        title=DASHBOARD_TITLE,
-        cache_bust=cache_bust,
-        account=account,
-        positions=positions,
-        trade_log=trade_log,
-        daily_report=daily_report,
-        system_status=session.shared_state.get("system_status", {})
-    )
+def root():
+    return redirect("/dashboard")
 
 
 @app.route("/close/<position_id>", methods=["POST"])
