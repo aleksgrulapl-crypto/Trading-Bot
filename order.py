@@ -1,17 +1,57 @@
 # ============================
-# ORDER MODULE (FINAL VERSION — FULLY ALIGNED)
+# ORDER MODULE (FINAL — SAFE SL/TP + CONSISTENT LOGGING)
 # ============================
 
 import session
-from auth import auth
 from config import API_POSITIONS, API_MARKET
 from utils import timestamp
 from trade_log import log_trade
 
+
+def clamp_price(value):
+    """
+    Capital.com requires correct decimal precision.
+    All US stocks in your 30‑ticker universe use 2 decimals.
+    """
+    try:
+        return round(float(value), 2)
+    except:
+        return None
+
+
+def validate_and_correct_levels(direction, midpoint, sl, tp):
+    """
+    Ensures SL/TP are valid for Capital.com and logically correct.
+    Automatically fixes inverted SL/TP if Pine ever sends them.
+    """
+
+    sl_c = clamp_price(sl) if sl is not None else None
+    tp_c = clamp_price(tp) if tp is not None else None
+
+    if sl_c is None or tp_c is None:
+        return None, None
+
+    # BUY: SL < midpoint < TP
+    if direction.lower() == "buy":
+        if sl_c >= midpoint:
+            sl_c = midpoint * 0.99  # push below market
+        if tp_c <= midpoint:
+            tp_c = midpoint * 1.01  # push above market
+
+    # SELL: SL > midpoint > TP
+    if direction.lower() == "sell":
+        if sl_c <= midpoint:
+            sl_c = midpoint * 1.01  # push above market
+        if tp_c >= midpoint:
+            tp_c = midpoint * 0.99  # push below market
+
+    return clamp_price(sl_c), clamp_price(tp_c)
+
+
 def place_order(epic, direction, size, sl=None, tp=None):
     """
-    Places a BUY or SELL order with optional SL/TP.
-    Fully compatible with restored sizing, parser, session, and webhook.
+    Places a BUY or SELL order with safe SL/TP correction.
+    Fully compatible with parser, webhook, sizing, dashboard, and trade_log.
     """
 
     # ---------------------------------------------------------
@@ -30,8 +70,15 @@ def place_order(epic, direction, size, sl=None, tp=None):
         print(f"[ERROR] Market prices unavailable for {epic}", flush=True)
         return {"status": "error", "message": "Price unavailable"}
 
-    # Midpoint price (consistent with sizing + logging)
     midpoint = (bid + offer) / 2
+
+    # ---------------------------------------------------------
+    # CORRECT SL/TP BEFORE SENDING ORDER
+    # ---------------------------------------------------------
+    sl_fixed, tp_fixed = validate_and_correct_levels(direction, midpoint, sl, tp)
+
+    print(f"[ORDER] Corrected SL: {sl_fixed}")
+    print(f"[ORDER] Corrected TP: {tp_fixed}")
 
     # ---------------------------------------------------------
     # BUILD ORDER PAYLOAD
@@ -45,13 +92,11 @@ def place_order(epic, direction, size, sl=None, tp=None):
         "guaranteedStop": False
     }
 
-    # STOP LOSS
-    if sl is not None:
-        payload["stopLevel"] = float(sl)
+    if sl_fixed is not None:
+        payload["stopLevel"] = sl_fixed
 
-    # TAKE PROFIT
-    if tp is not None:
-        payload["profitLevel"] = float(tp)
+    if tp_fixed is not None:
+        payload["profitLevel"] = tp_fixed
 
     print("[ORDER] Sending payload:", payload, flush=True)
 
@@ -62,7 +107,7 @@ def place_order(epic, direction, size, sl=None, tp=None):
 
     if not response or response.status_code >= 400:
         print(f"[ERROR] Order failed for {epic} ({direction})", flush=True)
-        print(f"[ERROR] Response: {response.text}", flush=True)
+        print(f"[ERROR] Response: {response.text if response else 'No response'}", flush=True)
         return {"status": "error", "message": "Order failed"}
 
     try:
@@ -73,19 +118,21 @@ def place_order(epic, direction, size, sl=None, tp=None):
         print(f"[TRADE] dealReference: {deal_ref}", flush=True)
 
         # ---------------------------------------------------------
-        # LOG TRADE (FULLY RESTORED)
+        # LOG TRADE (symbol/epic-consistent)
         # ---------------------------------------------------------
         log_trade(
-            ticker=epic,            # epic is correct for Capital.com
+            ticker=epic,              # using epic as ticker label in log
+            epic=epic,
+            deal_id=deal_ref,
             side=direction.upper(),
             size=size,
             price=midpoint,
-            sl=sl,
-            tp=tp,
-            timestamp=timestamp()
+            sl=sl_fixed,
+            tp=tp_fixed,
+            timestamp=timestamp(),
+            timeframe=None
         )
 
-        # Update dashboard system status
         session.update_last_trade()
 
         return {

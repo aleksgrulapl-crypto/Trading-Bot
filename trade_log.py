@@ -1,5 +1,5 @@
 # ============================
-# TRADE LOG MODULE (FINAL VERSION — SL/TP + TRAIL SUPPORT)
+# TRADE LOG MODULE (FINAL VERSION — CONSISTENT + TRAIL READY)
 # ============================
 
 import json
@@ -11,6 +11,7 @@ LOG_FILE = config.TRADE_LOG_FILE
 
 # Ensure directory exists
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+
 
 # ---------------------------------------------------------
 # LOAD LOG
@@ -51,24 +52,33 @@ def save_log(log):
 # LOG OPEN TRADE
 # ---------------------------------------------------------
 
-def log_trade(ticker, side, size, price, sl=None, tp=None, timestamp=None, timeframe=None):
+def log_trade(ticker, epic=None, deal_id=None, side=None, size=None,
+              price=None, sl=None, tp=None, timestamp=None, timeframe=None):
     """
     Logs an OPEN trade.
-    Includes SL/TP and timeframe.
+    Includes:
+    - symbol + epic
+    - dealId
+    - entry price
+    - SL/TP
+    - timeframe
     """
+
     log = load_log()
 
     entry = {
         "time": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "ticker": ticker,
-        "side": side.upper(),          # BUY or SELL
+        "ticker": ticker,               # symbol
+        "epic": epic,                   # Capital.com EPIC
+        "dealId": deal_id,
+        "side": side.upper(),           # BUY or SELL
         "size": float(size),
         "entry_price": float(price),
         "exit_price": None,
         "pnl": None,
         "sl": sl,
         "tp": tp,
-        "trail": None,                 # future trailing stop updates
+        "trail": None,
         "timeframe": timeframe
     }
 
@@ -80,19 +90,29 @@ def log_trade(ticker, side, size, price, sl=None, tp=None, timestamp=None, timef
 # LOG CLOSED TRADE
 # ---------------------------------------------------------
 
-def log_close(ticker, size, close_price, pnl, sl=None, tp=None, timestamp=None, timeframe=None):
+def log_close(ticker, epic=None, deal_id=None, direction=None, size=None,
+              entry_price=None, close_price=None, pnl=None,
+              sl=None, tp=None, timestamp=None, timeframe=None):
     """
     Logs a CLOSED trade with final PnL.
-    Includes SL/TP and timeframe.
+    Includes:
+    - original direction (BUY/SELL)
+    - entry price
+    - exit price
+    - SL/TP
+    - timeframe
     """
+
     log = load_log()
 
     entry = {
         "time": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "ticker": ticker,
-        "side": "CLOSE",
+        "epic": epic,
+        "dealId": deal_id,
+        "side": direction.upper() if direction else "CLOSE",
         "size": float(size),
-        "entry_price": None,
+        "entry_price": entry_price,
         "exit_price": float(close_price),
         "pnl": float(pnl),
         "sl": sl,
@@ -109,15 +129,19 @@ def log_close(ticker, size, close_price, pnl, sl=None, tp=None, timestamp=None, 
 # LOG TRAILING STOP UPDATE
 # ---------------------------------------------------------
 
-def log_trail_update(ticker, new_sl, price, timestamp=None, timeframe=None):
+def log_trail_update(ticker, epic=None, deal_id=None, new_sl=None,
+                     price=None, timestamp=None, timeframe=None):
     """
     Logs a trailing stop adjustment event.
     """
+
     log = load_log()
 
     entry = {
         "time": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "ticker": ticker,
+        "epic": epic,
+        "dealId": deal_id,
         "side": "TRAIL",
         "size": None,
         "entry_price": None,

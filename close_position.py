@@ -1,5 +1,5 @@
 # ============================
-# CLOSE POSITION MODULE (FINAL CLEAN + TIMEFRAME SUPPORT)
+# CLOSE POSITION MODULE (FINAL + TRAIL-SL READY + CONSISTENT)
 # ============================
 
 import session
@@ -15,8 +15,10 @@ def close_position(position_id):
     Includes:
     - Correct exit price
     - Correct PnL
-    - Timeframe tagging
+    - Symbol + EPIC + dealId logging
+    - Direction + entry_price logging (required for trailing SL)
     - Dashboard state refresh
+    - Safe error handling
     """
 
     auth.ensure_token()
@@ -58,24 +60,35 @@ def close_position(position_id):
                 "message": f"Position {position_id} closed (details unavailable)."
             }
 
-        ticker = closed["ticker"]
+        # -----------------------------
+        # Extract full trade details
+        # -----------------------------
+        ticker = closed["ticker"]          # symbol
+        epic = closed["epic"]              # Capital.com EPIC
+        deal_id = closed["id"]             # dealId
+        direction = closed["direction"]    # BUY or SELL
         size = closed["size"]
+        entry_price = closed["price"]
         close_price = closed["current_price"]
         pnl = closed["profit"]
 
-        # -----------------------------
-        # Extract timeframe (NEW)
-        # -----------------------------
-        timeframe = closed.get("timeframe")  # enriched_positions should include this
+        # Timeframe is not stored in positions → safe default
+        timeframe = None
 
         # -----------------------------
-        # Log closed trade
+        # Log closed trade (full detail)
         # -----------------------------
         log_close(
             ticker=ticker,
+            epic=epic,
+            deal_id=deal_id,
+            direction=direction,
             size=size,
+            entry_price=entry_price,
             close_price=close_price,
             pnl=pnl,
+            sl=closed.get("stopLevel"),
+            tp=closed.get("limitLevel"),
             timestamp=timestamp(),
             timeframe=timeframe
         )
@@ -87,7 +100,7 @@ def close_position(position_id):
         # -----------------------------
         session.shared_state["positions"] = enriched_positions
         session.shared_state["account"] = session.enrich_account(session.get_account())
-        session.shared_state["trade_log"] = session.shared_state["trade_log"]  # already updated
+        session.shared_state["trade_log"] = session.shared_state["trade_log"]
         session.shared_state["daily_report"] = session.get_daily_report()
 
         # -----------------------------
@@ -98,10 +111,13 @@ def close_position(position_id):
         return {
             "status": "success",
             "ticker": ticker,
+            "epic": epic,
+            "dealId": deal_id,
+            "direction": direction,
             "size": size,
+            "entry_price": entry_price,
             "price": close_price,
             "pnl": pnl,
-            "timeframe": timeframe,
             "message": f"Position {position_id} closed."
         }
 

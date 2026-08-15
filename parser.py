@@ -1,5 +1,5 @@
 # ============================
-# TradingView Alert Parser (STRICT + BLOCKED TRADE SUPPORT)
+# TradingView Alert Parser (STRICT + EXIT-SIGNAL BLOCKING)
 # ============================
 
 PLACEHOLDER_VALUES = {"{{alert_message}}", "", None}
@@ -8,7 +8,7 @@ PLACEHOLDER_VALUES = {"{{alert_message}}", "", None}
 def parse_tradingview_alert(data):
     """
     Accepts:
-    - Raw TradingView alert string: "BUY|NVDA|SL:123|TP:130"
+    - Raw TradingView alert string: "BUY|NVDA|SL:123|TP:130|TF:5M"
     - JSON TradingView alert dict: {"symbol": "NVDA", "action": "buy", "payload": "..."}
     Returns either:
     - Valid parsed alert dict
@@ -33,7 +33,7 @@ def parse_tradingview_alert(data):
 def parse_raw_alert_strict(raw: str):
     """
     Expected clean format:
-    BUY|NVDA|SL:123|TP:130
+    BUY|NVDA|SL:123|TP:130|TF:5M
     """
 
     if raw in PLACEHOLDER_VALUES:
@@ -44,26 +44,39 @@ def parse_raw_alert_strict(raw: str):
     if len(parts) < 4:
         return block_alert("malformed_raw_alert", raw=raw)
 
-    direction = parts[0].lower()
-    symbol = normalise_symbol(parts[1])
+    # Direction
+    direction_raw = parts[0].strip().lower()
 
-    if not direction or direction not in ("buy", "sell"):
+    # Ignore exit signals entirely
+    if direction_raw.startswith("exit"):
+        return block_alert("ignored_exit_signal", raw=raw)
+
+    # Normal BUY/SELL
+    direction = direction_raw.split(" ")[0]
+    if direction not in ("buy", "sell"):
         return block_alert("missing_direction", raw=raw)
 
+    # Symbol
+    symbol = normalise_symbol(parts[1])
     if not symbol:
         return block_alert("missing_symbol", raw=raw)
 
     sl = None
     tp = None
+    timeframe = None
 
+    # Parse SL/TP/TF from any position
     for part in parts:
         part = part.strip()
 
         if part.upper().startswith("SL:"):
             sl = safe_float_or_none(part.replace("SL:", "").strip())
 
-        if part.upper().startswith("TP:"):
+        elif part.upper().startswith("TP:"):
             tp = safe_float_or_none(part.replace("TP:", "").strip())
+
+        elif part.upper().startswith("TF:"):
+            timeframe = part.replace("TF:", "").strip().upper()
 
     if sl is None or tp is None:
         return block_alert("missing_sl_tp", raw=raw)
@@ -75,6 +88,7 @@ def parse_raw_alert_strict(raw: str):
         "quantity": 1,
         "sl": sl,
         "tp": tp,
+        "timeframe": timeframe,
         "raw": raw
     }
 
@@ -85,9 +99,15 @@ def parse_raw_alert_strict(raw: str):
 
 def parse_json_alert_strict(data):
     symbol = normalise_symbol(data.get("symbol"))
-    direction = (data.get("action") or "").lower()
+    direction_raw = (data.get("action") or "").lower()
     quantity = safe_float_or_none(data.get("quantity", 1))
     payload_raw = data.get("payload")
+
+    # Ignore exit signals
+    if direction_raw.startswith("exit"):
+        return block_alert("ignored_exit_signal", raw=data)
+
+    direction = direction_raw.split(" ")[0]
 
     # Basic validation
     if not symbol:
@@ -122,6 +142,7 @@ def parse_json_alert_strict(data):
         "quantity": quantity,
         "sl": sl,
         "tp": tp,
+        "timeframe": payload.get("timeframe"),
         "raw": payload_raw
     }
 
@@ -133,7 +154,7 @@ def parse_json_alert_strict(data):
 def parse_payload_strict(payload: str):
     """
     Expected clean format:
-    BUY|NVDA|SL:123|TP:130
+    BUY|NVDA|SL:123|TP:130|TF:5M
     """
 
     if payload in PLACEHOLDER_VALUES:
@@ -144,17 +165,23 @@ def parse_payload_strict(payload: str):
     if len(parts) < 4:
         raise ValueError("malformed payload")
 
-    direction = parts[0].lower()
-    symbol = normalise_symbol(parts[1])
+    direction_raw = parts[0].strip().lower()
 
+    # Ignore exit signals
+    if direction_raw.startswith("exit"):
+        raise ValueError("exit signal ignored")
+
+    direction = direction_raw.split(" ")[0]
     if direction not in ("buy", "sell"):
         raise ValueError("missing direction")
 
+    symbol = normalise_symbol(parts[1])
     if not symbol:
         raise ValueError("missing symbol")
 
     sl = None
     tp = None
+    timeframe = None
 
     for part in parts:
         part = part.strip()
@@ -162,8 +189,11 @@ def parse_payload_strict(payload: str):
         if part.upper().startswith("SL:"):
             sl = safe_float_or_none(part.replace("SL:", "").strip())
 
-        if part.upper().startswith("TP:"):
+        elif part.upper().startswith("TP:"):
             tp = safe_float_or_none(part.replace("TP:", "").strip())
+
+        elif part.upper().startswith("TF:"):
+            timeframe = part.replace("TF:", "").strip().upper()
 
     if sl is None or tp is None:
         raise ValueError("missing SL/TP")
@@ -172,7 +202,8 @@ def parse_payload_strict(payload: str):
         "direction": direction,
         "symbol": symbol,
         "sl": sl,
-        "tp": tp
+        "tp": tp,
+        "timeframe": timeframe
     }
 
 
@@ -206,5 +237,5 @@ def normalise_symbol(symbol: str):
 def safe_float_or_none(value):
     try:
         return float(value)
-    except:
+    except Exception:
         return None

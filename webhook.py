@@ -1,10 +1,11 @@
 # ============================
-# WEBHOOK MODULE (STRICT + CLEAN + FULLY COMPATIBLE)
+# WEBHOOK MODULE (FINAL — STRICT + CONSISTENT + TRAIL-READY)
 # ============================
 
 from flask import Flask, request, jsonify, render_template
 import json
 import time
+import os
 
 import session
 from parser import parse_tradingview_alert
@@ -12,10 +13,11 @@ from sizing import calculate_size
 from order import place_order
 from trade_log import log_trade, load_log
 from auth import auth
-from config import API_POSITIONS, API_ACCOUNTS, API_MARKET
+from config import API_POSITIONS, API_ACCOUNTS, API_MARKET, DASHBOARD_TITLE
 from dashboard import dashboard as dashboard_blueprint
 from scheduler import start_scheduler
-from utils import timestamp  # correct timestamp source
+from utils import timestamp
+from close_position import close_position as close_position_module
 
 app = Flask(__name__)
 app.url_map.strict_slashes = False
@@ -42,14 +44,17 @@ def webhook():
     # ---------------------------------------------------------
     alert = None
 
+    # Try JSON first
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
     except:
+        # Try JSON via manual load
         try:
             data = json.loads(raw)
             alert = parse_tradingview_alert(data)
         except:
+            # Try raw string
             try:
                 alert = parse_tradingview_alert(raw)
             except Exception as e:
@@ -62,16 +67,17 @@ def webhook():
     if alert.get("blocked"):
         print(f"[WEBHOOK] ALERT BLOCKED: {alert.get('reason')}")
 
-        # Minimal blocked trade entry (Option B1)
         log_trade(
             ticker=alert.get("symbol") or "UNKNOWN",
+            epic=None,
+            deal_id=None,
             side="BLOCKED",
             size=0,
             price=0,
             sl=None,
             tp=None,
             timestamp=timestamp(),
-            timeframe=None
+            timeframe=alert.get("timeframe")
         )
 
         return jsonify({"status": "blocked", "reason": alert.get("reason")}), 200
@@ -83,6 +89,7 @@ def webhook():
     action = alert["action"]
     sl_price = alert["sl"]
     tp_price = alert["tp"]
+    timeframe = alert.get("timeframe")
 
     # ---------------------------------------------------------
     # EPIC LOOKUP
@@ -95,13 +102,15 @@ def webhook():
 
         log_trade(
             ticker=symbol,
+            epic=None,
+            deal_id=None,
             side="BLOCKED",
             size=0,
             price=0,
-            sl=None,
-            tp=None,
+            sl=sl_price,
+            tp=tp_price,
             timestamp=timestamp(),
-            timeframe=None
+            timeframe=timeframe
         )
 
         return jsonify({"status": "blocked", "reason": "epic_lookup_failed"}), 200
@@ -115,13 +124,15 @@ def webhook():
 
         log_trade(
             ticker=symbol,
+            epic=epic,
+            deal_id=None,
             side="BLOCKED",
             size=0,
             price=0,
-            sl=None,
-            tp=None,
+            sl=sl_price,
+            tp=tp_price,
             timestamp=timestamp(),
-            timeframe=None
+            timeframe=timeframe
         )
 
         return jsonify({"status": "blocked", "reason": "market_snapshot_unavailable"}), 200
@@ -135,13 +146,15 @@ def webhook():
 
         log_trade(
             ticker=symbol,
+            epic=epic,
+            deal_id=None,
             side="BLOCKED",
             size=0,
             price=0,
-            sl=None,
-            tp=None,
+            sl=sl_price,
+            tp=tp_price,
             timestamp=timestamp(),
-            timeframe=None
+            timeframe=timeframe
         )
 
         return jsonify({"status": "blocked", "reason": "price_unavailable"}), 200
@@ -161,16 +174,17 @@ def webhook():
     if size_info["blocked"]:
         print(f"[WEBHOOK] SIZING BLOCKED: {size_info['reason']}")
 
-        # Option Q: log mid-price if available
         log_trade(
             ticker=symbol,
+            epic=epic,
+            deal_id=None,
             side="BLOCKED",
             size=0,
             price=entry_price,
-            sl=None,
-            tp=None,
+            sl=sl_price,
+            tp=tp_price,
             timestamp=timestamp(),
-            timeframe=None
+            timeframe=timeframe
         )
 
         return jsonify({"status": "blocked", "reason": size_info["reason"]}), 200
@@ -206,9 +220,11 @@ app.register_blueprint(dashboard_blueprint)
 def raw_positions():
     return jsonify(session.fetch_positions_from(API_POSITIONS))
 
+
 @app.route("/raw/account")
 def raw_account():
-    return jsonify(session.request("GET", API_ACCOUNTS).json())
+    r = session.request("GET", API_ACCOUNTS)
+    return jsonify(r.json() if r else {})
 
 
 # ---------------------------------------------------------
@@ -229,7 +245,7 @@ def dashboard():
 
     return render_template(
         "dashboard.html",
-        title="AG Capital Trader",
+        title=DASHBOARD_TITLE,
         cache_bust=time.time(),
         account=account,
         positions=positions,
@@ -240,17 +256,13 @@ def dashboard():
 
 
 # ---------------------------------------------------------
-# CLOSE POSITION
+# CLOSE POSITION (uses close_position module)
 # ---------------------------------------------------------
 
 @app.route("/close/<position_id>", methods=["POST"])
 def close_position(position_id):
-    auth.ensure_token()
-    payload = {"dealId": position_id, "direction": "SELL", "size": 0}
-    r = session.request("POST", f"{API_POSITIONS}/{position_id}/close", json=payload)
-    result = r.json()
-    session.update_last_trade()
-    return jsonify({"status": "ok", "result": result})
+    result = close_position_module(position_id)
+    return jsonify(result), 200
 
 
 # ---------------------------------------------------------
@@ -260,8 +272,6 @@ def close_position(position_id):
 print("[Webhook] Starting scheduler...")
 start_scheduler()
 print("[Webhook] Scheduler started.")
-
-import os
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

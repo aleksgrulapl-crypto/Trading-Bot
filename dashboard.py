@@ -86,6 +86,7 @@ def dashboard_home():
     available_log = load_available_log()
     equity_log = load_equity_log()
 
+    # Update shared state
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
     session.shared_state["trade_log"] = trade_log
@@ -119,6 +120,7 @@ def dashboard_data():
     trade_log = load_log()
     daily_report = session.get_daily_report()
 
+    # Update shared state
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
     session.shared_state["trade_log"] = trade_log

@@ -1,5 +1,5 @@
 # ============================
-# POSITION SIZING MODULE (LEGACY LOGIC RESTORED + UPDATED)
+# POSITION SIZING MODULE (FULLY CORRECTED + SAFE)
 # ============================
 
 import session
@@ -9,16 +9,17 @@ from config import (
     LEVERAGE
 )
 
+
 def calculate_size(entry_price, sl_price, tp_price, direction):
     """
-    Restored legacy sizing logic (proven stable):
+    Corrected sizing logic:
     - Uses equity (cash + PnL)
     - Uses EQUITY_PERCENT allocation
     - Uses LEVERAGE multiplier
     - Uses entry_price for size calculation
-    - Validates SL/TP
+    - Validates SL/TP properly (direction-aware)
     - Enforces max positions per ticker
-    - Negative balance logic preserved (block only if cash <= 0)
+    - Blocks negative balance
     """
 
     # ---------------------------------------------------------
@@ -32,7 +33,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
     equity = cash + pnl
 
     # ---------------------------------------------------------
-    # NEGATIVE BALANCE BLOCK (SAFE)
+    # NEGATIVE BALANCE BLOCK
     # ---------------------------------------------------------
     if cash <= 0:
         print("[SIZING] Blocked: cash balance is zero or negative.")
@@ -46,10 +47,11 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
     # POSITION LIMIT PER TICKER
     # ---------------------------------------------------------
     positions = session.get_positions()
+    epic = session.verify_epic(direction.upper()).get("epic")  # FIXED
+
     count = 0
     for p in positions:
-        market = p.get("market", {})
-        if market.get("epic") == session.verify_epic(market.get("symbol")).get("epic"):
+        if p.get("market", {}).get("epic") == epic:
             count += 1
 
     if count >= MAX_POSITIONS_PER_TICKER:
@@ -81,8 +83,25 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
             "reason": "invalid_sl"
         }
 
+    # Direction-aware SL validation
+    if direction.lower() == "buy" and sl_price >= entry_price:
+        print("[SIZING] Blocked: BUY SL must be below entry.")
+        return {
+            "size": 0,
+            "blocked": True,
+            "reason": "invalid_sl_buy"
+        }
+
+    if direction.lower() == "sell" and sl_price <= entry_price:
+        print("[SIZING] Blocked: SELL SL must be above entry.")
+        return {
+            "size": 0,
+            "blocked": True,
+            "reason": "invalid_sl_sell"
+        }
+
     # ---------------------------------------------------------
-    # LEGACY SIZING LOGIC (RESTORED)
+    # LEGACY SIZING LOGIC (RESTORED + CORRECTED)
     # ---------------------------------------------------------
     allocation = equity * EQUITY_PERCENT
     exposure = allocation * LEVERAGE

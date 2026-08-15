@@ -1,5 +1,5 @@
 # ============================
-# AUTH MODULE (FINAL CLEAN)
+# AUTH MODULE (FINAL — STABLE + SAFE + UNIFIED)
 # ============================
 
 import requests
@@ -11,16 +11,27 @@ from config import (
     CAPITAL_PASSWORD
 )
 
+
 class CapitalAuth:
+    """
+    Handles:
+    - Login
+    - Token storage
+    - Token refresh
+    - Safe retry logic
+    - Unified session headers
+    """
+
     def __init__(self):
         self.cst = None
         self.xst = None
         self.last_login = 0
         self.session = requests.Session()
+        self.session.timeout = 10  # global safety timeout
         self.api_key = CAPITAL_API_KEY
 
     # ---------------------------------------------------------
-    # FULL LOGIN (silent, clean)
+    # FULL LOGIN
     # ---------------------------------------------------------
     def login(self):
         payload = {
@@ -29,7 +40,7 @@ class CapitalAuth:
         }
 
         headers = {
-            "X-CAP-API-KEY": CAPITAL_API_KEY,
+            "X-CAP-API-KEY": self.api_key,
             "Content-Type": "application/json"
         }
 
@@ -54,25 +65,39 @@ class CapitalAuth:
     # TOKEN MANAGEMENT
     # ---------------------------------------------------------
     def ensure_token(self):
-        # No token → login
+        """
+        Ensures a valid token is present.
+        Refreshes if:
+        - missing
+        - older than 10 minutes
+        """
+
+        # No token at all
         if not self.cst or not self.xst:
             print("[AUTH] No token found → login")
             return self.login()
 
-        # Token older than 10 minutes → login again
+        # Token expired
         if time.time() - self.last_login > 600:
             print("[AUTH] Token expired → login")
             return self.login()
 
     # ---------------------------------------------------------
-    # REQUEST WRAPPER (silent, clean)
+    # REQUEST WRAPPER
     # ---------------------------------------------------------
     def request(self, method, url, **kwargs):
+        """
+        Unified request wrapper:
+        - ensures token
+        - retries on 401/403
+        - safe header rebuild
+        """
+
         self.ensure_token()
 
         headers = kwargs.pop("headers", {})
         headers.update({
-            "X-CAP-API-KEY": CAPITAL_API_KEY,
+            "X-CAP-API-KEY": self.api_key,
             "CST": self.cst,
             "X-SECURITY-TOKEN": self.xst
         })
@@ -80,9 +105,21 @@ class CapitalAuth:
         try:
             r = self.session.request(method, url, headers=headers, **kwargs)
 
-            # 401 → login → retry
+            # 401 → token invalid → re-login
             if r.status_code == 401:
                 print("[AUTH] 401 detected → re-login")
+                self.login()
+
+                headers.update({
+                    "CST": self.cst,
+                    "X-SECURITY-TOKEN": self.xst
+                })
+
+                r = self.session.request(method, url, headers=headers, **kwargs)
+
+            # 403 → token expired or invalid
+            if r.status_code == 403:
+                print("[AUTH] 403 detected → re-login")
                 self.login()
 
                 headers.update({

@@ -1,11 +1,13 @@
 # ============================
-# REPORT MODULE (RESTORED + VERIFIED)
+# REPORT MODULE (RESTORED + FIXED + AUTO-FETCH)
 # ============================
 
 import json
 import os
 from config import DAILY_REPORT_FILE
 from utils import timestamp
+import session
+
 
 # ---------------------------------------------------------
 # LOAD DAILY REPORT
@@ -31,6 +33,7 @@ def get_daily_report():
         print(f"[REPORT] Error reading daily report: {e}")
         return {}
 
+
 # ---------------------------------------------------------
 # SAVE DAILY REPORT
 # ---------------------------------------------------------
@@ -49,20 +52,30 @@ def save_daily_report(report_data):
     except Exception as e:
         print(f"[REPORT] Failed to save daily report: {e}")
 
+
 # ---------------------------------------------------------
-# GENERATE DAILY REPORT (OPTIONAL)
+# GENERATE DAILY REPORT (AUTO-FETCH)
 # ---------------------------------------------------------
 
-def generate_daily_report(positions, account):
+def generate_daily_report():
     """
-    Generates a daily report structure.
+    Generates a daily report using live session data.
+    Called automatically by scheduler with no arguments.
     """
 
-    report_data = {
-        "timestamp": timestamp(),
-        "positions": positions,
-        "account": account
-    }
+    try:
+        positions = session.get_positions() or []
+        account = session.get_account() or {}
 
-    save_daily_report(report_data)
-    return report_data
+        report_data = {
+            "timestamp": timestamp(),
+            "positions": positions,
+            "account": account
+        }
+
+        save_daily_report(report_data)
+        return report_data
+
+    except Exception as e:
+        print(f"[REPORT] Error generating daily report: {e}")
+        return {}

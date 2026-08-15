@@ -1,5 +1,5 @@
 # ============================
-# SCHEDULER MODULE (RESTORED + MODERNISED)
+# SCHEDULER MODULE (RESTORED + MODERNISED + SAFE)
 # ============================
 
 import threading
@@ -91,7 +91,8 @@ class Scheduler:
             "hour": hour,
             "minute": minute,
             "func": func,
-            "hourly": False
+            "hourly": False,
+            "last_run": None
         })
 
     def add_hourly_job(self, minute, func):
@@ -99,7 +100,8 @@ class Scheduler:
             "hour": None,
             "minute": minute,
             "func": func,
-            "hourly": True
+            "hourly": True,
+            "last_run": None
         })
 
     def start(self):
@@ -115,26 +117,30 @@ class Scheduler:
             now_uk = datetime.now(UK_TZ)
 
             for job in self.jobs:
-
                 # DAILY JOBS
                 if not job["hourly"]:
                     if now_uk.hour == job["hour"] and now_uk.minute == job["minute"]:
-                        print(f"[Scheduler] Running daily job: {job['func'].__name__}")
-                        try:
-                            job["func"]()
-                        except Exception as e:
-                            print(f"[Scheduler] Error running daily job {job['func'].__name__}: {e}")
-                        time.sleep(60)
+                        # Prevent duplicate runs
+                        if job["last_run"] != now_uk.date():
+                            print(f"[Scheduler] Running daily job: {job['func'].__name__}")
+                            try:
+                                job["func"]()
+                                job["last_run"] = now_uk.date()
+                            except Exception as e:
+                                print(f"[Scheduler] Error running daily job {job['func'].__name__}: {e}")
 
                 # HOURLY JOBS
                 else:
                     if now_uk.minute == job["minute"]:
-                        print(f"[Scheduler] Running hourly job: {job['func'].__name__}")
-                        try:
-                            job["func"]()
-                        except Exception as e:
-                            print(f"[Scheduler] Error running hourly job {job['func'].__name__}: {e}")
-                        time.sleep(60)
+                        # Prevent duplicate runs
+                        hour_key = (now_uk.year, now_uk.month, now_uk.day, now_uk.hour)
+                        if job["last_run"] != hour_key:
+                            print(f"[Scheduler] Running hourly job: {job['func'].__name__}")
+                            try:
+                                job["func"]()
+                                job["last_run"] = hour_key
+                            except Exception as e:
+                                print(f"[Scheduler] Error running hourly job {job['func'].__name__}: {e}")
 
             # Update scheduler heartbeat
             session.shared_state["system_status"]["last_scheduler"] = timestamp()

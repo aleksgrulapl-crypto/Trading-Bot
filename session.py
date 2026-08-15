@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (FINAL RESTORED + UPDATED)
+# SESSION MODULE (STABLE + CACHED + UPDATED)
 # ============================
 
 import requests
@@ -26,7 +26,13 @@ shared_state = {
 # ---------------------------------------------------------
 
 def get_headers():
-    auth.ensure_token()
+    try:
+        auth.ensure_token()
+        shared_state["system_status"]["auth"] = "OK"
+    except Exception as e:
+        print(f"[AUTH] ensure_token failed: {e}")
+        shared_state["system_status"]["auth"] = "ERROR"
+
     return {
         "X-CAP-API-KEY": auth.api_key,
         "CST": auth.cst,
@@ -70,14 +76,16 @@ def get_positions():
     url = f"{API_POSITIONS}?includeProfitLoss=true"
     response = request("GET", url)
     if not response or response.status_code != 200:
-        return []
+        return shared_state.get("positions", [])
+
     try:
         data = response.json()
         positions = data.get("positions", [])
         shared_state["positions"] = positions
         return positions
-    except Exception:
-        return []
+    except Exception as e:
+        print(f"[POSITIONS] Failed to parse positions: {e}")
+        return shared_state.get("positions", [])
 
 # ---------------------------------------------------------
 # GET ACCOUNT (USES API_ACCOUNTS)
@@ -92,7 +100,7 @@ def get_account():
     """
     response = request("GET", API_ACCOUNTS)
     if not response or response.status_code != 200:
-        return {}
+        return shared_state.get("account", {})
 
     try:
         data = response.json()
@@ -100,8 +108,9 @@ def get_account():
         account = accounts[0] if accounts else {}
         shared_state["account"] = account
         return account
-    except Exception:
-        return {}
+    except Exception as e:
+        print(f"[ACCOUNT] Failed to parse account: {e}")
+        return shared_state.get("account", {})
 
 # ---------------------------------------------------------
 # ENRICH ACCOUNT
@@ -137,6 +146,9 @@ def enrich_account(raw):
 # ---------------------------------------------------------
 
 def verify_epic(symbol):
+    if not symbol:
+        return {"epic": None, "source": "invalid_symbol"}
+
     symbol = symbol.upper()
 
     if symbol in EPIC_MAP:
@@ -171,8 +183,8 @@ def enrich_positions(raw_positions):
     enriched = []
 
     for item in raw_positions:
-        pos = item["position"]
-        market = item["market"]
+        pos = item.get("position", {})
+        market = item.get("market", {})
 
         profit = pos.get("upl", 0)
 
@@ -203,7 +215,7 @@ def get_daily_report():
         return report_data
     except Exception as e:
         print(f"[REPORT] Failed to load daily report: {e}")
-        return {}
+        return shared_state.get("daily_report", {})
 
 # ---------------------------------------------------------
 # SYSTEM STATUS UPDATES
