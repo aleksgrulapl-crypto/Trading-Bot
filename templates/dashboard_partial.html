@@ -1,10 +1,7 @@
-<!-- rebuild: {{ 999999 }} -->
-
 <!-- ============================
-     ACCOUNT SUMMARY
+     ACCOUNT SUMMARY (PROFESSIONAL)
 ============================= -->
 <div class="section card">
-
     <h2 class="section-title">Account Summary</h2>
 
     <div class="grid-2">
@@ -28,7 +25,7 @@
 
 
 <!-- ============================
-     OPEN POSITIONS (CARD VIEW)
+     OPEN POSITIONS (PROFESSIONAL GRID)
 ============================= -->
 <div class="section card">
     <h2 class="section-title">Open Positions</h2>
@@ -76,7 +73,7 @@
 
 
 <!-- ============================
-     TRADE LOG (MODERNISED)
+     TRADE LOG (PROFESSIONAL TABLE)
 ============================= -->
 <div class="section card">
     <h2 class="section-title">Trade Log</h2>
@@ -85,14 +82,16 @@
     <table class="trade-table">
         <thead>
             <tr>
-                <th>Time</th>
+                <th>Trade ID</th>
+                <th>Open</th>
+                <th>Close</th>
                 <th>Ticker</th>
                 <th>Side</th>
                 <th>Size</th>
                 <th>Entry</th>
                 <th>Exit</th>
                 <th>PnL</th>
-                <th>Timeframe</th>
+                <th>Status</th>
             </tr>
         </thead>
 
@@ -100,9 +99,11 @@
         {% for t in trade_log %}
         {% set pnl = t.pnl or 0 %}
         <tr>
-            <td>{{ t.time }}</td>
+            <td>{{ t.trade_id or t.dealId }}</td>
+            <td>{{ t.open_timestamp or t.time }}</td>
+            <td>{{ t.close_timestamp or "-" }}</td>
             <td>{{ t.ticker }}</td>
-            <td>{{ t.side }}</td>
+            <td class="{{ t.side }}">{{ t.side }}</td>
             <td>{{ t.size }}</td>
 
             <td>
@@ -122,7 +123,7 @@
             </td>
 
             <td>
-                {% if t.side == "CLOSE" %}
+                {% if t.pnl is not none %}
                     <span class="{{ 'green' if pnl >= 0 else 'red' }}">
                         £{{ pnl | round(2) }}
                     </span>
@@ -131,7 +132,7 @@
                 {% endif %}
             </td>
 
-            <td>{{ t.timeframe or "N/A" }}</td>
+            <td>{{ t.status or "N/A" }}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -143,7 +144,7 @@
 
 
 <!-- ============================
-     DAILY REPORT
+     DAILY REPORT (CLEANED)
 ============================= -->
 <div class="section card">
     <h2 class="section-title">Daily Report</h2>
@@ -171,7 +172,7 @@
 
 
 <!-- ============================
-     SYSTEM STATUS
+     SYSTEM STATUS (CLEANED)
 ============================= -->
 <div class="section card">
     <h2 class="section-title">System Status</h2>
