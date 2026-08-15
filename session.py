@@ -104,11 +104,11 @@ def enrich_account(raw):
 
     equity = cash + pnl
 
-    margin_warning = None    # unchanged logic
+    margin_warning = None
     if available < 0:
         margin_warning = "⚠ Margin Warning: Available balance is negative."
 
-    # Funds = cash, Balance = equity (as per your request)
+    # Funds = cash, Balance = equity
     return {
         "funds": round(cash, 2),
         "balance": round(equity, 2),

@@ -30,12 +30,7 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
         direction = row.get("Direction")
         side = None
         if isinstance(direction, str):
-            direction = direction.upper()
-            # keep BUY/SELL for template logic
-            if direction in ("BUY", "SELL"):
-                side = direction
-            else:
-                side = direction
+            side = direction.upper()
         else:
             side = direction
 
@@ -53,7 +48,7 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
             "checklist_passed": row.get("Checklist Passed?"),
             "notes": row.get("Notes"),
 
-            # extra fields for analytics / future use
+            # extra fields
             "trade_id": row.get("Trade ID"),
             "currency": row.get("Currency"),
             "platform": row.get("Trading Platform"),

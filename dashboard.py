@@ -34,28 +34,38 @@ def normalize_trades(trades):
     normalized = []
 
     for t in trades:
-        # legacy keys → new keys
-        if "symbol" in t and "ticker" not in t:
-            t["ticker"] = t.get("symbol")
+        # timestamps
+        t.setdefault("open_timestamp", t.get("time"))
+        t.setdefault("close_timestamp", t.get("time"))
 
-        if "time" in t:
-            # if open/close timestamps missing, use time
-            t.setdefault("open_timestamp", t.get("time"))
-            t.setdefault("close_timestamp", t.get("time"))
+        # ticker fallback
+        if not t.get("ticker"):
+            t["ticker"] = t.get("epic") or t.get("symbol") or "—"
 
-        # side normalization: keep BUY/SELL for template logic
+        # side normalization (keep BUY/SELL for template)
         side = t.get("side")
         if isinstance(side, str):
             t["side"] = side.upper()
+        else:
+            t["side"] = "SELL"
 
-        # ensure required keys exist
-        t.setdefault("ticker", None)
-        t.setdefault("size", None)
-        t.setdefault("entry_price", None)
-        t.setdefault("exit_price", None)
-        t.setdefault("pnl", 0.0)
-        t.setdefault("checklist_passed", None)
-        t.setdefault("notes", None)
+        # size fallback
+        t.setdefault("size", t.get("size") or "—")
+
+        # entry/exit fallback
+        t.setdefault("entry_price", t.get("entry_price") or "—")
+        t.setdefault("exit_price", t.get("exit_price") or "—")
+
+        # pnl fallback
+        pnl = t.get("pnl", 0)
+        try:
+            t["pnl"] = float(pnl)
+        except Exception:
+            t["pnl"] = 0.0
+
+        # checklist / notes fallback
+        t.setdefault("checklist_passed", "Yes")
+        t.setdefault("notes", "")
 
         normalized.append(t)
 

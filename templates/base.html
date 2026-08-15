@@ -23,12 +23,10 @@
             --danger: #f97373;
             --success: #4ade80;
             --warning: #facc15;
-            --gold: #f5d76e; /* NEW GOLD COLOR */
+            --gold: #f5d76e;
         }
 
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
 
         body {
             margin: 0;
@@ -38,28 +36,24 @@
             color: var(--text);
         }
 
-        /* ============================
-           HEADER — GOLDEN CENTERED TITLE
-           ============================ */
         header {
             background: linear-gradient(90deg, #020617, #0a1a2f);
             padding: 20px 24px;
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
-            justify-content: center; /* CENTER TITLE */
-            position: relative; /* allows nav to float right */
+            justify-content: center;
+            position: relative;
         }
 
         header .title {
             font-size: 24px;
             font-weight: 700;
-            color: var(--gold); /* GOLD TITLE */
+            color: var(--gold);
             letter-spacing: 0.05em;
             text-shadow: 0 0 8px rgba(245, 215, 110, 0.4);
         }
 
-        /* NAV stays top-right */
         header .nav {
             position: absolute;
             right: 24px;
@@ -68,6 +62,7 @@
             display: flex;
             gap: 16px;
             font-size: 14px;
+            align-items: center;
         }
 
         header .nav a {
@@ -101,9 +96,7 @@
             gap: 16px;
         }
 
-        .grid-full {
-            margin-top: 16px;
-        }
+        .grid-full { margin-top: 16px; }
 
         .card {
             background: rgba(15, 23, 42, 0.9);
@@ -160,17 +153,9 @@
             font-weight: 600;
         }
 
-        .metric-good {
-            color: var(--success);
-        }
-
-        .metric-bad {
-            color: var(--danger);
-        }
-
-        .metric-neutral {
-            color: var(--accent);
-        }
+        .metric-good { color: var(--success); }
+        .metric-bad { color: var(--danger); }
+        .metric-neutral { color: var(--accent); }
 
         .table {
             width: 100%;
@@ -223,13 +208,8 @@
             border: 1px solid rgba(56, 189, 248, 0.4);
         }
 
-        .pnl-pos {
-            color: var(--success);
-        }
-
-        .pnl-neg {
-            color: var(--danger);
-        }
+        .pnl-pos { color: var(--success); }
+        .pnl-neg { color: var(--danger); }
 
         .small {
             font-size: 11px;
@@ -237,9 +217,7 @@
         }
 
         @media (max-width: 1024px) {
-            .grid {
-                grid-template-columns: minmax(0, 1fr);
-            }
+            .grid { grid-template-columns: minmax(0, 1fr); }
         }
     </style>
 </head>
@@ -249,6 +227,12 @@
     <div class="title">{{ title }}</div>
 
     <div class="nav">
+        <span style="color: var(--accent-soft); font-weight: 600;">
+            Funds: {{ account.funds|default('—') }} ·
+            Balance: {{ account.balance|default('—') }} ·
+            PnL: {{ account.pnl|default('—') }}
+        </span>
+
         <a href="/dashboard">Dashboard</a>
         <a href="/dashboard/logout" class="logout">Logout</a>
     </div>
