@@ -2,11 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{{ title }}</title>
+    <title>{{ title }} - {{ cache_bust }}</title>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-    <style>
+    <!-- Force browser to reload CSS -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+
+    <style data-version="{{ cache_bust }}">
         body {
             background-color: #0d1117;
             color: #c9d1d9;
