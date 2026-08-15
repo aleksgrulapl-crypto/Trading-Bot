@@ -84,56 +84,39 @@ def get_account():
 
 def enrich_account(raw):
     """
-    FINAL CAPITAL MAPPING (as per your spec):
+    EXACT CAPITAL MAPPING (no remapping):
 
     Capital fields:
-      - balance.balance     → Funds (cash)
-      - balance.equity      → Equity
+      - balance.balance     → Funds
+      - balance.equity      → Balance (Equity)
       - balance.profitLoss  → PnL
       - balance.available   → Available
       - balance.margin      → Margin
 
-    UI mapping:
-      - Funds   (UI) = Equity
-      - Balance (UI) = Funds
-      - PnL     (UI) = profitLoss
-      - Available (UI) = available
-      - Margin    (UI) = margin
+    UI uses the same wording and values.
     """
     if not raw:
         return {}
 
     bal = raw.get("balance", {})
 
-    capital_funds = bal.get("balance", 0)
-    capital_pnl = bal.get("profitLoss", 0)
-
-    equity_raw = bal.get("equity")
-    if equity_raw is None:
-        capital_equity = capital_funds + capital_pnl
-    else:
-        capital_equity = equity_raw
-
-    capital_available = bal.get("available", 0)
-    capital_margin = bal.get("margin", 0)
-
-    ui_funds = capital_equity          # 837.88
-    ui_balance = capital_funds         # 866.11
-    ui_pnl = capital_pnl               # -28.22
-    ui_available = capital_available   # 0
-    ui_margin = capital_margin         # 860.29
+    funds = bal.get("balance", 0)
+    equity = bal.get("equity", 0)
+    pnl = bal.get("profitLoss", 0)
+    available = bal.get("available", 0)
+    margin = bal.get("margin", 0)
 
     margin_warning = None
-    if ui_available < 0:
+    if available < 0:
         margin_warning = "⚠ Margin Warning: Available balance is negative."
 
     return {
-        "funds": round(ui_funds, 2),
-        "balance": round(ui_balance, 2),
-        "pnl": round(ui_pnl, 2),
-        "available": round(ui_available, 2),
-        "margin": round(ui_margin, 2),
-        "available_color": "red" if ui_available < 0 else "lime",
+        "funds": round(funds, 2),
+        "balance": round(equity, 2),
+        "pnl": round(pnl, 2),
+        "available": round(available, 2),
+        "margin": round(margin, 2),
+        "available_color": "red" if available < 0 else "lime",
         "margin_warning": margin_warning
     }
 
