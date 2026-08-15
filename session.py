@@ -84,21 +84,24 @@ def get_account():
 
 def enrich_account(raw):
     """
-    Map Capital.com balance fields to dashboard fields:
+    Capital.com mapping:
 
-    - Funds  = balance.balance
-    - Balance (Equity) = balance.equity
-    - PnL    = balance.profitLoss
+    - Funds      = balance.balance
+    - Balance    = balance.equity
+    - PnL        = balance.profitLoss
+    - Available  = balance.available
+    - Margin     = balance.margin
     """
     if not raw:
         return {}
 
     bal = raw.get("balance", {})
 
-    funds = bal.get("balance", 0)          # Capital "Funds"
-    equity = bal.get("equity", funds)      # Capital "Equity"
+    funds = bal.get("balance", 0)
+    equity = bal.get("equity", funds)
     pnl = bal.get("profitLoss", 0)
     available = bal.get("available", 0)
+    margin = bal.get("margin", 0)
 
     margin_warning = None
     if available < 0:
@@ -106,9 +109,10 @@ def enrich_account(raw):
 
     return {
         "funds": round(funds, 2),
-        "balance": round(equity, 2),       # label "Balance" shows Equity
+        "balance": round(equity, 2),
         "pnl": round(pnl, 2),
         "available": round(available, 2),
+        "margin": round(margin, 2),
         "available_color": "red" if available < 0 else "lime",
         "margin_warning": margin_warning
     }

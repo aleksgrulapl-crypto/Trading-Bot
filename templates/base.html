@@ -230,7 +230,9 @@
         <span style="color: var(--accent-soft); font-weight: 600;">
             Funds: {{ account.funds|default('—') }} ·
             Balance: {{ account.balance|default('—') }} ·
-            PnL: {{ account.pnl|default('—') }}
+            PnL: {{ account.pnl|default('—') }} ·
+            Available: {{ account.available|default('—') }} ·
+            Margin: {{ account.margin|default('—') }}
         </span>
 
         <a href="/dashboard">Dashboard</a>
