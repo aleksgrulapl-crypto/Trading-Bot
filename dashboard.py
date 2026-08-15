@@ -35,20 +35,23 @@ def dedupe_trades(trades):
     seen = set()
     unique = []
 
-    for t in trades:
+    for i, t in enumerate(trades):
         key = (
             str(t.get("trade_id")),
-            str(t.get("ticker")),
             str(t.get("open_timestamp")),
             str(t.get("close_timestamp")),
-            str(t.get("entry_price")),
-            str(t.get("exit_price")),
         )
+
+        # Fallback for trades missing all identifiers
+        if key == ("None", "None", "None"):
+            key = f"fallback_{i}"
+
         if key not in seen:
             seen.add(key)
             unique.append(t)
 
     return unique
+
 
 # ---------------------------------------------------------
 # ANALYTICS COMPUTATION (CRASH-PROOF)
