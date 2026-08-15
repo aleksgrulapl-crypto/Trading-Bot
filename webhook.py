@@ -16,6 +16,7 @@ from utils import timestamp
 from close_position import close_position as close_position_module
 
 app = Flask(__name__)
+app.config['DEBUG'] = True
 
 # 🔥 Force Flask/Jinja to reload templates every request
 app.config['TEMPLATES_AUTO_RELOAD'] = True
