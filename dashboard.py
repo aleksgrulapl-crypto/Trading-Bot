@@ -28,6 +28,29 @@ def login_required(view):
     return wrapper
 
 # ---------------------------------------------------------
+# DEDUPE TRADES (Capital + Excel)
+# ---------------------------------------------------------
+
+def dedupe_trades(trades):
+    seen = set()
+    unique = []
+
+    for t in trades:
+        key = (
+            str(t.get("trade_id")),
+            str(t.get("ticker")),
+            str(t.get("open_timestamp")),
+            str(t.get("close_timestamp")),
+            str(t.get("entry_price")),
+            str(t.get("exit_price")),
+        )
+        if key not in seen:
+            seen.add(key)
+            unique.append(t)
+
+    return unique
+
+# ---------------------------------------------------------
 # ANALYTICS COMPUTATION (CRASH-PROOF)
 # ---------------------------------------------------------
 
@@ -48,12 +71,10 @@ def compute_analytics(trades):
     cleaned = []
     for t in trades:
         pnl = t.get("pnl")
-
         try:
             pnl = float(pnl)
         except (TypeError, ValueError):
             pnl = 0.0
-
         t["pnl"] = pnl
         cleaned.append(t)
 
@@ -155,7 +176,7 @@ def dashboard_home():
 
     capital_trades = load_log()
     excel_trades = load_excel_trades()
-    combined_trades = capital_trades + excel_trades
+    combined_trades = dedupe_trades(capital_trades + excel_trades)
 
     daily_report = session.get_daily_report()
 
@@ -199,7 +220,7 @@ def dashboard_data():
 
     capital_trades = load_log()
     excel_trades = load_excel_trades()
-    combined_trades = capital_trades + excel_trades
+    combined_trades = dedupe_trades(capital_trades + excel_trades)
 
     daily_report = session.get_daily_report()
 

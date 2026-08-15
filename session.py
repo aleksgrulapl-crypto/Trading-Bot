@@ -163,16 +163,16 @@ def enrich_positions(raw_positions):
         profit = pos.get("upl", 0)
 
         enriched.append({
-            "id": pos.get("dealId"),
+            "position_id": pos.get("dealId"),
             "ticker": market.get("symbol"),
             "epic": market.get("epic"),
             "size": pos.get("size"),
-            "price": pos.get("level"),
+            "entry_price": pos.get("level"),
             "current_price": market.get("bid") if pos.get("direction") == "SELL" else market.get("offer"),
-            "direction": pos.get("direction"),
-            "profit": round(profit, 2),
-            "stopLevel": pos.get("stopLevel"),
-            "limitLevel": pos.get("profitLevel"),
+            "side": "Short" if pos.get("direction") == "SELL" else "Long",
+            "pnl": round(profit, 2),
+            "sl": pos.get("stopLevel"),
+            "tp": pos.get("profitLevel"),
             "currency": pos.get("currency")
         })
 
