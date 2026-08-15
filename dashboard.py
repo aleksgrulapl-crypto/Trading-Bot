@@ -11,6 +11,8 @@ from flask import Blueprint, request, render_template, redirect, jsonify
 import session
 import config
 from trade_log import load_log
+from excel_import import load_excel_trades
+
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
