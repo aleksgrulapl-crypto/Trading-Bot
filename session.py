@@ -50,6 +50,16 @@ def request(method, url, json=None):
         return None
 
 
+def fetch_positions_from(url):
+    response = request("GET", url)
+    if not response or response.status_code != 200:
+        return {}
+    try:
+        return response.json()
+    except Exception:
+        return {}
+
+
 def get_positions():
     url = f"{API_POSITIONS}?includeProfitLoss=true"
     response = request("GET", url)
@@ -84,27 +94,32 @@ def get_account():
 
 def enrich_account(raw):
     """
-    EXACT CAPITAL MAPPING (no remapping):
+    Capital.com live JSON (as observed):
 
-    Capital fields:
-      - balance.balance     → Funds
-      - balance.equity      → Balance (Equity)
-      - balance.profitLoss  → PnL
-      - balance.available   → Available
-      - balance.margin      → Margin
+      balance.balance   → Equity
+      balance.deposit   → Funds
+      balance.profitLoss→ PnL
+      balance.available → Available
 
-    UI uses the same wording and values.
+    UI mapping (keep wording exactly as Capital):
+
+      Funds   = deposit
+      Balance = balance (Equity)
+      PnL     = profitLoss
+      Available = available
+      Margin    = balance - available  (since margin field is not present)
     """
     if not raw:
         return {}
 
     bal = raw.get("balance", {})
 
-    funds = bal.get("balance", 0)
-    equity = bal.get("equity", 0)
-    pnl = bal.get("profitLoss", 0)
-    available = bal.get("available", 0)
-    margin = bal.get("margin", 0)
+    funds = bal.get("deposit", 0)          # 866.11
+    equity = bal.get("balance", 0)         # 837.88
+    pnl = bal.get("profitLoss", 0)         # -28.23
+    available = bal.get("available", 0)    # -22.41
+
+    margin = equity - available            # inferred margin
 
     margin_warning = None
     if available < 0:
@@ -164,19 +179,18 @@ def enrich_positions(raw_positions):
         market = item.get("market", {})
 
         profit = pos.get("upl", 0)
-        direction = pos.get("direction")
 
         enriched.append({
-            "position_id": pos.get("dealId"),
+            "id": pos.get("dealId"),
             "ticker": market.get("symbol"),
             "epic": market.get("epic"),
             "size": pos.get("size"),
-            "entry_price": pos.get("level"),
-            "current_price": market.get("bid") if direction == "SELL" else market.get("offer"),
-            "side": direction,
-            "pnl": round(profit, 2),
-            "sl": pos.get("stopLevel"),
-            "tp": pos.get("profitLevel"),
+            "price": pos.get("level"),
+            "current_price": market.get("bid") if pos.get("direction") == "SELL" else market.get("offer"),
+            "direction": pos.get("direction"),
+            "profit": round(profit, 2),
+            "stopLevel": pos.get("stopLevel"),
+            "limitLevel": pos.get("profitLevel"),
             "currency": pos.get("currency")
         })
 
