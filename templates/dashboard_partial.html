@@ -13,16 +13,18 @@
                     {{ analytics.win_rate|default('—') }}%
                 </div>
             </div>
+
             <div class="metric">
                 <div class="metric-label">Expectancy / Trade</div>
                 <div class="metric-value {% if analytics.expectancy and analytics.expectancy >= 0 %}metric-good{% else %}metric-bad{% endif %}">
                     {{ analytics.expectancy|default('—') }}
                 </div>
             </div>
+
             <div class="metric">
-                <div class="metric-label">Checklist Compliance</div>
+                <div class="metric-label">Trades</div>
                 <div class="metric-value metric-neutral">
-                    {{ analytics.checklist_compliance|default('—') }}%
+                    {{ analytics.trade_count|default('—') }}
                 </div>
             </div>
         </div>
@@ -34,12 +36,14 @@
                     {{ analytics.total_pl|default('—') }}
                 </div>
             </div>
+
             <div class="metric">
                 <div class="metric-label">Max Drawdown</div>
                 <div class="metric-value metric-bad">
                     {{ analytics.max_drawdown|default('—') }}
                 </div>
             </div>
+
             <div class="metric">
                 <div class="metric-label">Average Win / Loss</div>
                 <div class="metric-value metric-neutral">
@@ -49,7 +53,7 @@
         </div>
 
         <div class="small" style="margin-top: 10px;">
-            Story in brief: {{ analytics.story|default('Discipline and risk define the curve — keep checklist compliance high and losses controlled.') }}
+            Story in brief: {{ analytics.story|default('Discipline and risk define the curve — keep losses controlled.') }}
         </div>
     </div>
 
@@ -58,7 +62,7 @@
         <div class="card-header">
             <div class="card-title">Account & Open Positions</div>
             <div class="card-subtitle">
-                Equity: {{ account.equity|default('—') }} · Margin: {{ account.margin|default('—') }}
+                Balance: {{ account.balance|default('—') }} · PnL: {{ account.pnl|default('—') }}
             </div>
         </div>
 
@@ -79,6 +83,7 @@
             {% for p in positions %}
                 <tr>
                     <td>{{ p.ticker }}</td>
+
                     <td>
                         {% if p.side == 'BUY' %}
                             <span class="pill pill-long">Long</span>
@@ -86,12 +91,15 @@
                             <span class="pill pill-short">Short</span>
                         {% endif %}
                     </td>
+
                     <td>{{ p.size }}</td>
-                    <td>{{ p.entry_price }}</td>
-                    <td>{{ p.sl }} / {{ p.tp }}</td>
+                    <td>{{ p.entry_price|default('—') }}</td>
+                    <td>{{ p.sl|default('—') }} / {{ p.tp|default('—') }}</td>
+
                     <td class="{% if p.pnl and p.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
                         {{ p.pnl|default('—') }}
                     </td>
+
                     <td>
                         <button class="pill pill-status" onclick="closePosition('{{ p.position_id }}')">
                             Close
@@ -112,7 +120,7 @@
     <div class="card">
         <div class="card-header">
             <div class="card-title">Completed Trades</div>
-            <div class="card-subtitle">Capital closed trades with journal fields</div>
+            <div class="card-subtitle">Capital + Excel imported trades</div>
         </div>
 
         {% if trades %}
@@ -134,6 +142,7 @@
                 <tr>
                     <td>{{ t.close_timestamp or t.open_timestamp }}</td>
                     <td>{{ t.ticker }}</td>
+
                     <td>
                         {% if t.side == 'BUY' %}
                             <span class="pill pill-long">Long</span>
@@ -141,11 +150,14 @@
                             <span class="pill pill-short">Short</span>
                         {% endif %}
                     </td>
+
                     <td>{{ t.size }}</td>
                     <td>{{ t.entry_price }} → {{ t.exit_price }}</td>
+
                     <td class="{% if t.pnl and t.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
                         {{ t.pnl|default('—') }}
                     </td>
+
                     <td>{{ t.checklist_passed|default('Yes') }}</td>
                     <td class="small">{{ t.notes|default('') }}</td>
                 </tr>

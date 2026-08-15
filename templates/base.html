@@ -23,6 +23,7 @@
             --danger: #f97373;
             --success: #4ade80;
             --warning: #facc15;
+            --gold: #f5d76e; /* NEW GOLD COLOR */
         }
 
         * {
@@ -37,22 +38,33 @@
             color: var(--text);
         }
 
+        /* ============================
+           HEADER — GOLDEN CENTERED TITLE
+           ============================ */
         header {
-            background: linear-gradient(90deg, #020617, #0f172a);
-            padding: 16px 24px;
+            background: linear-gradient(90deg, #020617, #0a1a2f);
+            padding: 20px 24px;
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: center; /* CENTER TITLE */
+            position: relative; /* allows nav to float right */
         }
 
         header .title {
-            font-size: 20px;
-            font-weight: 600;
-            letter-spacing: 0.03em;
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--gold); /* GOLD TITLE */
+            letter-spacing: 0.05em;
+            text-shadow: 0 0 8px rgba(245, 215, 110, 0.4);
         }
 
+        /* NAV stays top-right */
         header .nav {
+            position: absolute;
+            right: 24px;
+            top: 50%;
+            transform: translateY(-50%);
             display: flex;
             gap: 16px;
             font-size: 14px;
@@ -235,6 +247,7 @@
 
 <header>
     <div class="title">{{ title }}</div>
+
     <div class="nav">
         <a href="/dashboard">Dashboard</a>
         <a href="/dashboard/logout" class="logout">Logout</a>

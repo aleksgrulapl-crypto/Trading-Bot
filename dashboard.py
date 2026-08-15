@@ -1,10 +1,11 @@
 # ============================
-# DASHBOARD MODULE (FINAL VERSION — SL/TP + TRAIL SUPPORT)
+# DASHBOARD MODULE (TradingView Dashboard + Excel Import)
 # ============================
 
 import json
 import functools
 import time
+import pandas as pd
 from flask import Blueprint, request, render_template, redirect, jsonify
 
 import session
@@ -26,6 +27,35 @@ def login_required(view):
     return wrapper
 
 # ---------------------------------------------------------
+# EXCEL IMPORT
+# ---------------------------------------------------------
+
+def load_excel_trades(path="Trading Log 2026.xlsx"):
+    try:
+        df = pd.read_excel(path, sheet_name="Trade Log")
+    except Exception:
+        return []
+
+    trades = []
+    for _, row in df.iterrows():
+        trades.append({
+            "trade_id": row.get("Trade ID"),
+            "ticker": row.get("Ticker"),
+            "side": row.get("Direction"),
+            "size": row.get("Position Size"),
+            "entry_price": row.get("Entry Price"),
+            "exit_price": row.get("Exit Price"),
+            "pnl": row.get("Outcome (P/L)"),
+            "sl": row.get("SL"),
+            "tp": row.get("TP"),
+            "open_timestamp": row.get("Open Timestamp (UTC)"),
+            "close_timestamp": row.get("Close Timestamp (UTC)"),
+            "notes": row.get("Notes"),
+            "checklist_passed": row.get("Checklist Passed?"),
+        })
+    return trades
+
+# ---------------------------------------------------------
 # ANALYTICS COMPUTATION
 # ---------------------------------------------------------
 
@@ -36,28 +66,23 @@ def compute_analytics(trades):
             "avg_win": None,
             "avg_loss": None,
             "expectancy": None,
-            "checklist_compliance": None,
             "total_pl": None,
             "max_drawdown": None,
+            "trade_count": 0,
             "story": None
         }
 
     wins = [t.get("pnl", 0) for t in trades if t.get("pnl", 0) > 0]
     losses = [t.get("pnl", 0) for t in trades if t.get("pnl", 0) < 0]
 
-    win_rate = round(len(wins) / len(trades) * 100, 2) if trades else None
+    trade_count = len(trades)
+    win_rate = round(len(wins) / trade_count * 100, 2) if trade_count else None
     avg_win = round(sum(wins) / len(wins), 2) if wins else None
     avg_loss = round(sum(losses) / len(losses), 2) if losses else None
 
     expectancy = None
     if avg_win is not None and avg_loss is not None:
         expectancy = round((win_rate/100) * avg_win + (1 - win_rate/100) * avg_loss, 2)
-
-    checklist_values = [
-        1 if t.get("checklist_passed") in ("Yes", True, "yes") else 0
-        for t in trades
-    ]
-    checklist_compliance = round(sum(checklist_values) / len(checklist_values) * 100, 2)
 
     cumulative = []
     running = 0
@@ -77,10 +102,10 @@ def compute_analytics(trades):
         "avg_win": avg_win,
         "avg_loss": avg_loss,
         "expectancy": expectancy,
-        "checklist_compliance": checklist_compliance,
         "total_pl": total_pl,
         "max_drawdown": round(max_drawdown, 2),
-        "story": "Checklist discipline and controlled losses drive expectancy."
+        "trade_count": trade_count,
+        "story": "Discipline and controlled losses define the curve."
     }
 
 # ---------------------------------------------------------
@@ -139,17 +164,21 @@ def dashboard_home():
 
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
-    trade_log = load_log()
+
+    capital_trades = load_log()
+    excel_trades = load_excel_trades()
+    combined_trades = capital_trades + excel_trades
+
     daily_report = session.get_daily_report()
 
     available_log = load_available_log()
     equity_log = load_equity_log()
 
-    analytics = compute_analytics(trade_log)
+    analytics = compute_analytics(combined_trades)
 
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
-    session.shared_state["trade_log"] = trade_log
+    session.shared_state["trade_log"] = combined_trades
     session.shared_state["daily_report"] = daily_report
 
     return render_template(
@@ -158,7 +187,7 @@ def dashboard_home():
         cache_bust=time.time(),
         account=account,
         positions=positions,
-        trade_log=trade_log,
+        trades=combined_trades,
         daily_report=daily_report,
         system_status=session.shared_state.get("system_status", {}),
         available_log=available_log,
@@ -179,50 +208,24 @@ def dashboard_data():
 
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
-    trade_log = load_log()
+
+    capital_trades = load_log()
+    excel_trades = load_excel_trades()
+    combined_trades = capital_trades + excel_trades
+
     daily_report = session.get_daily_report()
 
     available_log = load_available_log()
     equity_log = load_equity_log()
 
-    analytics = compute_analytics(trade_log)
-
-    trades = []
-    for t in trade_log:
-        trades.append({
-            "trade_id": t.get("trade_id") or t.get("dealId"),
-            "ticker": t.get("ticker"),
-            "epic": t.get("epic"),
-            "side": t.get("side"),
-            "size": t.get("size"),
-            "entry_price": t.get("entry_price"),
-            "exit_price": t.get("exit_price"),
-            "pnl": t.get("pnl"),
-            "sl": t.get("sl"),
-            "tp": t.get("tp"),
-            "status": t.get("status"),
-            "open_timestamp": t.get("open_timestamp") or t.get("time"),
-            "close_timestamp": t.get("close_timestamp"),
-            "currency": t.get("currency"),
-            "platform": t.get("platform"),
-            "notes": t.get("notes"),
-            "fees": t.get("fees"),
-            "timeframe": t.get("timeframe")
-        })
-
-    trades = sorted(
-        trades,
-        key=lambda x: x.get("close_timestamp") or x.get("open_timestamp"),
-        reverse=True
-    )
+    analytics = compute_analytics(combined_trades)
 
     html = render_template(
         "dashboard_partial.html",
         cache_bust=time.time(),
         account=account,
         positions=positions,
-        trades=trades,
-        trade_log=trade_log,
+        trades=combined_trades,
         daily_report=daily_report,
         system_status=session.shared_state.get("system_status", {}),
         available_log=available_log,
@@ -234,7 +237,7 @@ def dashboard_data():
         "html": html,
         "account": account,
         "positions": positions,
-        "trades": trades,
+        "trades": combined_trades,
         "available_log": available_log,
         "equity_log": equity_log,
         "daily_report": daily_report,
