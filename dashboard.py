@@ -26,6 +26,64 @@ def login_required(view):
     return wrapper
 
 # ---------------------------------------------------------
+# ANALYTICS COMPUTATION
+# ---------------------------------------------------------
+
+def compute_analytics(trades):
+    if not trades:
+        return {
+            "win_rate": None,
+            "avg_win": None,
+            "avg_loss": None,
+            "expectancy": None,
+            "checklist_compliance": None,
+            "total_pl": None,
+            "max_drawdown": None,
+            "story": None
+        }
+
+    wins = [t.get("pnl", 0) for t in trades if t.get("pnl", 0) > 0]
+    losses = [t.get("pnl", 0) for t in trades if t.get("pnl", 0) < 0]
+
+    win_rate = round(len(wins) / len(trades) * 100, 2) if trades else None
+    avg_win = round(sum(wins) / len(wins), 2) if wins else None
+    avg_loss = round(sum(losses) / len(losses), 2) if losses else None
+
+    expectancy = None
+    if avg_win is not None and avg_loss is not None:
+        expectancy = round((win_rate/100) * avg_win + (1 - win_rate/100) * avg_loss, 2)
+
+    checklist_values = [
+        1 if t.get("checklist_passed") in ("Yes", True, "yes") else 0
+        for t in trades
+    ]
+    checklist_compliance = round(sum(checklist_values) / len(checklist_values) * 100, 2)
+
+    cumulative = []
+    running = 0
+    max_peak = 0
+    max_drawdown = 0
+
+    for t in trades:
+        running += t.get("pnl", 0)
+        cumulative.append(running)
+        max_peak = max(max_peak, running)
+        max_drawdown = min(max_drawdown, running - max_peak)
+
+    total_pl = round(running, 2)
+
+    return {
+        "win_rate": win_rate,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "expectancy": expectancy,
+        "checklist_compliance": checklist_compliance,
+        "total_pl": total_pl,
+        "max_drawdown": round(max_drawdown, 2),
+        "story": "Checklist discipline and controlled losses drive expectancy."
+    }
+
+# ---------------------------------------------------------
 # LOGIN PAGE
 # ---------------------------------------------------------
 
@@ -87,7 +145,8 @@ def dashboard_home():
     available_log = load_available_log()
     equity_log = load_equity_log()
 
-    # Update shared state
+    analytics = compute_analytics(trade_log)
+
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
     session.shared_state["trade_log"] = trade_log
@@ -96,14 +155,15 @@ def dashboard_home():
     return render_template(
         "dashboard.html",
         title=config.DASHBOARD_TITLE,
-        cache_bust=time.time(),   # ⭐ FIXED — forces browser to reload HTML
+        cache_bust=time.time(),
         account=account,
         positions=positions,
         trade_log=trade_log,
         daily_report=daily_report,
         system_status=session.shared_state.get("system_status", {}),
         available_log=available_log,
-        equity_log=equity_log
+        equity_log=equity_log,
+        analytics=analytics
     )
 
 # ---------------------------------------------------------
@@ -122,18 +182,10 @@ def dashboard_data():
     trade_log = load_log()
     daily_report = session.get_daily_report()
 
-    # Update shared state
-    session.shared_state["account"] = account
-    session.shared_state["positions"] = positions
-    session.shared_state["trade_log"] = trade_log
-    session.shared_state["daily_report"] = daily_report
-
     available_log = load_available_log()
     equity_log = load_equity_log()
 
-    # -------------------------------
-    # NEW: Professional Trade Log JSON
-    # -------------------------------
+    analytics = compute_analytics(trade_log)
 
     trades = []
     for t in trade_log:
@@ -158,7 +210,6 @@ def dashboard_data():
             "timeframe": t.get("timeframe")
         })
 
-    # Sort newest → oldest
     trades = sorted(
         trades,
         key=lambda x: x.get("close_timestamp") or x.get("open_timestamp"),
@@ -167,7 +218,7 @@ def dashboard_data():
 
     html = render_template(
         "dashboard_partial.html",
-        cache_bust=time.time(),   # ⭐ FIXED — forces refresh to load new partial
+        cache_bust=time.time(),
         account=account,
         positions=positions,
         trades=trades,
@@ -175,7 +226,8 @@ def dashboard_data():
         daily_report=daily_report,
         system_status=session.shared_state.get("system_status", {}),
         available_log=available_log,
-        equity_log=equity_log
+        equity_log=equity_log,
+        analytics=analytics
     )
 
     return jsonify({
@@ -185,7 +237,8 @@ def dashboard_data():
         "trades": trades,
         "available_log": available_log,
         "equity_log": equity_log,
-        "daily_report": daily_report
+        "daily_report": daily_report,
+        "analytics": analytics
     })
 
 # ---------------------------------------------------------
