@@ -4,6 +4,7 @@
 
 import json
 import functools
+import time
 from flask import Blueprint, request, render_template, redirect, jsonify
 
 import session
@@ -36,8 +37,8 @@ def dashboard_login():
             resp = redirect("/dashboard")
             resp.set_cookie("dashboard_auth", "1", max_age=86400)
             return resp
-        return render_template("login.html", error="Incorrect password")
-    return render_template("login.html", error=None)
+        return render_template("login.html", error="Incorrect password", cache_bust=time.time())
+    return render_template("login.html", error=None, cache_bust=time.time())
 
 # ---------------------------------------------------------
 # LOGOUT
@@ -95,6 +96,7 @@ def dashboard_home():
     return render_template(
         "dashboard.html",
         title=config.DASHBOARD_TITLE,
+        cache_bust=time.time(),   # ⭐ FIXED — forces browser to reload HTML
         account=account,
         positions=positions,
         trade_log=trade_log,
@@ -163,30 +165,28 @@ def dashboard_data():
         reverse=True
     )
 
-    # Existing HTML partial (kept for backward compatibility)
     html = render_template(
         "dashboard_partial.html",
+        cache_bust=time.time(),   # ⭐ FIXED — forces refresh to load new partial
         account=account,
         positions=positions,
-        trades=trades,   # NEW
-        trade_log=trade_log,  # still passed for backward compatibility
+        trades=trades,
+        trade_log=trade_log,
         daily_report=daily_report,
         system_status=session.shared_state.get("system_status", {}),
         available_log=available_log,
         equity_log=equity_log
     )
 
-
     return jsonify({
         "html": html,
         "account": account,
         "positions": positions,
-        "trades": trades,               # NEW professional trade log
+        "trades": trades,
         "available_log": available_log,
         "equity_log": equity_log,
         "daily_report": daily_report
     })
-
 
 # ---------------------------------------------------------
 # CLOSE POSITION
