@@ -28,6 +28,13 @@ COLUMN_MAP = {
 }
 
 
+def _to_str(value):
+    """Convert datetime or other types to JSON-safe string."""
+    if value is None:
+        return None
+    return str(value)
+
+
 def load_excel_trades(path="Trading Log 2026.xlsx"):
     """
     Load trades from Excel 'Trade Log' sheet using manual column mapping.
@@ -38,16 +45,15 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
     except Exception:
         return []
 
-    trades = []
-
-    # Skip row 0 (header row)
+    # Skip header row inside sheet
     df = df.iloc[1:]
+
+    trades = []
 
     for _, row in df.iterrows():
         ticker = row.get(COLUMN_MAP["ticker"])
         status = row.get(COLUMN_MAP["status"])
 
-        # Skip non-trade rows
         if pd.isna(ticker) or pd.isna(status):
             continue
 
@@ -63,9 +69,9 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
         side = direction.upper() if isinstance(direction, str) else direction
 
         entry = {
-            "time": row.get(COLUMN_MAP["close_ts"]) or row.get(COLUMN_MAP["open_ts"]),
-            "open_timestamp": row.get(COLUMN_MAP["open_ts"]),
-            "close_timestamp": row.get(COLUMN_MAP["close_ts"]),
+            "time": _to_str(row.get(COLUMN_MAP["close_ts"]) or row.get(COLUMN_MAP["open_ts"])),
+            "open_timestamp": _to_str(row.get(COLUMN_MAP["open_ts"])),
+            "close_timestamp": _to_str(row.get(COLUMN_MAP["close_ts"])),
 
             "ticker": ticker,
             "epic": ticker,
