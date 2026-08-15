@@ -5,20 +5,15 @@ from trade_log import load_raw_log, save_log
 
 def _convert_timestamp(value):
     """
-    Excel timestamps in your sheet are numeric (Excel serial dates).
-    Example: 46245.61183 → datetime.
-    If value is already a string, return as-is.
+    Convert Excel serial timestamps or return strings unchanged.
     """
     if value is None:
         return None
 
-    # Already a string timestamp
     if isinstance(value, str):
         return value
 
-    # Excel serial date (float or int)
     try:
-        # Excel epoch starts 1899-12-30
         base = datetime(1899, 12, 30)
         dt = base + pd.to_timedelta(value, unit="D")
         return dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -26,10 +21,22 @@ def _convert_timestamp(value):
         return None
 
 
+def _is_valid_row(row):
+    """
+    Reject empty or header-like rows.
+    """
+    if not isinstance(row.get("Ticker"), str):
+        return False
+    if row.get("Status") != "CLOSED":
+        return False
+    if row.get("Entry Price") is None or row.get("Exit Price") is None:
+        return False
+    return True
+
+
 def load_excel_trades(path="Trading Log 2026.xlsx"):
     """
     Load trades from Excel 'Trade Log' sheet into unified trade dicts.
-    Compatible with dashboard + merge engine.
     """
     try:
         df = pd.read_excel(path, sheet_name="Trade Log")
@@ -39,38 +46,31 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
     trades = []
 
     for _, row in df.iterrows():
-        # -----------------------------
-        # PNL CLEANING
-        # -----------------------------
+        if not _is_valid_row(row):
+            continue
+
+        # PNL
         pnl_raw = row.get("Outcome (P/L)")
-        pnl = 0.0
         try:
             pnl = float(str(pnl_raw).replace("£", "").replace(",", "").strip())
         except Exception:
             pnl = 0.0
 
-        # -----------------------------
-        # SIDE NORMALIZATION
-        # -----------------------------
+        # Side
         direction = row.get("Direction")
         side = direction.upper() if isinstance(direction, str) else direction
 
-        # -----------------------------
-        # TIMESTAMP CONVERSION
-        # -----------------------------
+        # Timestamps
         open_ts = _convert_timestamp(row.get("Open Timestamp (UTC)"))
         close_ts = _convert_timestamp(row.get("Close Timestamp (UTC)"))
 
-        # -----------------------------
-        # BUILD TRADE ENTRY
-        # -----------------------------
         entry = {
             "time": close_ts or open_ts,
             "open_timestamp": open_ts,
             "close_timestamp": close_ts,
 
             "ticker": row.get("Ticker"),
-            "epic": row.get("Ticker"),  # Capital uses ticker as epic for US stocks
+            "epic": row.get("Ticker"),
             "side": side,
             "size": float(row.get("Position Size") or 0),
 
@@ -96,7 +96,6 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
             "running_peak": row.get("Running Peak"),
             "drawdown": row.get("Drawdown"),
 
-            # Dashboard compatibility
             "trail": None,
             "timeframe": None,
         }
@@ -113,7 +112,7 @@ def import_excel_into_log(path="Trading Log 2026.xlsx"):
     """
     excel_trades = load_excel_trades(path)
     if not excel_trades:
-        print("[EXCEL IMPORT] No trades found.")
+        print("[EXCEL IMPORT] No valid trades found.")
         return
 
     log = load_raw_log()
