@@ -2,9 +2,35 @@ import pandas as pd
 from trade_log import load_raw_log, save_log
 
 
+COLUMN_MAP = {
+    "trade_id": "Unnamed: 0",
+    "open_ts": "Unnamed: 1",
+    "close_ts": "Unnamed: 2",
+    "ticker": "Unnamed: 3",
+    "currency": "Unnamed: 4",
+    "direction": "Unnamed: 5",
+    "platform": "Unnamed: 6",
+    "entry_price": "Unnamed: 7",
+    "exit_price": "Unnamed: 8",
+    "sl": "Unnamed: 9",
+    "tp": "Unnamed: 10",
+    "size": "Unnamed: 11",
+    "reason": "Unnamed: 12",
+    "checklist": "Unnamed: 13",
+    "close_source": "Unnamed: 14",
+    "status": "Unnamed: 15",
+    "notes": "Unnamed: 16",
+    "fees": "Unnamed: 17",
+    "pnl": "Unnamed: 18",
+    "cumulative_pnl": "Unnamed: 19",
+    "running_peak": "Unnamed: 20",
+    "drawdown": "Unnamed: 21",
+}
+
+
 def load_excel_trades(path="Trading Log 2026.xlsx"):
     """
-    Load trades from Excel 'Trade Log' sheet using the correct header row (row 2).
+    Load trades from Excel 'Trade Log' sheet using manual column mapping.
     """
     try:
         df = pd.read_excel(path, sheet_name="Trade Log", header=2)
@@ -14,55 +40,55 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
     trades = []
 
     for _, row in df.iterrows():
-        ticker = row.get("Ticker")
-        status = row.get("Status")
+        ticker = row.get(COLUMN_MAP["ticker"])
+        status = row.get(COLUMN_MAP["status"])
 
         # Skip non-trade rows
         if pd.isna(ticker) or pd.isna(status):
             continue
 
         # PNL
-        pnl_raw = row.get("Outcome (P/L)")
+        pnl_raw = row.get(COLUMN_MAP["pnl"])
         try:
             pnl = float(str(pnl_raw).replace("£", "").replace(",", "").strip())
         except Exception:
             pnl = 0.0
 
         # Side
-        direction = row.get("Direction")
+        direction = row.get(COLUMN_MAP["direction"])
         side = direction.upper() if isinstance(direction, str) else direction
 
         entry = {
-            "time": row.get("Close Timestamp (UTC)") or row.get("Open Timestamp (UTC)"),
-            "open_timestamp": row.get("Open Timestamp (UTC)"),
-            "close_timestamp": row.get("Close Timestamp (UTC)"),
+            "time": row.get(COLUMN_MAP["close_ts"]) or row.get(COLUMN_MAP["open_ts"]),
+            "open_timestamp": row.get(COLUMN_MAP["open_ts"]),
+            "close_timestamp": row.get(COLUMN_MAP["close_ts"]),
 
             "ticker": ticker,
             "epic": ticker,
             "side": side,
-            "size": float(row.get("Position Size") or 0),
+            "size": float(row.get(COLUMN_MAP["size"]) or 0),
 
-            "entry_price": float(row.get("Entry Price") or 0),
-            "exit_price": float(row.get("Exit Price") or 0),
+            "entry_price": float(row.get(COLUMN_MAP["entry_price"]) or 0),
+            "exit_price": float(row.get(COLUMN_MAP["exit_price"]) or 0),
             "pnl": pnl,
 
-            "sl": row.get("SL"),
-            "tp": row.get("TP"),
+            "sl": row.get(COLUMN_MAP["sl"]),
+            "tp": row.get(COLUMN_MAP["tp"]),
 
-            "reason": row.get("Reason for Entry"),
-            "checklist_passed": row.get("Checklist Passed?"),
-            "close_source": row.get("Close Source"),
+            "reason": row.get(COLUMN_MAP["reason"]),
+            "checklist_passed": row.get(COLUMN_MAP["checklist"]),
+            "close_source": row.get(COLUMN_MAP["close_source"]),
             "status": status,
-            "notes": row.get("Notes"),
-            "fees": float(row.get("Fees / Adjustments") or 0),
+            "notes": row.get(COLUMN_MAP["notes"]),
+            "fees": float(row.get(COLUMN_MAP["fees"]) or 0),
 
-            "trade_id": row.get("Trade ID"),
-            "currency": row.get("Currency"),
-            "platform": row.get("Trading Platform"),
+            "trade_id": row.get(COLUMN_MAP["trade_id"]),
+            "currency": row.get(COLUMN_MAP["currency"]),
+            "platform": row.get(COLUMN_MAP["platform"]),
 
-            "cumulative_pnl": row.get("Cumulative P/L"),
-            "running_peak": row.get("Running Peak"),
-            "drawdown": row.get("Drawdown"),
+            "cumulative_pnl": row.get(COLUMN_MAP["cumulative_pnl"]),
+            "running_peak": row.get(COLUMN_MAP["running_peak"]),
+            "drawdown": row.get(COLUMN_MAP["drawdown"]),
 
             "trail": None,
             "timeframe": None,
