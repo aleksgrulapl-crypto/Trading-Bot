@@ -27,27 +27,44 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
             except (TypeError, ValueError):
                 pnl = 0.0
 
+        direction = row.get("Direction")
+        side = None
+        if isinstance(direction, str):
+            direction = direction.upper()
+            if direction == "SELL":
+                side = "Short"
+            elif direction == "BUY":
+                side = "Long"
+            else:
+                side = direction
+        else:
+            side = direction
+
         trades.append({
+            # Core fields used by dashboard
+            "time": row.get("Open Timestamp (UTC)"),
+            "ticker": row.get("Ticker"),
+            "side": side,
+            "size": row.get("Position Size"),
+            "entry_price": row.get("Entry Price"),
+            "exit_price": row.get("Exit Price"),
+            "pnl": pnl,
+            "checklist_passed": row.get("Checklist Passed?"),
+            "notes": row.get("Notes"),
+
+            # Extra fields for analytics / future use
             "trade_id": row.get("Trade ID"),
             "open_timestamp": row.get("Open Timestamp (UTC)"),
             "close_timestamp": row.get("Close Timestamp (UTC)"),
-            "ticker": row.get("Ticker"),
             "currency": row.get("Currency"),
-            "side": row.get("Direction"),
             "platform": row.get("Trading Platform"),
-            "entry_price": row.get("Entry Price"),
-            "exit_price": row.get("Exit Price"),
             "sl": row.get("SL"),
             "tp": row.get("TP"),
-            "size": row.get("Position Size"),
             "reason": row.get("Reason for Entry"),
-            "checklist_passed": row.get("Checklist Passed?"),
             "close_source": row.get("Close Source"),
             "status": row.get("Status"),
-            "notes": row.get("Notes"),
             "fees": row.get("Fees / Adjustments"),
-            "pnl": pnl,
-            "cumulative_pl": row.get("Cumulative P/L"),
+            "cumulative_pnl": row.get("Cumulative P/L"),
             "running_peak": row.get("Running Peak"),
             "drawdown": row.get("Drawdown"),
         })

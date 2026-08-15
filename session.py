@@ -111,7 +111,8 @@ def enrich_account(raw):
     return {
         "balance": round(cash, 2),
         "equity": round(equity, 2),
-        "margin": round(pnl, 2),
+        "pnl": round(pnl, 2),          # used next to Balance in dashboard
+        "margin": round(pnl, 2),       # kept for backward compatibility
         "available": round(available, 2),
         "available_color": "red" if available < 0 else "lime",
         "margin_warning": margin_warning

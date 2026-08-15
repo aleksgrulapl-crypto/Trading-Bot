@@ -5,7 +5,6 @@
 import json
 import functools
 import time
-import pandas as pd
 from flask import Blueprint, request, render_template, redirect, jsonify
 
 import session
@@ -37,13 +36,11 @@ def dedupe_trades(trades):
 
     for i, t in enumerate(trades):
         key = (
-            str(t.get("trade_id")),
-            str(t.get("open_timestamp")),
-            str(t.get("close_timestamp")),
+            str(t.get("trade_id") or t.get("dealId")),
+            str(t.get("close_timestamp") or t.get("time")),
         )
 
-        # Fallback for trades missing all identifiers
-        if key == ("None", "None", "None"):
+        if key == ("None", "None"):
             key = f"fallback_{i}"
 
         if key not in seen:
@@ -51,7 +48,6 @@ def dedupe_trades(trades):
             unique.append(t)
 
     return unique
-
 
 # ---------------------------------------------------------
 # ANALYTICS COMPUTATION (CRASH-PROOF)
@@ -70,7 +66,6 @@ def compute_analytics(trades):
             "story": None
         }
 
-    # --- SANITIZE PNL VALUES ---
     cleaned = []
     for t in trades:
         pnl = t.get("pnl")
@@ -83,7 +78,6 @@ def compute_analytics(trades):
 
     trades = cleaned
 
-    # --- ANALYTICS ---
     wins = [t["pnl"] for t in trades if t["pnl"] > 0]
     losses = [t["pnl"] for t in trades if t["pnl"] < 0]
 
