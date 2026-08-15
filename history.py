@@ -9,6 +9,48 @@ from config import API_HISTORY_TRANSACTIONS
 
 
 # ---------------------------------------------------------
+# TIMESTAMP PARSING (CAPITAL HISTORY FLEXIBLE)
+# ---------------------------------------------------------
+
+def _parse_capital_timestamp(value):
+    """
+    Capital history timestamps can be:
+      - ISO strings: "2026-08-14T19:59:56.923"
+      - ISO strings with Z: "2026-08-14T19:59:56.923Z"
+      - Epoch seconds: 1692033596
+      - Epoch milliseconds: 1692033596923
+
+    Returns a formatted UTC string: "YYYY-MM-DD HH:MM:SS" or None.
+    """
+    if value is None:
+        return None
+
+    # Epoch (int/float)
+    if isinstance(value, (int, float)):
+        try:
+            # Detect ms vs s
+            if value > 1e12:
+                dt = datetime.utcfromtimestamp(value / 1000.0)
+            else:
+                dt = datetime.utcfromtimestamp(value)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+
+    # ISO string
+    if isinstance(value, str):
+        try:
+            # Strip trailing Z if present
+            cleaned = value.replace("Z", "")
+            dt = datetime.fromisoformat(cleaned)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+
+    return None
+
+
+# ---------------------------------------------------------
 # FETCH CLOSED TRADES FROM CAPITAL.COM
 # ---------------------------------------------------------
 
@@ -40,6 +82,10 @@ def fetch_closed_trades():
 def convert_capital_trade(raw):
     """
     Converts a single Capital.com trade into your upgraded trade_log.py format.
+    Compatible with:
+      - merge_trades()
+      - dashboard analytics
+      - Excel trade log
     """
 
     try:
@@ -51,34 +97,32 @@ def convert_capital_trade(raw):
         exit_price = raw.get("closeLevel")
         pnl = raw.get("profitLoss")
         currency = raw.get("currency")
-        open_ts = raw.get("date")
-        close_ts = raw.get("closeDate")
+        instrument_name = raw.get("instrumentName")
 
-        # Convert timestamps
-        try:
-            open_timestamp = datetime.utcfromtimestamp(open_ts).strftime("%Y-%m-%d %H:%M:%S")
-        except:
-            open_timestamp = None
+        # SL/TP fields in history can be stopLevel / limitLevel
+        sl = raw.get("stopLevel")
+        tp = raw.get("limitLevel")
 
-        try:
-            close_timestamp = datetime.utcfromtimestamp(close_ts).strftime("%Y-%m-%d %H:%M:%S")
-        except:
-            close_timestamp = None
+        open_ts_raw = raw.get("date")
+        close_ts_raw = raw.get("closeDate")
+
+        open_timestamp = _parse_capital_timestamp(open_ts_raw)
+        close_timestamp = _parse_capital_timestamp(close_ts_raw)
 
         # Build upgraded entry
         entry = {
             # Existing fields (backend compatibility)
             "time": close_timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "ticker": raw.get("instrumentName"),
+            "ticker": instrument_name,
             "epic": epic,
             "dealId": deal_id,
-            "side": direction.upper(),
-            "size": float(size),
-            "entry_price": float(entry_price),
-            "exit_price": float(exit_price),
-            "pnl": float(pnl),
-            "sl": raw.get("stopLevel"),
-            "tp": raw.get("limitLevel"),
+            "side": (direction or "CLOSE").upper(),
+            "size": float(size) if size is not None else 0.0,
+            "entry_price": float(entry_price) if entry_price is not None else None,
+            "exit_price": float(exit_price) if exit_price is not None else None,
+            "pnl": float(pnl) if pnl is not None else 0.0,
+            "sl": sl,
+            "tp": tp,
             "trail": None,
             "timeframe": None,
 
@@ -125,7 +169,7 @@ def merge_history():
         print("[HISTORY] No closed trades found.")
         return
 
-    log = trade_log.load_log()
+    log = trade_log.load_raw_log()
     existing_ids = {entry.get("dealId") for entry in log}
 
     added = 0

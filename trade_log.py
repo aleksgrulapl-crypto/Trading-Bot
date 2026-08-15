@@ -14,12 +14,23 @@ os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 
 
 def load_raw_log():
+    """
+    Load the raw trade log (unmerged events).
+    If the file does not exist, create an empty log and return [].
+    """
     if not os.path.exists(LOG_FILE):
+        # Initialize empty log file so downstream tools (cat, etc.) see it.
+        try:
+            with open(LOG_FILE, "w") as f:
+                json.dump([], f)
+        except Exception as e:
+            print(f"[TRADE_LOG] Failed to initialize log file: {e}")
         return []
     try:
         with open(LOG_FILE, "r") as f:
             return json.load(f)
-    except:
+    except Exception as e:
+        print(f"[TRADE_LOG] Failed to load log file: {e}")
         return []
 
 
