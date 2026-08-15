@@ -1,5 +1,6 @@
 import pandas as pd
 from trade_log import load_raw_log, save_log
+import math
 
 
 COLUMN_MAP = {
@@ -28,9 +29,11 @@ COLUMN_MAP = {
 }
 
 
-def _to_str(value):
-    """Convert datetime or other types to JSON-safe string."""
+def _clean(value):
+    """Convert NaN → None, datetime → string, everything else unchanged."""
     if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
         return None
     return str(value)
 
@@ -64,41 +67,40 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
         except Exception:
             pnl = 0.0
 
-        # Side
         direction = row.get(COLUMN_MAP["direction"])
         side = direction.upper() if isinstance(direction, str) else direction
 
         entry = {
-            "time": _to_str(row.get(COLUMN_MAP["close_ts"]) or row.get(COLUMN_MAP["open_ts"])),
-            "open_timestamp": _to_str(row.get(COLUMN_MAP["open_ts"])),
-            "close_timestamp": _to_str(row.get(COLUMN_MAP["close_ts"])),
+            "time": _clean(row.get(COLUMN_MAP["close_ts"]) or row.get(COLUMN_MAP["open_ts"])),
+            "open_timestamp": _clean(row.get(COLUMN_MAP["open_ts"])),
+            "close_timestamp": _clean(row.get(COLUMN_MAP["close_ts"])),
 
-            "ticker": ticker,
-            "epic": ticker,
-            "side": side,
+            "ticker": _clean(ticker),
+            "epic": _clean(ticker),
+            "side": _clean(side),
             "size": float(row.get(COLUMN_MAP["size"]) or 0),
 
             "entry_price": float(row.get(COLUMN_MAP["entry_price"]) or 0),
             "exit_price": float(row.get(COLUMN_MAP["exit_price"]) or 0),
             "pnl": pnl,
 
-            "sl": row.get(COLUMN_MAP["sl"]),
-            "tp": row.get(COLUMN_MAP["tp"]),
+            "sl": _clean(row.get(COLUMN_MAP["sl"])),
+            "tp": _clean(row.get(COLUMN_MAP["tp"])),
 
-            "reason": row.get(COLUMN_MAP["reason"]),
-            "checklist_passed": row.get(COLUMN_MAP["checklist"]),
-            "close_source": row.get(COLUMN_MAP["close_source"]),
-            "status": status,
-            "notes": row.get(COLUMN_MAP["notes"]),
+            "reason": _clean(row.get(COLUMN_MAP["reason"])),
+            "checklist_passed": _clean(row.get(COLUMN_MAP["checklist"])),
+            "close_source": _clean(row.get(COLUMN_MAP["close_source"])),
+            "status": _clean(status),
+            "notes": _clean(row.get(COLUMN_MAP["notes"])),
             "fees": float(row.get(COLUMN_MAP["fees"]) or 0),
 
-            "trade_id": row.get(COLUMN_MAP["trade_id"]),
-            "currency": row.get(COLUMN_MAP["currency"]),
-            "platform": row.get(COLUMN_MAP["platform"]),
+            "trade_id": _clean(row.get(COLUMN_MAP["trade_id"])),
+            "currency": _clean(row.get(COLUMN_MAP["currency"])),
+            "platform": _clean(row.get(COLUMN_MAP["platform"])),
 
-            "cumulative_pnl": row.get(COLUMN_MAP["cumulative_pnl"]),
-            "running_peak": row.get(COLUMN_MAP["running_peak"]),
-            "drawdown": row.get(COLUMN_MAP["drawdown"]),
+            "cumulative_pnl": _clean(row.get(COLUMN_MAP["cumulative_pnl"])),
+            "running_peak": _clean(row.get(COLUMN_MAP["running_peak"])),
+            "drawdown": _clean(row.get(COLUMN_MAP["drawdown"])),
 
             "trail": None,
             "timeframe": None,
@@ -110,10 +112,6 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
 
 
 def import_excel_into_log(path="Trading Log 2026.xlsx"):
-    """
-    Merge Excel trades into trade_log.json safely.
-    Avoid duplicates using trade_id.
-    """
     excel_trades = load_excel_trades(path)
     if not excel_trades:
         print("[EXCEL IMPORT] No valid trades found.")

@@ -166,8 +166,15 @@ def merge_trades(raw_log):
 
 
 def load_log():
-    raw = load_raw_log()
-    return merge_trades(raw)
+    try:
+        with open(LOG_FILE, "r") as f:
+            log = json.load(f)
+    except Exception:
+        return []
+
+    # Sort newest → oldest
+    log.sort(key=lambda x: x.get("close_timestamp") or x.get("open_timestamp"), reverse=True)
+    return log
 
 
 def log_trade(ticker, epic=None, deal_id=None, side=None, size=None,
