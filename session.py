@@ -104,15 +104,17 @@ def enrich_account(raw):
 
     equity = cash + pnl
 
-    margin_warning = None
+    margin_warning = None    # unchanged logic
     if available < 0:
         margin_warning = "⚠ Margin Warning: Available balance is negative."
 
+    # Funds = cash, Balance = equity (as per your request)
     return {
-        "balance": round(cash, 2),
+        "funds": round(cash, 2),
+        "balance": round(equity, 2),
         "equity": round(equity, 2),
-        "pnl": round(pnl, 2),          # used next to Balance in dashboard
-        "margin": round(pnl, 2),       # kept for backward compatibility
+        "pnl": round(pnl, 2),
+        "margin": round(pnl, 2),  # backward compatible
         "available": round(available, 2),
         "available_color": "red" if available < 0 else "lime",
         "margin_warning": margin_warning
@@ -162,6 +164,7 @@ def enrich_positions(raw_positions):
         market = item.get("market", {})
 
         profit = pos.get("upl", 0)
+        direction = pos.get("direction")
 
         enriched.append({
             "position_id": pos.get("dealId"),
@@ -169,8 +172,8 @@ def enrich_positions(raw_positions):
             "epic": market.get("epic"),
             "size": pos.get("size"),
             "entry_price": pos.get("level"),
-            "current_price": market.get("bid") if pos.get("direction") == "SELL" else market.get("offer"),
-            "side": "Short" if pos.get("direction") == "SELL" else "Long",
+            "current_price": market.get("bid") if direction == "SELL" else market.get("offer"),
+            "side": direction,  # BUY / SELL for template logic
             "pnl": round(profit, 2),
             "sl": pos.get("stopLevel"),
             "tp": pos.get("profitLevel"),

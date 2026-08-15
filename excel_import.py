@@ -31,18 +31,19 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
         side = None
         if isinstance(direction, str):
             direction = direction.upper()
-            if direction == "SELL":
-                side = "Short"
-            elif direction == "BUY":
-                side = "Long"
+            # keep BUY/SELL for template logic
+            if direction in ("BUY", "SELL"):
+                side = direction
             else:
                 side = direction
         else:
             side = direction
 
         trades.append({
-            # Core fields used by dashboard
+            # fields used directly in dashboard_partial.html
             "time": row.get("Open Timestamp (UTC)"),
+            "open_timestamp": row.get("Open Timestamp (UTC)"),
+            "close_timestamp": row.get("Close Timestamp (UTC)"),
             "ticker": row.get("Ticker"),
             "side": side,
             "size": row.get("Position Size"),
@@ -52,10 +53,8 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
             "checklist_passed": row.get("Checklist Passed?"),
             "notes": row.get("Notes"),
 
-            # Extra fields for analytics / future use
+            # extra fields for analytics / future use
             "trade_id": row.get("Trade ID"),
-            "open_timestamp": row.get("Open Timestamp (UTC)"),
-            "close_timestamp": row.get("Close Timestamp (UTC)"),
             "currency": row.get("Currency"),
             "platform": row.get("Trading Platform"),
             "sl": row.get("SL"),

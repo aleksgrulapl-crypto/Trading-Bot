@@ -27,6 +27,41 @@ def login_required(view):
     return wrapper
 
 # ---------------------------------------------------------
+# NORMALIZE TRADES (legacy + new + excel)
+# ---------------------------------------------------------
+
+def normalize_trades(trades):
+    normalized = []
+
+    for t in trades:
+        # legacy keys → new keys
+        if "symbol" in t and "ticker" not in t:
+            t["ticker"] = t.get("symbol")
+
+        if "time" in t:
+            # if open/close timestamps missing, use time
+            t.setdefault("open_timestamp", t.get("time"))
+            t.setdefault("close_timestamp", t.get("time"))
+
+        # side normalization: keep BUY/SELL for template logic
+        side = t.get("side")
+        if isinstance(side, str):
+            t["side"] = side.upper()
+
+        # ensure required keys exist
+        t.setdefault("ticker", None)
+        t.setdefault("size", None)
+        t.setdefault("entry_price", None)
+        t.setdefault("exit_price", None)
+        t.setdefault("pnl", 0.0)
+        t.setdefault("checklist_passed", None)
+        t.setdefault("notes", None)
+
+        normalized.append(t)
+
+    return normalized
+
+# ---------------------------------------------------------
 # DEDUPE TRADES (Capital + Excel)
 # ---------------------------------------------------------
 
@@ -173,7 +208,7 @@ def dashboard_home():
 
     capital_trades = load_log()
     excel_trades = load_excel_trades()
-    combined_trades = dedupe_trades(capital_trades + excel_trades)
+    combined_trades = normalize_trades(dedupe_trades(capital_trades + excel_trades))
 
     daily_report = session.get_daily_report()
 
@@ -217,7 +252,7 @@ def dashboard_data():
 
     capital_trades = load_log()
     excel_trades = load_excel_trades()
-    combined_trades = dedupe_trades(capital_trades + excel_trades)
+    combined_trades = normalize_trades(dedupe_trades(capital_trades + excel_trades))
 
     daily_report = session.get_daily_report()
 
