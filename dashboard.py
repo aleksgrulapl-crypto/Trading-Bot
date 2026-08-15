@@ -14,10 +14,6 @@ from excel_import import load_excel_trades
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
-# ---------------------------------------------------------
-# LOGIN REQUIRED DECORATOR
-# ---------------------------------------------------------
-
 def login_required(view):
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
@@ -26,44 +22,33 @@ def login_required(view):
         return view(*args, **kwargs)
     return wrapper
 
-# ---------------------------------------------------------
-# NORMALIZE TRADES (legacy + new + excel)
-# ---------------------------------------------------------
 
 def normalize_trades(trades):
     normalized = []
 
     for t in trades:
-        # timestamps
         t.setdefault("open_timestamp", t.get("time"))
         t.setdefault("close_timestamp", t.get("time"))
 
-        # ticker fallback
         if not t.get("ticker"):
             t["ticker"] = t.get("epic") or t.get("symbol") or "—"
 
-        # side normalization (keep BUY/SELL for template)
         side = t.get("side")
         if isinstance(side, str):
             t["side"] = side.upper()
         else:
             t["side"] = "SELL"
 
-        # size fallback
         t.setdefault("size", t.get("size") or "—")
-
-        # entry/exit fallback
         t.setdefault("entry_price", t.get("entry_price") or "—")
         t.setdefault("exit_price", t.get("exit_price") or "—")
 
-        # pnl fallback
         pnl = t.get("pnl", 0)
         try:
             t["pnl"] = float(pnl)
         except Exception:
             t["pnl"] = 0.0
 
-        # checklist / notes fallback
         t.setdefault("checklist_passed", "Yes")
         t.setdefault("notes", "")
 
@@ -71,9 +56,6 @@ def normalize_trades(trades):
 
     return normalized
 
-# ---------------------------------------------------------
-# DEDUPE TRADES (Capital + Excel)
-# ---------------------------------------------------------
 
 def dedupe_trades(trades):
     seen = set()
@@ -94,9 +76,13 @@ def dedupe_trades(trades):
 
     return unique
 
-# ---------------------------------------------------------
-# ANALYTICS COMPUTATION (CRASH-PROOF)
-# ---------------------------------------------------------
+
+def filter_completed(trades):
+    return [
+        t for t in trades
+        if t.get("status") == "CLOSED" or t.get("exit_price") not in (None, "—")
+    ]
+
 
 def compute_analytics(trades):
     if not trades:
@@ -159,9 +145,6 @@ def compute_analytics(trades):
         "story": "Discipline and controlled losses define the curve."
     }
 
-# ---------------------------------------------------------
-# LOGIN PAGE
-# ---------------------------------------------------------
 
 @dashboard.route("/dashboard/login", methods=["GET", "POST"])
 def dashboard_login():
@@ -174,9 +157,6 @@ def dashboard_login():
         return render_template("login.html", error="Incorrect password", cache_bust=time.time())
     return render_template("login.html", error=None, cache_bust=time.time())
 
-# ---------------------------------------------------------
-# LOGOUT
-# ---------------------------------------------------------
 
 @dashboard.route("/dashboard/logout")
 def dashboard_logout():
@@ -184,9 +164,6 @@ def dashboard_logout():
     resp.delete_cookie("dashboard_auth")
     return resp
 
-# ---------------------------------------------------------
-# TREND LOGS
-# ---------------------------------------------------------
 
 def load_available_log():
     try:
@@ -195,6 +172,7 @@ def load_available_log():
     except:
         return []
 
+
 def load_equity_log():
     try:
         with open("equity_log.json") as f:
@@ -202,14 +180,10 @@ def load_equity_log():
     except:
         return []
 
-# ---------------------------------------------------------
-# DASHBOARD HOME
-# ---------------------------------------------------------
 
 @dashboard.route("/dashboard")
 @login_required
 def dashboard_home():
-
     raw_positions = session.get_positions() or []
     raw_account = session.get_account() or {}
 
@@ -218,7 +192,8 @@ def dashboard_home():
 
     capital_trades = load_log()
     excel_trades = load_excel_trades()
-    combined_trades = normalize_trades(dedupe_trades(capital_trades + excel_trades))
+    combined_raw = capital_trades + excel_trades
+    combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
 
     daily_report = session.get_daily_report()
 
@@ -246,14 +221,10 @@ def dashboard_home():
         analytics=analytics
     )
 
-# ---------------------------------------------------------
-# DASHBOARD PARTIAL (AJAX REFRESH)
-# ---------------------------------------------------------
 
 @dashboard.route("/dashboard/data")
 @login_required
 def dashboard_data():
-
     raw_positions = session.get_positions() or []
     raw_account = session.get_account() or {}
 
@@ -262,7 +233,8 @@ def dashboard_data():
 
     capital_trades = load_log()
     excel_trades = load_excel_trades()
-    combined_trades = normalize_trades(dedupe_trades(capital_trades + excel_trades))
+    combined_raw = capital_trades + excel_trades
+    combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
 
     daily_report = session.get_daily_report()
 
@@ -295,9 +267,6 @@ def dashboard_data():
         "analytics": analytics
     })
 
-# ---------------------------------------------------------
-# CLOSE POSITION
-# ---------------------------------------------------------
 
 @dashboard.route("/dashboard/close/<position_id>")
 @login_required
@@ -315,9 +284,6 @@ def dashboard_close(position_id):
 
     return redirect("/dashboard")
 
-# ---------------------------------------------------------
-# DEBUG
-# ---------------------------------------------------------
 
 @dashboard.route("/dashboard/debug")
 @login_required

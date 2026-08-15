@@ -8,7 +8,6 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
 
     trades = []
     for _, row in df.iterrows():
-        # PnL: strip currency symbol and commas, convert to float
         pnl_raw = row.get("Outcome (P/L)")
         pnl = 0.0
         if isinstance(pnl_raw, str):
@@ -28,14 +27,9 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
                 pnl = 0.0
 
         direction = row.get("Direction")
-        side = None
-        if isinstance(direction, str):
-            side = direction.upper()
-        else:
-            side = direction
+        side = direction.upper() if isinstance(direction, str) else direction
 
         trades.append({
-            # fields used directly in dashboard_partial.html
             "time": row.get("Open Timestamp (UTC)"),
             "open_timestamp": row.get("Open Timestamp (UTC)"),
             "close_timestamp": row.get("Close Timestamp (UTC)"),
@@ -48,7 +42,6 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
             "checklist_passed": row.get("Checklist Passed?"),
             "notes": row.get("Notes"),
 
-            # extra fields
             "trade_id": row.get("Trade ID"),
             "currency": row.get("Currency"),
             "platform": row.get("Trading Platform"),

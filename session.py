@@ -98,23 +98,21 @@ def enrich_account(raw):
 
     bal = raw.get("balance", {})
 
-    cash = bal.get("balance", 0)
+    # Capital.com: balance = Funds, equity = Equity, profitLoss = PnL
+    funds = bal.get("balance", 0)
+    equity = bal.get("equity", funds + bal.get("profitLoss", 0))
     pnl = bal.get("profitLoss", 0)
     available = bal.get("available", 0)
-
-    equity = cash + pnl
 
     margin_warning = None
     if available < 0:
         margin_warning = "⚠ Margin Warning: Available balance is negative."
 
-    # Funds = cash, Balance = equity
     return {
-        "funds": round(cash, 2),
-        "balance": round(equity, 2),
+        "funds": round(funds, 2),
+        "balance": round(equity, 2),   # Balance = Equity (what you want in the corner)
         "equity": round(equity, 2),
         "pnl": round(pnl, 2),
-        "margin": round(pnl, 2),  # backward compatible
         "available": round(available, 2),
         "available_color": "red" if available < 0 else "lime",
         "margin_warning": margin_warning
@@ -173,7 +171,7 @@ def enrich_positions(raw_positions):
             "size": pos.get("size"),
             "entry_price": pos.get("level"),
             "current_price": market.get("bid") if direction == "SELL" else market.get("offer"),
-            "side": direction,  # BUY / SELL for template logic
+            "side": direction,
             "pnl": round(profit, 2),
             "sl": pos.get("stopLevel"),
             "tp": pos.get("profitLevel"),
