@@ -16,9 +16,11 @@ from utils import timestamp
 from close_position import close_position as close_position_module
 
 app = Flask(__name__)
-app.config['DEBUG'] = True
 
-# 🔥 Force Flask/Jinja to reload templates every request
+# ============================
+# 🔥 TEMPLATE RELOAD FIX
+# ============================
+app.config['DEBUG'] = True
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.jinja_env.auto_reload = True
 app.jinja_env.cache = {}
@@ -219,10 +221,13 @@ def dashboard():
     trade_log = load_log()
     daily_report = session.get_daily_report() or {}
 
+    # ⭐ Cache-busting token for dashboard.html + CSS
+    cache_bust = str(time.time())
+
     return render_template(
         "dashboard.html",
         title=DASHBOARD_TITLE,
-        cache_bust=time.time(),
+        cache_bust=cache_bust,
         account=account,
         positions=positions,
         trade_log=trade_log,
