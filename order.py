@@ -97,6 +97,3 @@ def place_order(epic, direction, size, sl=None, tp=None):
         "price": midpoint
     }
 
-    except Exception as e:
-        print(f"[ERROR] Failed to parse order response: {e}", flush=True)
-        return {"status": "error", "message": "Order response parse error"}
