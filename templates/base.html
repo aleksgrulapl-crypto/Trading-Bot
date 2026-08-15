@@ -183,8 +183,11 @@ function refreshDashboard() {
         .then(response => response.json())
         .then(data => {
             if (data && data.html) {
-                const container = document.getElementById('dashboard-content');
-                container.innerHTML = data.html;
+                // ⭐ FIXED: Replace dashboard-inner, not dashboard-content
+                const container = document.getElementById('dashboard-inner');
+                if (container) {
+                    container.innerHTML = data.html;
+                }
             } else {
                 errorBanner.innerText = "Dashboard refresh failed: Invalid response.";
                 errorBanner.style.display = "block";
