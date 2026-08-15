@@ -78,7 +78,7 @@
 <div class="section card">
     <h2 class="section-title">Trade Log</h2>
 
-    {% if trade_log %}
+    {% if trades %}
     <table class="trade-table">
         <thead>
             <tr>
@@ -96,7 +96,7 @@
         </thead>
 
         <tbody>
-        {% for t in trade_log %}
+        {% for t in trades %}
         {% set pnl = t.pnl or 0 %}
         <tr>
             <td>{{ t.trade_id or t.dealId }}</td>

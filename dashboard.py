@@ -129,18 +129,64 @@ def dashboard_data():
     available_log = load_available_log()
     equity_log = load_equity_log()
 
+    # -------------------------------
+    # NEW: Professional Trade Log JSON
+    # -------------------------------
+
+    trades = []
+    for t in trade_log:
+        trades.append({
+            "trade_id": t.get("trade_id") or t.get("dealId"),
+            "ticker": t.get("ticker"),
+            "epic": t.get("epic"),
+            "side": t.get("side"),
+            "size": t.get("size"),
+            "entry_price": t.get("entry_price"),
+            "exit_price": t.get("exit_price"),
+            "pnl": t.get("pnl"),
+            "sl": t.get("sl"),
+            "tp": t.get("tp"),
+            "status": t.get("status"),
+            "open_timestamp": t.get("open_timestamp") or t.get("time"),
+            "close_timestamp": t.get("close_timestamp"),
+            "currency": t.get("currency"),
+            "platform": t.get("platform"),
+            "notes": t.get("notes"),
+            "fees": t.get("fees"),
+            "timeframe": t.get("timeframe")
+        })
+
+    # Sort newest → oldest
+    trades = sorted(
+        trades,
+        key=lambda x: x.get("close_timestamp") or x.get("open_timestamp"),
+        reverse=True
+    )
+
+    # Existing HTML partial (kept for backward compatibility)
     html = render_template(
         "dashboard_partial.html",
         account=account,
         positions=positions,
-        trade_log=trade_log,
+        trades=trades,   # NEW
+        trade_log=trade_log,  # still passed for backward compatibility
         daily_report=daily_report,
         system_status=session.shared_state.get("system_status", {}),
         available_log=available_log,
         equity_log=equity_log
     )
 
-    return jsonify({"html": html})
+
+    return jsonify({
+        "html": html,
+        "account": account,
+        "positions": positions,
+        "trades": trades,               # NEW professional trade log
+        "available_log": available_log,
+        "equity_log": equity_log,
+        "daily_report": daily_report
+    })
+
 
 # ---------------------------------------------------------
 # CLOSE POSITION
