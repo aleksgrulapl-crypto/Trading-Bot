@@ -16,6 +16,11 @@ from utils import timestamp
 from close_position import close_position as close_position_module
 
 app = Flask(__name__)
+
+# 🔥 Force Flask/Jinja to reload templates every request
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.jinja_env.auto_reload = True
+app.jinja_env.cache = {}
 app.url_map.strict_slashes = False
 
 
