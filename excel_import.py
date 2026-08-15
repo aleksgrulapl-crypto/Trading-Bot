@@ -31,6 +31,7 @@ COLUMN_MAP = {
 def load_excel_trades(path="Trading Log 2026.xlsx"):
     """
     Load trades from Excel 'Trade Log' sheet using manual column mapping.
+    Skip the first row because it contains header labels.
     """
     try:
         df = pd.read_excel(path, sheet_name="Trade Log", header=2)
@@ -38,6 +39,9 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
         return []
 
     trades = []
+
+    # Skip row 0 (header row)
+    df = df.iloc[1:]
 
     for _, row in df.iterrows():
         ticker = row.get(COLUMN_MAP["ticker"])
