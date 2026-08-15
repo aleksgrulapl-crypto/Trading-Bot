@@ -30,6 +30,7 @@ API_ACCOUNT = f"{API_BASE}/api/v1/accounts"
 
 API_POSITIONS = f"{API_BASE}/api/v1/positions"
 API_MARKET = f"{API_BASE}/api/v1/markets"
+API_HISTORY_TRANSACTIONS = "https://api-capital.backend-capital.com/api/v1/history/transactions"
 
 # -----------------------------------------
 # USER CREDENTIALS
