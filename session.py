@@ -94,36 +94,37 @@ def get_account():
 
 def enrich_account(raw):
     """
-    Capital.com live JSON (as observed):
+    Live Capital JSON (as observed):
 
       balance.balance   → Equity
       balance.deposit   → Funds
       balance.profitLoss→ PnL
-      balance.available → Available
+      balance.available → internal available (not UI)
 
-    UI mapping (keep wording exactly as Capital):
+    UI mapping:
 
       Funds   = deposit
       Balance = balance (Equity)
       PnL     = profitLoss
-      Available = available
-      Margin    = balance - available  (since margin field is not present)
+      Margin  = balance - available_raw
+      Available = max(0, equity - margin)
     """
     if not raw:
         return {}
 
     bal = raw.get("balance", {})
 
-    funds = bal.get("deposit", 0)          # 866.11
-    equity = bal.get("balance", 0)         # 837.88
-    pnl = bal.get("profitLoss", 0)         # -28.23
-    available = bal.get("available", 0)    # -22.41
+    equity = bal.get("balance", 0)        # 837.88
+    funds = bal.get("deposit", 0)         # 866.11
+    pnl = bal.get("profitLoss", 0)        # -28.23
+    available_raw = bal.get("available", 0)  # -22.41
 
-    margin = equity - available            # inferred margin
+    margin = equity - available_raw       # 860.29
+    available = max(0, equity - margin)   # clamp to 0
 
     margin_warning = None
-    if available < 0:
-        margin_warning = "⚠ Margin Warning: Available balance is negative."
+    if available <= 0:
+        margin_warning = "⚠ Margin Warning: Available balance is zero or negative."
 
     return {
         "funds": round(funds, 2),
@@ -131,7 +132,7 @@ def enrich_account(raw):
         "pnl": round(pnl, 2),
         "available": round(available, 2),
         "margin": round(margin, 2),
-        "available_color": "red" if available < 0 else "lime",
+        "available_color": "red" if available <= 0 else "lime",
         "margin_warning": margin_warning
     }
 
@@ -172,6 +173,17 @@ def verify_epic(symbol):
 
 
 def enrich_positions(raw_positions):
+    """
+    Expose both NEW and LEGACY keys so the old dashboard
+    and new logic both work:
+
+      New keys:
+        position_id, ticker, epic, size, entry_price,
+        current_price, side, pnl, sl, tp, currency
+
+      Legacy keys (for old templates):
+        id, price, profit, stopLevel, limitLevel, direction
+    """
     enriched = []
 
     for item in raw_positions:
@@ -179,19 +191,39 @@ def enrich_positions(raw_positions):
         market = item.get("market", {})
 
         profit = pos.get("upl", 0)
+        direction = pos.get("direction")
+
+        position_id = pos.get("dealId")
+        ticker = market.get("symbol")
+        epic = market.get("epic")
+        size = pos.get("size")
+        entry_price = pos.get("level")
+        current_price = market.get("bid") if direction == "SELL" else market.get("offer")
+        sl = pos.get("stopLevel")
+        tp = pos.get("profitLevel")
+        currency = pos.get("currency")
 
         enriched.append({
-            "id": pos.get("dealId"),
-            "ticker": market.get("symbol"),
-            "epic": market.get("epic"),
-            "size": pos.get("size"),
-            "price": pos.get("level"),
-            "current_price": market.get("bid") if pos.get("direction") == "SELL" else market.get("offer"),
-            "direction": pos.get("direction"),
+            # New keys
+            "position_id": position_id,
+            "ticker": ticker,
+            "epic": epic,
+            "size": size,
+            "entry_price": entry_price,
+            "current_price": current_price,
+            "side": direction,
+            "pnl": round(profit, 2),
+            "sl": sl,
+            "tp": tp,
+            "currency": currency,
+
+            # Legacy keys (for old dashboard templates)
+            "id": position_id,
+            "price": entry_price,
             "profit": round(profit, 2),
-            "stopLevel": pos.get("stopLevel"),
-            "limitLevel": pos.get("profitLevel"),
-            "currency": pos.get("currency")
+            "stopLevel": sl,
+            "limitLevel": tp,
+            "direction": direction
         })
 
     return enriched
