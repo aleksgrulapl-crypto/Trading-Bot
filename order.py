@@ -1,5 +1,5 @@
 # ============================
-# ORDER MODULE (FINAL — FIXED LOGGING + SAFE SL/TP)
+# ORDER MODULE (FINAL — FULLY CORRECTED)
 # ============================
 
 import session
@@ -38,8 +38,10 @@ def validate_and_correct_levels(direction, midpoint, sl, tp):
 
 
 def place_order(epic, direction, size, sl=None, tp=None):
+    # Fetch market snapshot
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
+        print(f"[ERROR] Market snapshot unavailable for {epic}", flush=True)
         return {"status": "error", "message": "Market snapshot unavailable"}
 
     snapshot = market.json().get("snapshot", {})
@@ -47,12 +49,18 @@ def place_order(epic, direction, size, sl=None, tp=None):
     offer = snapshot.get("offer")
 
     if bid is None or offer is None:
+        print(f"[ERROR] Market prices unavailable for {epic}", flush=True)
         return {"status": "error", "message": "Price unavailable"}
 
     midpoint = (bid + offer) / 2
 
+    # Correct SL/TP
     sl_fixed, tp_fixed = validate_and_correct_levels(direction, midpoint, sl, tp)
 
+    print(f"[ORDER] Corrected SL: {sl_fixed}", flush=True)
+    print(f"[ORDER] Corrected TP: {tp_fixed}", flush=True)
+
+    # Build payload
     payload = {
         "epic": epic,
         "direction": direction.upper(),
@@ -67,28 +75,35 @@ def place_order(epic, direction, size, sl=None, tp=None):
     if tp_fixed is not None:
         payload["profitLevel"] = tp_fixed
 
+    print("[ORDER] Sending payload:", payload, flush=True)
+
+    # Send order
     response = session.request("POST", API_POSITIONS, json=payload)
 
     if not response or response.status_code >= 400:
+        print(f"[ERROR] Order failed for {epic} ({direction})", flush=True)
+        print(f"[ERROR] Response: {response.text if response else 'No response'}", flush=True)
         return {"status": "error", "message": "Order failed"}
 
     data = response.json()
     deal_ref = data.get("dealReference")
 
+    print(f"[TRADE] {direction.upper()} {epic} @ {midpoint} (size {size}) → SUCCESS", flush=True)
+    print(f"[TRADE] dealReference: {deal_ref}", flush=True)
+
     # FIXED LOGGING — correct signature
     log_trade(
-    ticker=epic,              # symbol or epic label
-    epic=epic,                # correct epic
-    deal_id=deal_ref,         # dealReference from Capital.com
-    side=direction.upper(),
-    size=size,
-    price=midpoint,
-    sl=sl_fixed,
-    tp=tp_fixed,
-    timestamp=timestamp(),
-    timeframe=None            # webhook passes timeframe separately
-)
-
+        ticker=epic,          # symbol or epic label
+        epic=epic,            # correct epic
+        deal_id=deal_ref,     # dealReference from Capital.com
+        side=direction.upper(),
+        size=size,
+        price=midpoint,
+        sl=sl_fixed,
+        tp=tp_fixed,
+        timestamp=timestamp(),
+        timeframe=None
+    )
 
     session.update_last_trade()
 
@@ -97,4 +112,3 @@ def place_order(epic, direction, size, sl=None, tp=None):
         "dealReference": deal_ref,
         "price": midpoint
     }
-
