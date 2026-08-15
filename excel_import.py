@@ -4,9 +4,7 @@ from trade_log import load_raw_log, save_log
 
 def load_excel_trades(path="Trading Log 2026.xlsx"):
     """
-    Load trades from Excel 'Trade Log' sheet into unified trade dicts.
-    Uses row 2 as header (0-based index), which contains:
-    Trade ID, Open Timestamp (UTC), Close Timestamp (UTC), Ticker, ...
+    Load trades from Excel 'Trade Log' sheet using the correct header row (row 2).
     """
     try:
         df = pd.read_excel(path, sheet_name="Trade Log", header=2)
@@ -16,10 +14,10 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
     trades = []
 
     for _, row in df.iterrows():
-        # Skip rows without a ticker or status
         ticker = row.get("Ticker")
         status = row.get("Status")
 
+        # Skip non-trade rows
         if pd.isna(ticker) or pd.isna(status):
             continue
 
