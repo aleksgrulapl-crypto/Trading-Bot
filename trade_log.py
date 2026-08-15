@@ -1,5 +1,5 @@
 # ============================
-# TRADE LOG MODULE (FINAL VERSION — CONSISTENT + TRAIL READY)
+# TRADE LOG MODULE (UPGRADED — FULL TRADE LOG STRUCTURE + BACKWARD COMPATIBLE)
 # ============================
 
 import json
@@ -56,22 +56,19 @@ def log_trade(ticker, epic=None, deal_id=None, side=None, size=None,
               price=None, sl=None, tp=None, timestamp=None, timeframe=None):
     """
     Logs an OPEN trade.
-    Includes:
-    - symbol + epic
-    - dealId
-    - entry price
-    - SL/TP
-    - timeframe
+    Existing fields preserved.
+    New fields added for full Trade Log compatibility.
     """
 
     log = load_log()
 
     entry = {
+        # Existing fields (unchanged)
         "time": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "ticker": ticker,               # symbol
-        "epic": epic,                   # Capital.com EPIC
+        "ticker": ticker,
+        "epic": epic,
         "dealId": deal_id,
-        "side": side.upper(),           # BUY or SELL
+        "side": side.upper(),
         "size": float(size),
         "entry_price": float(price),
         "exit_price": None,
@@ -79,7 +76,23 @@ def log_trade(ticker, epic=None, deal_id=None, side=None, size=None,
         "sl": sl,
         "tp": tp,
         "trail": None,
-        "timeframe": timeframe
+        "timeframe": timeframe,
+
+        # New fields (added safely)
+        "trade_id": deal_id,                     # mirrors Capital.com
+        "open_timestamp": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "close_timestamp": None,
+        "currency": "USD",
+        "platform": "Capital",
+        "reason": None,
+        "checklist_passed": None,
+        "close_source": None,
+        "status": "OPEN",
+        "notes": None,
+        "fees": 0.0,
+        "cumulative_pnl": None,
+        "running_peak": None,
+        "drawdown": None
     }
 
     log.append(entry)
@@ -95,17 +108,14 @@ def log_close(ticker, epic=None, deal_id=None, direction=None, size=None,
               sl=None, tp=None, timestamp=None, timeframe=None):
     """
     Logs a CLOSED trade with final PnL.
-    Includes:
-    - original direction (BUY/SELL)
-    - entry price
-    - exit price
-    - SL/TP
-    - timeframe
+    Existing fields preserved.
+    New fields added for full Trade Log compatibility.
     """
 
     log = load_log()
 
     entry = {
+        # Existing fields
         "time": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "ticker": ticker,
         "epic": epic,
@@ -118,7 +128,25 @@ def log_close(ticker, epic=None, deal_id=None, direction=None, size=None,
         "sl": sl,
         "tp": tp,
         "trail": None,
-        "timeframe": timeframe
+        "timeframe": timeframe,
+
+        # New fields
+        "trade_id": deal_id,
+        "open_timestamp": None,                   # filled later by history.py
+        "close_timestamp": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "currency": "USD",
+        "platform": "Capital",
+        "reason": None,
+        "checklist_passed": None,
+        "close_source": "AUTO",
+        "status": "CLOSED",
+        "notes": None,
+        "fees": 0.0,
+
+        # Performance fields (filled later)
+        "cumulative_pnl": None,
+        "running_peak": None,
+        "drawdown": None
     }
 
     log.append(entry)
@@ -138,6 +166,7 @@ def log_trail_update(ticker, epic=None, deal_id=None, new_sl=None,
     log = load_log()
 
     entry = {
+        # Existing fields
         "time": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "ticker": ticker,
         "epic": epic,
@@ -153,7 +182,23 @@ def log_trail_update(ticker, epic=None, deal_id=None, new_sl=None,
             "new_sl": new_sl,
             "price": price
         },
-        "timeframe": timeframe
+        "timeframe": timeframe,
+
+        # New fields
+        "trade_id": deal_id,
+        "open_timestamp": None,
+        "close_timestamp": None,
+        "currency": "USD",
+        "platform": "Capital",
+        "reason": "TRAIL UPDATE",
+        "checklist_passed": None,
+        "close_source": None,
+        "status": "TRAIL_UPDATE",
+        "notes": None,
+        "fees": 0.0,
+        "cumulative_pnl": None,
+        "running_peak": None,
+        "drawdown": None
     }
 
     log.append(entry)
