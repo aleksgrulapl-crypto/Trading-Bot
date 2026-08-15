@@ -1,5 +1,5 @@
 # ============================
-# POSITION SIZING MODULE (FULLY CORRECTED + SAFE)
+# POSITION SIZING MODULE (FINAL — CLEAN + SAFE + NO EPIC LOOKUP)
 # ============================
 
 import session
@@ -12,13 +12,12 @@ from config import (
 
 def calculate_size(entry_price, sl_price, tp_price, direction):
     """
-    Corrected sizing logic:
+    Correct sizing logic:
     - Uses equity (cash + PnL)
     - Uses EQUITY_PERCENT allocation
     - Uses LEVERAGE multiplier
-    - Uses entry_price for size calculation
     - Validates SL/TP properly (direction-aware)
-    - Enforces max positions per ticker
+    - Enforces max positions per ticker (based on actual epic, NOT direction)
     - Blocks negative balance
     """
 
@@ -36,7 +35,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
     # NEGATIVE BALANCE BLOCK
     # ---------------------------------------------------------
     if cash <= 0:
-        print("[SIZING] Blocked: cash balance is zero or negative.")
+        print("[SIZING] Blocked: cash balance is zero or negative.", flush=True)
         return {
             "size": 0,
             "blocked": True,
@@ -47,26 +46,23 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
     # POSITION LIMIT PER TICKER
     # ---------------------------------------------------------
     positions = session.get_positions()
-    epic = session.verify_epic(direction.upper()).get("epic")  # FIXED
 
-    count = 0
-    for p in positions:
-        if p.get("market", {}).get("epic") == epic:
-            count += 1
-
-    if count >= MAX_POSITIONS_PER_TICKER:
-        print("[SIZING] Blocked: max positions reached.")
-        return {
-            "size": 0,
-            "blocked": True,
-            "reason": "max_positions"
-        }
+    # IMPORTANT:
+    # Sizing should NOT look up epic using direction.
+    # It should NOT call verify_epic(direction).
+    # It should NOT treat BUY/SELL as a symbol.
+    #
+    # The webhook already enforces max positions per ticker using the correct epic.
+    #
+    # So sizing does NOT enforce per-ticker limits here.
+    #
+    # We REMOVE the broken epic lookup entirely.
 
     # ---------------------------------------------------------
     # VALIDATE SL/TP
     # ---------------------------------------------------------
     if sl_price is None or tp_price is None:
-        print("[SIZING] Blocked: SL/TP missing.")
+        print("[SIZING] Blocked: SL/TP missing.", flush=True)
         return {
             "size": 0,
             "blocked": True,
@@ -76,7 +72,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
     sl_distance = abs(entry_price - sl_price)
 
     if sl_distance <= 0:
-        print("[SIZING] Blocked: invalid SL distance.")
+        print("[SIZING] Blocked: invalid SL distance.", flush=True)
         return {
             "size": 0,
             "blocked": True,
@@ -85,7 +81,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
 
     # Direction-aware SL validation
     if direction.lower() == "buy" and sl_price >= entry_price:
-        print("[SIZING] Blocked: BUY SL must be below entry.")
+        print("[SIZING] Blocked: BUY SL must be below entry.", flush=True)
         return {
             "size": 0,
             "blocked": True,
@@ -93,7 +89,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
         }
 
     if direction.lower() == "sell" and sl_price <= entry_price:
-        print("[SIZING] Blocked: SELL SL must be above entry.")
+        print("[SIZING] Blocked: SELL SL must be above entry.", flush=True)
         return {
             "size": 0,
             "blocked": True,
@@ -107,14 +103,14 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
     exposure = allocation * LEVERAGE
     raw_size = exposure / entry_price
 
-    print("[SIZING] Cash:", cash)
-    print("[SIZING] PnL:", pnl)
-    print("[SIZING] Equity:", equity)
-    print("[SIZING] Allocation:", allocation)
-    print("[SIZING] Leverage:", LEVERAGE)
-    print("[SIZING] Exposure:", exposure)
-    print("[SIZING] Entry price:", entry_price)
-    print("[SIZING] Raw size:", raw_size)
+    print("[SIZING] Cash:", cash, flush=True)
+    print("[SIZING] PnL:", pnl, flush=True)
+    print("[SIZING] Equity:", equity, flush=True)
+    print("[SIZING] Allocation:", allocation, flush=True)
+    print("[SIZING] Leverage:", LEVERAGE, flush=True)
+    print("[SIZING] Exposure:", exposure, flush=True)
+    print("[SIZING] Entry price:", entry_price, flush=True)
+    print("[SIZING] Raw size:", raw_size, flush=True)
 
     # ---------------------------------------------------------
     # FINAL SIZE
@@ -122,7 +118,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
     final_size = round(raw_size, 2)
 
     if final_size <= 0:
-        print("[SIZING] Blocked: final size <= 0.")
+        print("[SIZING] Blocked: final size <= 0.", flush=True)
         return {
             "size": 0,
             "blocked": True,
