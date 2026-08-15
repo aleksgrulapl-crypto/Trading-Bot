@@ -77,17 +77,18 @@ def place_order(epic, direction, size, sl=None, tp=None):
 
     # FIXED LOGGING — correct signature
     log_trade(
-        ticker=epic,
-        epic=epic,
-        deal_id=deal_ref,
-        side=direction.upper(),
-        size=size,
-        price=midpoint,
-        sl=sl_fixed,
-        tp=tp_fixed,
-        timestamp=timestamp(),
-        timeframe=None
-    )
+    ticker=epic,              # symbol or epic label
+    epic=epic,                # correct epic
+    deal_id=deal_ref,         # dealReference from Capital.com
+    side=direction.upper(),
+    size=size,
+    price=midpoint,
+    sl=sl_fixed,
+    tp=tp_fixed,
+    timestamp=timestamp(),
+    timeframe=None            # webhook passes timeframe separately
+)
+
 
     session.update_last_trade()
 
