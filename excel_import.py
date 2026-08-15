@@ -1,52 +1,26 @@
 import pandas as pd
-from datetime import datetime
 from trade_log import load_raw_log, save_log
-
-
-def _convert_timestamp(value):
-    """
-    Convert Excel serial timestamps or return strings unchanged.
-    """
-    if value is None:
-        return None
-
-    if isinstance(value, str):
-        return value
-
-    try:
-        base = datetime(1899, 12, 30)
-        dt = base + pd.to_timedelta(value, unit="D")
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except Exception:
-        return None
-
-
-def _is_valid_row(row):
-    """
-    Reject empty or header-like rows.
-    """
-    if not isinstance(row.get("Ticker"), str):
-        return False
-    if row.get("Status") != "CLOSED":
-        return False
-    if row.get("Entry Price") is None or row.get("Exit Price") is None:
-        return False
-    return True
 
 
 def load_excel_trades(path="Trading Log 2026.xlsx"):
     """
     Load trades from Excel 'Trade Log' sheet into unified trade dicts.
+    Uses row 2 as header (0-based index), which contains:
+    Trade ID, Open Timestamp (UTC), Close Timestamp (UTC), Ticker, ...
     """
     try:
-        df = pd.read_excel(path, sheet_name="Trade Log")
+        df = pd.read_excel(path, sheet_name="Trade Log", header=2)
     except Exception:
         return []
 
     trades = []
 
     for _, row in df.iterrows():
-        if not _is_valid_row(row):
+        # Skip rows without a ticker or status
+        ticker = row.get("Ticker")
+        status = row.get("Status")
+
+        if pd.isna(ticker) or pd.isna(status):
             continue
 
         # PNL
@@ -60,17 +34,13 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
         direction = row.get("Direction")
         side = direction.upper() if isinstance(direction, str) else direction
 
-        # Timestamps
-        open_ts = _convert_timestamp(row.get("Open Timestamp (UTC)"))
-        close_ts = _convert_timestamp(row.get("Close Timestamp (UTC)"))
-
         entry = {
-            "time": close_ts or open_ts,
-            "open_timestamp": open_ts,
-            "close_timestamp": close_ts,
+            "time": row.get("Close Timestamp (UTC)") or row.get("Open Timestamp (UTC)"),
+            "open_timestamp": row.get("Open Timestamp (UTC)"),
+            "close_timestamp": row.get("Close Timestamp (UTC)"),
 
-            "ticker": row.get("Ticker"),
-            "epic": row.get("Ticker"),
+            "ticker": ticker,
+            "epic": ticker,
             "side": side,
             "size": float(row.get("Position Size") or 0),
 
@@ -84,7 +54,7 @@ def load_excel_trades(path="Trading Log 2026.xlsx"):
             "reason": row.get("Reason for Entry"),
             "checklist_passed": row.get("Checklist Passed?"),
             "close_source": row.get("Close Source"),
-            "status": "CLOSED",
+            "status": status,
             "notes": row.get("Notes"),
             "fees": float(row.get("Fees / Adjustments") or 0),
 
