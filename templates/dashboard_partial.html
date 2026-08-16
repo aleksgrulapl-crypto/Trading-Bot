@@ -74,6 +74,7 @@
                     <th>Side</th>
                     <th>Size</th>
                     <th>Entry</th>
+                    <th>Current</th>
                     <th>SL / TP</th>
                     <th>PnL</th>
                     <th></th>
@@ -94,6 +95,7 @@
 
                     <td>{{ p.size }}</td>
                     <td>{{ p.entry_price|default('—') }}</td>
+                    <td>{{ p.current_price|default('—') }}</td>
                     <td>{{ p.sl|default('—') }} / {{ p.tp|default('—') }}</td>
 
                     <td class="{% if p.pnl and p.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
