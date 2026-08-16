@@ -149,6 +149,41 @@ def compute_analytics(trades):
     }
 
 
+def load_available_log():
+    try:
+        with open("available_log.json") as f:
+            return [json.loads(line) for line in f]
+    except:
+        return []
+
+
+def load_equity_log():
+    try:
+        with open("equity_log.json") as f:
+            return [json.loads(line) for line in f]
+    except:
+        return []
+
+
+def clean_value(v):
+    try:
+        if v is None:
+            return None
+        if isinstance(v, float) and (v != v):  # NaN check
+            return None
+        return v
+    except:
+        return None
+
+
+def clean_structure(obj):
+    if isinstance(obj, dict):
+        return {k: clean_structure(clean_value(v)) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [clean_structure(clean_value(x)) for x in obj]
+    return clean_value(obj)
+
+
 @dashboard.route("/dashboard/login", methods=["GET", "POST"])
 def dashboard_login():
     if request.method == "POST":
@@ -166,22 +201,6 @@ def dashboard_logout():
     resp = redirect("/dashboard/login")
     resp.delete_cookie("dashboard_auth")
     return resp
-
-
-def load_available_log():
-    try:
-        with open("available_log.json") as f:
-            return [json.loads(line) for line in f]
-    except:
-        return []
-
-
-def load_equity_log():
-    try:
-        with open("equity_log.json") as f:
-            return [json.loads(line) for line in f]
-    except:
-        return []
 
 
 @dashboard.route("/dashboard")
@@ -259,7 +278,7 @@ def dashboard_data():
         analytics=analytics
     )
 
-    return jsonify({
+    return jsonify(clean_structure({
         "html": html,
         "account": account,
         "positions": positions,
@@ -268,7 +287,7 @@ def dashboard_data():
         "equity_log": equity_log,
         "daily_report": daily_report,
         "analytics": analytics
-    })
+    }))
 
 
 @dashboard.route("/dashboard/close/<position_id>")
@@ -291,7 +310,7 @@ def dashboard_close(position_id):
 @dashboard.route("/dashboard/debug")
 @login_required
 def dashboard_debug():
-    return jsonify({
+    return jsonify(clean_structure({
         "account": session.shared_state.get("account"),
         "positions": session.shared_state.get("positions"),
         "trade_log": session.shared_state.get("trade_log"),
@@ -299,4 +318,4 @@ def dashboard_debug():
         "daily_report": session.shared_state.get("daily_report", {}),
         "available_log": load_available_log(),
         "equity_log": load_equity_log()
-    })
+    }))
