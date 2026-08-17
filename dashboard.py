@@ -249,15 +249,17 @@ def dashboard_home():
         print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
 
     capital_trades = merge_trades(load_raw_log())
-    capital_trades.sort(
-        key=lambda x: x.get("close_timestamp") or x.get("open_timestamp"),
-        reverse=True
-    )
 
     excel_trades = load_excel_trades()
 
     combined_raw = excel_trades + capital_trades
     combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
+
+    # ⭐ Sort newest → oldest by close/open/time
+    combined_trades.sort(
+        key=lambda t: t.get("close_timestamp") or t.get("open_timestamp") or t.get("time"),
+        reverse=True
+    )
 
     daily_report = session.get_daily_report()
     available_log = load_available_log()
@@ -308,15 +310,17 @@ def dashboard_data():
         print(f"[DASHBOARD] live equity calc failed (data): {e}", flush=True)
 
     capital_trades = merge_trades(load_raw_log())
-    capital_trades.sort(
-        key=lambda x: x.get("close_timestamp") or x.get("open_timestamp"),
-        reverse=True
-    )
 
     excel_trades = load_excel_trades()
 
     combined_raw = excel_trades + capital_trades
     combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
+
+    # ⭐ Sort newest → oldest by close/open/time
+    combined_trades.sort(
+        key=lambda t: t.get("close_timestamp") or t.get("open_timestamp") or t.get("time"),
+        reverse=True
+    )
 
     daily_report = session.get_daily_report()
     available_log = load_available_log()
