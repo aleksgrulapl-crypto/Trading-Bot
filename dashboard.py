@@ -1,5 +1,5 @@
 # ============================
-# DASHBOARD MODULE (FULLY CORRECTED + PERSISTENT TRADE LOG)
+# DASHBOARD MODULE (DISK-ONLY TRADE LOG)
 # ============================
 
 import json
@@ -10,14 +10,10 @@ from flask import Blueprint, request, render_template, redirect, jsonify
 import session
 import config
 from trade_log import load_raw_log, merge_trades
-from excel_import import load_excel_trades
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
 
-# -----------------------------
-# AUTH
-# -----------------------------
 def login_required(view):
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
@@ -27,9 +23,6 @@ def login_required(view):
     return wrapper
 
 
-# -----------------------------
-# TRADE NORMALIZATION
-# -----------------------------
 def normalize_trades(trades):
     normalized = []
 
@@ -100,9 +93,6 @@ def filter_completed(trades):
     ]
 
 
-# -----------------------------
-# ANALYTICS ENGINE
-# -----------------------------
 def compute_analytics(trades):
     if not trades:
         return {
@@ -167,9 +157,6 @@ def compute_analytics(trades):
     }
 
 
-# -----------------------------
-# LOG LOADERS
-# -----------------------------
 def load_available_log():
     try:
         with open("available_log.json") as f:
@@ -205,9 +192,6 @@ def clean_structure(obj):
     return clean_value(obj)
 
 
-# -----------------------------
-# LOGIN
-# -----------------------------
 @dashboard.route("/dashboard/login", methods=["GET", "POST"])
 def dashboard_login():
     if request.method == "POST":
@@ -227,9 +211,6 @@ def dashboard_logout():
     return resp
 
 
-# -----------------------------
-# MAIN DASHBOARD PAGE
-# -----------------------------
 @dashboard.route("/dashboard")
 @login_required
 def dashboard_home():
@@ -249,10 +230,8 @@ def dashboard_home():
         print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
 
     capital_trades = merge_trades(load_raw_log())
-    excel_trades = load_excel_trades()
-
-    combined_raw = excel_trades + capital_trades
-    combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
+    combined_raw = capital_trades
+    combined_trades = normalize_trades(dedupe_trades(combined_raw))
 
     combined_trades.sort(
         key=lambda t: t.get("close_timestamp") or t.get("open_timestamp") or t.get("time"),
@@ -263,7 +242,7 @@ def dashboard_home():
     available_log = load_available_log()
     equity_log = load_equity_log()
 
-    analytics = compute_analytics(combined_trades)
+    analytics = compute_analytics(filter_completed(combined_trades))
 
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
@@ -286,9 +265,6 @@ def dashboard_home():
     )
 
 
-# -----------------------------
-# AJAX REFRESH ENDPOINT
-# -----------------------------
 @dashboard.route("/dashboard/data")
 @login_required
 def dashboard_data():
@@ -308,10 +284,8 @@ def dashboard_data():
         print(f"[DASHBOARD] live equity calc failed (data): {e}", flush=True)
 
     capital_trades = merge_trades(load_raw_log())
-    excel_trades = load_excel_trades()
-
-    combined_raw = excel_trades + capital_trades
-    combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
+    combined_raw = capital_trades
+    combined_trades = normalize_trades(dedupe_trades(combined_raw))
 
     combined_trades.sort(
         key=lambda t: t.get("close_timestamp") or t.get("open_timestamp") or t.get("time"),
@@ -322,7 +296,7 @@ def dashboard_data():
     available_log = load_available_log()
     equity_log = load_equity_log()
 
-    analytics = compute_analytics(combined_trades)
+    analytics = compute_analytics(filter_completed(combined_trades))
 
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
@@ -355,9 +329,6 @@ def dashboard_data():
     }))
 
 
-# -----------------------------
-# CLOSE POSITION
-# -----------------------------
 @dashboard.route("/dashboard/close/<position_id>")
 @login_required
 def dashboard_close(position_id):
@@ -375,9 +346,6 @@ def dashboard_close(position_id):
     return redirect("/dashboard")
 
 
-# -----------------------------
-# DEBUG ENDPOINT
-# -----------------------------
 @dashboard.route("/dashboard/debug")
 @login_required
 def dashboard_debug():
