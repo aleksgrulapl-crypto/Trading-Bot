@@ -80,20 +80,27 @@ def dedupe_trades(trades):
     unique = []
 
     for i, t in enumerate(trades):
-        # use unified dealId
+        # robust dedupe key
         key = (
             str(t.get("dealId")),
-            str(t.get("close_timestamp") or t.get("time")),
+            str(t.get("open_timestamp")),
+            str(t.get("size")),
         )
 
-        if key == ("None", "None"):
-            key = f"fallback_{i}"
+        # fallback for missing dealId
+        if key[0] == "None":
+            key = (
+                f"fallback_{i}",
+                str(t.get("open_timestamp")),
+                str(t.get("size")),
+            )
 
         if key not in seen:
             seen.add(key)
             unique.append(t)
 
     return unique
+
 
 
 def filter_completed(trades):
