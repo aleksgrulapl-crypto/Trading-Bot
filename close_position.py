@@ -3,9 +3,7 @@
 # ============================
 
 from datetime import datetime
-
 import session
-from config import API_POSITIONS
 from trade_log import log_trade
 from utils import timestamp
 
@@ -17,49 +15,48 @@ def close_position(position_id):
     """
 
     # 1) Fetch current positions to find the one we're closing
-    positions = session.fetch_positions_from(API_POSITIONS) or []
+    positions = session.get_positions() or []
     target = None
 
     for p in positions:
-        if str(p.get("positionId") or p.get("dealId")) == str(position_id):
+        if str(p.get("dealId") or p.get("positionId")) == str(position_id):
             target = p
             break
 
     if not target:
-        print(f"[CLOSE] Position {position_id} not found in current positions.")
+        print(f"[CLOSE] Position {position_id} not found.")
         return {"status": "error", "reason": "position_not_found"}
 
     epic = target.get("epic")
-    deal_id = target.get("dealId") or target.get("positionId")
+    deal_id = target.get("dealId")
     direction = target.get("direction") or target.get("side")
-    size = target.get("size") or target.get("quantity")
+    size = target.get("size")
     entry_price = target.get("level") or target.get("openLevel")
     currency = target.get("currency") or "USD"
-    ticker = target.get("instrumentName") or epic or "UNKNOWN"
+    ticker = target.get("instrumentName") or epic
 
     # 2) Close the position via Capital.com
     print(f"[CLOSE] Closing position {position_id} ({ticker})...")
     r = session.close_position(position_id)
 
     if not r or r.status_code not in (200, 202):
-        print(f"[CLOSE] Close request failed for {position_id}: {r.status_code if r else 'no response'}")
-        return {"status": "error", "reason": "close_failed", "code": r.status_code if r else None}
+        print(f"[CLOSE] Close request failed: {r.status_code if r else 'no response'}")
+        return {"status": "error", "reason": "close_failed"}
 
     data = r.json() if r.content else {}
 
-    # 3) Derive exit price and PnL from response or snapshot
-    exit_price = data.get("closeLevel") or data.get("level") or target.get("closeLevel")
-    pnl = data.get("profitLoss") or target.get("profitLoss") or 0.0
+    # 3) Extract exit price and PnL
+    exit_price = data.get("closeLevel") or data.get("level")
+    pnl = data.get("profitLoss") or 0.0
 
     try:
-        if exit_price is not None:
-            exit_price = float(exit_price)
-    except Exception:
+        exit_price = float(exit_price)
+    except:
         exit_price = None
 
     try:
         pnl = float(pnl)
-    except Exception:
+    except:
         pnl = 0.0
 
     close_ts = timestamp()
