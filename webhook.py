@@ -17,6 +17,9 @@ from scheduler import start_scheduler
 from utils import timestamp
 from close_position import close_position as close_position_module
 
+# ⭐ NEW IMPORT — auto‑import closed trades from Capital.com
+from history import merge_history
+
 app = Flask(__name__)
 
 # ============================
@@ -226,6 +229,9 @@ def webhook():
 
     except Exception as e:
         print(f"[WEBHOOK] log_trade failed: {e}", flush=True)
+
+    # ⭐ NEW: auto‑import CLOSED trades from Capital.com
+    merge_history()
 
     return jsonify({"status": "ok", "result": result}), 200
 

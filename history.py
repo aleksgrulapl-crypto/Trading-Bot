@@ -189,3 +189,20 @@ def merge_history():
     trade_log.save_log(log)
 
     print(f"[HISTORY] Added {added} new closed trades from Capital.com.")
+
+
+# ---------------------------------------------------------
+# FETCH SINGLE CLOSED TRADE BY DEAL ID
+# ---------------------------------------------------------
+
+def get_closed_trade_by_deal(deal_id):
+    """
+    Fetch a single closed trade from Capital.com history by dealId.
+    Returns an internal-format entry or None.
+    """
+
+    trades = fetch_closed_trades()
+    for raw in trades:
+        if raw.get("dealId") == deal_id:
+            return convert_capital_trade(raw)
+    return None
