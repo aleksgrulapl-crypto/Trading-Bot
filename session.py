@@ -11,10 +11,6 @@ from config import API_POSITIONS, API_ACCOUNTS, API_MARKET, EPIC_MAP
 from utils import timestamp
 import report
 
-# ============================
-# GLOBAL STATE
-# ============================
-
 shared_state = {
     "account": {},
     "positions": [],
@@ -27,7 +23,6 @@ shared_state = {
     "daily_report": {}
 }
 
-# Cache storage
 _cache = {
     "positions": {"data": None, "ts": 0},
     "account": {"data": None, "ts": 0},
@@ -39,9 +34,9 @@ CACHE_SECONDS = 5
 LOGIN_COOLDOWN_SECONDS = 30
 
 
-# ============================
-# CLEANER
-# ============================
+# ---------------------------------------------------------
+# CLEANERS
+# ---------------------------------------------------------
 
 def clean_value(v):
     try:
@@ -62,17 +57,15 @@ def clean_structure(obj):
     return clean_value(obj)
 
 
-# ============================
-# AUTH + REQUEST
-# ============================
+# ---------------------------------------------------------
+# AUTH + REQUEST (PATCHED)
+# ---------------------------------------------------------
 
 def get_headers():
     now = time.time()
 
-    # Prevent login spam
-    if now < _cache["login_cooldown"]:
-        print("[AUTH] Login cooldown active, skipping ensure_token", flush=True)
-    else:
+    # ⭐ PATCH: Only refresh token if missing AND cooldown expired
+    if (auth.cst is None or auth.xst is None) and now >= _cache["login_cooldown"]:
         try:
             auth.ensure_token()
             shared_state["system_status"]["auth"] = "OK"
@@ -91,24 +84,22 @@ def get_headers():
 def request(method, url, json=None):
     now = time.time()
 
-    # Prevent hammering API
+    # ⭐ PATCH: Respect cooldown to avoid rate-limit
     if now < _cache["request_cooldown"]:
         print("[REQUEST] Cooldown active, returning cached positions/account if available", flush=True)
+
         if "positions" in url and _cache["positions"]["data"] is not None:
             class DummyResponse:
                 status_code = 200
-
                 def json(self_inner):
                     return {"positions": _cache["positions"]["data"]}
-
             return DummyResponse()
+
         if "accounts" in url and _cache["account"]["data"] is not None:
             class DummyResponse:
                 status_code = 200
-
                 def json(self_inner):
                     return {"accounts": [_cache["account"]["data"]]}
-
             return DummyResponse()
 
     headers = get_headers()
@@ -120,7 +111,6 @@ def request(method, url, json=None):
             print(f"[ERROR] {method} {url} → {response.status_code}", flush=True)
             print(f"[ERROR] Response: {response.text}", flush=True)
 
-            # If rate-limited, activate cooldown
             if "too-many.requests" in response.text:
                 _cache["request_cooldown"] = now + CACHE_SECONDS
                 _cache["login_cooldown"] = now + LOGIN_COOLDOWN_SECONDS
@@ -132,14 +122,13 @@ def request(method, url, json=None):
         return None
 
 
-# ============================
-# POSITIONS (CACHED)
-# ============================
+# ---------------------------------------------------------
+# POSITIONS
+# ---------------------------------------------------------
 
 def get_positions():
     now = time.time()
 
-    # Return cached if fresh
     if now - _cache["positions"]["ts"] < CACHE_SECONDS and _cache["positions"]["data"] is not None:
         return _cache["positions"]["data"]
 
@@ -165,11 +154,7 @@ def get_positions():
         return shared_state.get("positions", [])
 
 
-# 🔹 used by /raw endpoint in webhook.py
 def fetch_positions_from(url: str):
-    """
-    Raw positions passthrough for /raw endpoint.
-    """
     response = request("GET", url)
     if not response:
         return {}
@@ -180,9 +165,9 @@ def fetch_positions_from(url: str):
         return {}
 
 
-# ============================
-# ACCOUNT (CACHED)
-# ============================
+# ---------------------------------------------------------
+# ACCOUNT
+# ---------------------------------------------------------
 
 def get_account():
     now = time.time()
@@ -212,9 +197,9 @@ def get_account():
         return shared_state.get("account", {})
 
 
-# ============================
+# ---------------------------------------------------------
 # ENRICHERS
-# ============================
+# ---------------------------------------------------------
 
 def enrich_account(raw):
     if not raw:
@@ -261,10 +246,7 @@ def enrich_positions(raw_positions):
         size = pos.get("size")
         entry_price = pos.get("level")
 
-        if direction == "SELL":
-            current_price = market.get("bid")
-        else:
-            current_price = market.get("offer")
+        current_price = market.get("bid") if direction == "SELL" else market.get("offer")
 
         sl = pos.get("stopLevel")
         tp = pos.get("profitLevel")
@@ -282,8 +264,6 @@ def enrich_positions(raw_positions):
             "sl": sl,
             "tp": tp,
             "currency": currency,
-
-            # Legacy keys
             "id": position_id,
             "price": entry_price,
             "profit": round(profit, 2) if profit is not None else None,
@@ -295,32 +275,15 @@ def enrich_positions(raw_positions):
     return enriched
 
 
-# ============================
-# EPIC RESOLUTION (NEW)
-# ============================
+# ---------------------------------------------------------
+# EPIC RESOLUTION
+# ---------------------------------------------------------
 
 def verify_epic(symbol: str):
-    """
-    Resolve symbol → epic in a way that never crashes webhook.
-
-    Returns dict:
-      {
-        "epic": <epic or None>,
-        "symbol": <symbol>,
-        "source": "map" | "api" | "none"
-      }
-    """
-
-    # 1) Try static EPIC_MAP first
     epic = EPIC_MAP.get(symbol)
     if epic:
-        return {
-            "epic": epic,
-            "symbol": symbol,
-            "source": "map"
-        }
+        return {"epic": epic, "symbol": symbol, "source": "map"}
 
-    # 2) Try API market lookup by symbol (best-effort)
     try:
         url = f"{API_MARKET}/{symbol}"
         resp = request("GET", url)
@@ -329,26 +292,17 @@ def verify_epic(symbol: str):
             snap = data.get("snapshot", {})
             epic_from_api = data.get("epic") or snap.get("epic")
             if epic_from_api:
-                return {
-                    "epic": epic_from_api,
-                    "symbol": symbol,
-                    "source": "api"
-                }
+                return {"epic": epic_from_api, "symbol": symbol, "source": "api"}
     except Exception as e:
         print(f"[EPIC] API lookup failed for {symbol}: {e}", flush=True)
 
-    # 3) Fallback: no epic found, but do NOT crash
     print(f"[EPIC] No epic found for symbol {symbol}", flush=True)
-    return {
-        "epic": None,
-        "symbol": symbol,
-        "source": "none"
-    }
+    return {"epic": None, "symbol": symbol, "source": "none"}
 
 
-# ============================
+# ---------------------------------------------------------
 # DAILY REPORT
-# ============================
+# ---------------------------------------------------------
 
 def get_daily_report():
     try:
