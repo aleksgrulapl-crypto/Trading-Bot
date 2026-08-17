@@ -9,7 +9,7 @@ from flask import Blueprint, request, render_template, redirect, jsonify
 
 import session
 import config
-from trade_log import load_log
+from trade_log import load_raw_log, merge_trades
 from excel_import import load_excel_trades
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
@@ -76,7 +76,6 @@ def normalize_trades(trades):
     return normalized
 
 
-
 def dedupe_trades(trades):
     seen = set()
     unique = []
@@ -99,8 +98,6 @@ def dedupe_trades(trades):
             unique.append(t)
 
     return unique
-
-
 
 
 def filter_completed(trades):
@@ -259,14 +256,12 @@ def dashboard_home():
     except Exception as e:
         print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
 
-from trade_log import load_raw_log, merge_trades
+    # MERGED TRADE LOG (Capital JSON + Excel)
+    capital_trades = merge_trades(load_raw_log())
+    excel_trades = load_excel_trades()
 
-capital_trades = merge_trades(load_raw_log())
-excel_trades = load_excel_trades()
-
-combined_raw = capital_trades + excel_trades
-combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
-
+    combined_raw = capital_trades + excel_trades
+    combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
 
     daily_report = session.get_daily_report()
     available_log = load_available_log()
@@ -318,8 +313,10 @@ def dashboard_data():
     except Exception as e:
         print(f"[DASHBOARD] live equity calc failed (data): {e}", flush=True)
 
-    capital_trades = load_log()
+    # MERGED TRADE LOG (Capital JSON + Excel)
+    capital_trades = merge_trades(load_raw_log())
     excel_trades = load_excel_trades()
+
     combined_raw = capital_trades + excel_trades
     combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
 
@@ -376,7 +373,8 @@ def dashboard_close(position_id):
 
     session.shared_state["positions"] = session.enrich_positions(raw_positions)
     session.shared_state["account"] = session.enrich_account(raw_account)
-    session.shared_state["trade_log"] = load_log()
+    # keep this simple: dashboard_home/data will rebuild merged log
+    session.shared_state["trade_log"] = merge_trades(load_raw_log())
 
     return redirect("/dashboard")
 
