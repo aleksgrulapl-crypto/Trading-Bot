@@ -96,7 +96,7 @@ DAILY_REPORT_ENABLED = True
 DAILY_REPORT_HOUR = 22
 DAILY_REPORT_MINUTE = 0
 
-TRADE_LOG_FILE = "/app/trade_log.json"
+TRADE_LOG_FILE = "/data/trade_log.json"
 DAILY_REPORT_FILE = "/tmp/daily_report.json"
 
 # Market cache TTL (used by MarketData)
