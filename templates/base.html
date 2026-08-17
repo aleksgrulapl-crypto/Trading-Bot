@@ -204,12 +204,6 @@
             border: 1px solid rgba(248, 113, 113, 0.4);
         }
 
-        .pill-status {
-            background: rgba(56, 189, 248, 0.08);
-            color: var(--accent-soft);
-            border: 1px solid rgba(56, 189, 248, 0.4);
-        }
-
         .pnl-pos { color: var(--success); }
         .pnl-neg { color: var(--danger); }
 
@@ -283,11 +277,6 @@ function refreshDashboard() {
 }
 
 setInterval(refreshDashboard, 5000);
-
-function closePosition(id) {
-    if (!id) return;
-    window.location.href = "/dashboard/close/" + id;
-}
 </script>
 
 </body>
