@@ -34,7 +34,6 @@ def normalize_trades(trades):
     normalized = []
 
     for t in trades:
-        # unify dealId / dealReference / trade_id
         deal_id = (
             t.get("dealId")
             or t.get("deal_id")
@@ -45,19 +44,15 @@ def normalize_trades(trades):
 
         t["dealId"] = str(deal_id) if deal_id else None
 
-        # timestamps
         t.setdefault("open_timestamp", t.get("time"))
         t.setdefault("close_timestamp", t.get("time"))
 
-        # ticker fallback
         if not t.get("ticker"):
             t["ticker"] = t.get("epic") or t.get("symbol") or "—"
 
-        # side normalization
         side = t.get("side")
         t["side"] = side.upper() if isinstance(side, str) else "SELL"
 
-        # numeric fields
         t.setdefault("size", t.get("size") or "—")
         t.setdefault("entry_price", t.get("entry_price") or "—")
         t.setdefault("exit_price", t.get("exit_price") or "—")
@@ -80,12 +75,10 @@ def dedupe_trades(trades):
     seen = set()
     unique = []
 
-    for i, t in enumerate(trades):
-        # primary key: dealId
+    for t in trades:
         if t.get("dealId"):
             key = ("ID", t["dealId"])
         else:
-            # fallback key: ticker + open_timestamp + entry_price
             key = (
                 "FALLBACK",
                 str(t.get("ticker")),
@@ -197,7 +190,7 @@ def clean_value(v):
     try:
         if v is None:
             return None
-        if isinstance(v, float) and (v != v):  # NaN
+        if isinstance(v, float) and (v != v):
             return None
         return v
     except:
@@ -248,7 +241,6 @@ def dashboard_home():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
-    # LIVE EQUITY
     try:
         open_pnl = sum(p.get("pnl", 0) or 0 for p in positions)
         if account.get("balance") is not None:
@@ -256,8 +248,12 @@ def dashboard_home():
     except Exception as e:
         print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
 
-    # MERGED TRADE LOG (Capital JSON + Excel)
     capital_trades = merge_trades(load_raw_log())
+    capital_trades.sort(
+        key=lambda x: x.get("close_timestamp") or x.get("open_timestamp"),
+        reverse=True
+    )
+
     excel_trades = load_excel_trades()
 
     combined_raw = capital_trades + excel_trades
@@ -269,7 +265,6 @@ def dashboard_home():
 
     analytics = compute_analytics(combined_trades)
 
-    # Update shared state
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
     session.shared_state["trade_log"] = combined_trades
@@ -292,7 +287,7 @@ def dashboard_home():
 
 
 # -----------------------------
-# AJAX REFRESH ENDPOINT (FULLY FIXED)
+# AJAX REFRESH ENDPOINT
 # -----------------------------
 @dashboard.route("/dashboard/data")
 @login_required
@@ -305,7 +300,6 @@ def dashboard_data():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
-    # LIVE EQUITY
     try:
         open_pnl = sum(p.get("pnl", 0) or 0 for p in positions)
         if account.get("balance") is not None:
@@ -313,8 +307,12 @@ def dashboard_data():
     except Exception as e:
         print(f"[DASHBOARD] live equity calc failed (data): {e}", flush=True)
 
-    # MERGED TRADE LOG (Capital JSON + Excel)
     capital_trades = merge_trades(load_raw_log())
+    capital_trades.sort(
+        key=lambda x: x.get("close_timestamp") or x.get("open_timestamp"),
+        reverse=True
+    )
+
     excel_trades = load_excel_trades()
 
     combined_raw = capital_trades + excel_trades
@@ -326,7 +324,6 @@ def dashboard_data():
 
     analytics = compute_analytics(combined_trades)
 
-    # update shared_state BEFORE rendering
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
     session.shared_state["trade_log"] = combined_trades
@@ -373,7 +370,6 @@ def dashboard_close(position_id):
 
     session.shared_state["positions"] = session.enrich_positions(raw_positions)
     session.shared_state["account"] = session.enrich_account(raw_account)
-    # keep this simple: dashboard_home/data will rebuild merged log
     session.shared_state["trade_log"] = merge_trades(load_raw_log())
 
     return redirect("/dashboard")
