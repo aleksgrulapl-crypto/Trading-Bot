@@ -1,5 +1,5 @@
 # ============================
-# DASHBOARD MODULE (DISK-ONLY TRADE LOG)
+# DASHBOARD MODULE (CLEAN FORMAT + DISK-ONLY TRADE LOG)
 # ============================
 
 import json
@@ -14,6 +14,10 @@ from trade_log import load_raw_log, merge_trades
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
 
+# ---------------------------------------------------------
+# AUTH
+# ---------------------------------------------------------
+
 def login_required(view):
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
@@ -23,59 +27,69 @@ def login_required(view):
     return wrapper
 
 
+# ---------------------------------------------------------
+# NORMALIZE TRADES (NEW FORMAT)
+# ---------------------------------------------------------
+
 def normalize_trades(trades):
     normalized = []
 
     for t in trades:
-        deal_id = (
-            t.get("dealId")
-            or t.get("deal_id")
-            or t.get("trade_id")
-            or t.get("dealReference")
-            or t.get("reference")
-        )
-
+        deal_id = t.get("dealId")
         t["dealId"] = str(deal_id) if deal_id else None
 
-        t.setdefault("open_timestamp", t.get("open_timestamp") or t.get("time"))
-        t.setdefault("close_timestamp", t.get("close_timestamp") or t.get("time"))
+        # New timestamp fields
+        t.setdefault("time_entered", t.get("time_entered"))
+        t.setdefault("time_exited", t.get("time_exited"))
 
+        # Ticker
         if not t.get("ticker"):
             t["ticker"] = t.get("epic") or t.get("symbol") or "—"
 
+        # Side
         side = t.get("side")
         t["side"] = side.upper() if isinstance(side, str) else "SELL"
 
+        # Size
         t.setdefault("size", t.get("size") or "—")
+
+        # Prices
         t.setdefault("entry_price", t.get("entry_price") or "—")
         t.setdefault("exit_price", t.get("exit_price") or "—")
 
+        # PnL
         pnl = t.get("pnl", 0)
         try:
             t["pnl"] = float(pnl)
         except Exception:
             t["pnl"] = 0.0
 
-        t.setdefault("checklist_passed", "Yes")
-        t.setdefault("notes", "")
+        # Remove checklist + notes
+        t.pop("checklist_passed", None)
+        t.pop("notes", None)
 
         normalized.append(t)
 
     return normalized
 
 
+# ---------------------------------------------------------
+# DEDUPE
+# ---------------------------------------------------------
+
 def dedupe_trades(trades):
     seen = set()
     unique = []
 
     for t in trades:
-        if t.get("dealId"):
-            key = ("ID", t["dealId"])
+        deal_id = t.get("dealId")
+        if deal_id:
+            key = ("ID", deal_id)
         else:
             key = (
                 "FALLBACK",
                 str(t.get("ticker")),
-                str(t.get("open_timestamp")),
+                str(t.get("time_entered")),
                 str(t.get("entry_price")),
             )
 
@@ -86,12 +100,20 @@ def dedupe_trades(trades):
     return unique
 
 
+# ---------------------------------------------------------
+# FILTER COMPLETED
+# ---------------------------------------------------------
+
 def filter_completed(trades):
     return [
         t for t in trades
         if t.get("status") == "CLOSED" or t.get("exit_price") not in (None, "—")
     ]
 
+
+# ---------------------------------------------------------
+# ANALYTICS
+# ---------------------------------------------------------
 
 def compute_analytics(trades):
     if not trades:
@@ -157,21 +179,20 @@ def compute_analytics(trades):
     }
 
 
-def load_available_log():
-    try:
-        with open("available_log.json") as f:
-            return [json.loads(line) for line in f]
-    except:
-        return []
+# ---------------------------------------------------------
+# LOG LOADERS (DISABLED DAILY REPORT)
+# ---------------------------------------------------------
 
+def load_available_log():
+    return []
 
 def load_equity_log():
-    try:
-        with open("equity_log.json") as f:
-            return [json.loads(line) for line in f]
-    except:
-        return []
+    return []
 
+
+# ---------------------------------------------------------
+# CLEAN STRUCTURE
+# ---------------------------------------------------------
 
 def clean_value(v):
     try:
@@ -183,7 +204,6 @@ def clean_value(v):
     except:
         return None
 
-
 def clean_structure(obj):
     if isinstance(obj, dict):
         return {k: clean_structure(clean_value(v)) for k, v in obj.items()}
@@ -191,6 +211,10 @@ def clean_structure(obj):
         return [clean_structure(clean_value(x)) for x in obj]
     return clean_value(obj)
 
+
+# ---------------------------------------------------------
+# LOGIN
+# ---------------------------------------------------------
 
 @dashboard.route("/dashboard/login", methods=["GET", "POST"])
 def dashboard_login():
@@ -210,6 +234,10 @@ def dashboard_logout():
     resp.delete_cookie("dashboard_auth")
     return resp
 
+
+# ---------------------------------------------------------
+# DASHBOARD HOME
+# ---------------------------------------------------------
 
 @dashboard.route("/dashboard")
 @login_required
@@ -233,21 +261,21 @@ def dashboard_home():
     combined_raw = capital_trades
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
 
+    # NEW SORT KEY
     combined_trades.sort(
-        key=lambda t: t.get("close_timestamp") or t.get("open_timestamp") or t.get("time"),
+        key=lambda t: (
+            t.get("time_exited")
+            or t.get("time_entered")
+            or ""
+        ),
         reverse=True
     )
-
-    daily_report = session.get_daily_report()
-    available_log = load_available_log()
-    equity_log = load_equity_log()
 
     analytics = compute_analytics(filter_completed(combined_trades))
 
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
     session.shared_state["trade_log"] = combined_trades
-    session.shared_state["daily_report"] = daily_report
     session.shared_state["analytics"] = analytics
 
     return render_template(
@@ -257,13 +285,13 @@ def dashboard_home():
         account=account,
         positions=positions,
         trades=combined_trades,
-        daily_report=daily_report,
-        system_status=session.shared_state.get("system_status", {}),
-        available_log=available_log,
-        equity_log=equity_log,
         analytics=analytics
     )
 
+
+# ---------------------------------------------------------
+# DASHBOARD DATA (AJAX)
+# ---------------------------------------------------------
 
 @dashboard.route("/dashboard/data")
 @login_required
@@ -292,21 +320,15 @@ def dashboard_data():
             t.get("time_exited")
             or t.get("time_entered")
             or ""
-       ),
-       reverse=True
-    )   
-
-
-    daily_report = session.get_daily_report()
-    available_log = load_available_log()
-    equity_log = load_equity_log()
+        ),
+        reverse=True
+    )
 
     analytics = compute_analytics(filter_completed(combined_trades))
 
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
     session.shared_state["trade_log"] = combined_trades
-    session.shared_state["daily_report"] = daily_report
     session.shared_state["analytics"] = analytics
 
     html = render_template(
@@ -315,10 +337,6 @@ def dashboard_data():
         account=account,
         positions=positions,
         trades=combined_trades,
-        daily_report=daily_report,
-        system_status=session.shared_state.get("system_status", {}),
-        available_log=available_log,
-        equity_log=equity_log,
         analytics=analytics
     )
 
@@ -327,12 +345,13 @@ def dashboard_data():
         "account": account,
         "positions": positions,
         "trades": combined_trades,
-        "available_log": available_log,
-        "equity_log": equity_log,
-        "daily_report": daily_report,
         "analytics": analytics
     }))
 
+
+# ---------------------------------------------------------
+# CLOSE POSITION
+# ---------------------------------------------------------
 
 @dashboard.route("/dashboard/close/<position_id>")
 @login_required
@@ -351,6 +370,10 @@ def dashboard_close(position_id):
     return redirect("/dashboard")
 
 
+# ---------------------------------------------------------
+# DEBUG
+# ---------------------------------------------------------
+
 @dashboard.route("/dashboard/debug")
 @login_required
 def dashboard_debug():
@@ -359,7 +382,5 @@ def dashboard_debug():
         "positions": session.shared_state.get("positions"),
         "trade_log": session.shared_state.get("trade_log"),
         "system_status": session.shared_state.get("system_status", {}),
-        "daily_report": session.shared_state.get("daily_report", {}),
-        "available_log": load_available_log(),
-        "equity_log": load_equity_log()
+        "analytics": session.shared_state.get("analytics", {})
     }))

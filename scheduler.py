@@ -164,10 +164,13 @@ scheduler = Scheduler()
 
 
 def start_scheduler():
-    scheduler.add_daily_job(21, 0, run_daily_report)
-    scheduler.add_daily_job(21, 0, log_equity)
-    scheduler.add_hourly_job(0, log_available)
-    scheduler.add_interval_job(300, import_closed_trades)
+    # Temporarily disable all jobs to reduce API hits and log spam.
+    # You can re-enable any of these later when you want them back:
+
+    # scheduler.add_daily_job(21, 0, run_daily_report)
+    # scheduler.add_daily_job(21, 0, log_equity)
+    # scheduler.add_hourly_job(0, log_available)
+    # scheduler.add_interval_job(300, import_closed_trades)
 
     scheduler.start()
-    print("[Scheduler] Started background scheduler.")
+    print("[Scheduler] Started background scheduler (jobs currently disabled).")
