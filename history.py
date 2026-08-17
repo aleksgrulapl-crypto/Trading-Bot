@@ -9,26 +9,15 @@ from config import API_HISTORY_TRANSACTIONS
 
 
 # ---------------------------------------------------------
-# TIMESTAMP PARSING (CAPITAL HISTORY FLEXIBLE)
+# TIMESTAMP PARSING
 # ---------------------------------------------------------
 
 def _parse_capital_timestamp(value):
-    """
-    Capital history timestamps can be:
-      - ISO strings: "2026-08-14T19:59:56.923"
-      - ISO strings with Z: "2026-08-14T19:59:56.923Z"
-      - Epoch seconds: 1692033596
-      - Epoch milliseconds: 1692033596923
-
-    Returns a formatted UTC string: "YYYY-MM-DD HH:MM:SS" or None.
-    """
     if value is None:
         return None
 
-    # Epoch (int/float)
     if isinstance(value, (int, float)):
         try:
-            # Detect ms vs s
             if value > 1e12:
                 dt = datetime.utcfromtimestamp(value / 1000.0)
             else:
@@ -37,10 +26,8 @@ def _parse_capital_timestamp(value):
         except Exception:
             return None
 
-    # ISO string
     if isinstance(value, str):
         try:
-            # Strip trailing Z if present
             cleaned = value.replace("Z", "")
             dt = datetime.fromisoformat(cleaned)
             return dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -55,11 +42,6 @@ def _parse_capital_timestamp(value):
 # ---------------------------------------------------------
 
 def fetch_closed_trades():
-    """
-    Pulls closed trades from Capital.com using the official history endpoint.
-    Returns a list of raw Capital.com trade objects.
-    """
-
     url = f"{API_HISTORY_TRANSACTIONS}?type=POSITION"
     response = session.request("GET", url)
 
@@ -76,18 +58,10 @@ def fetch_closed_trades():
 
 
 # ---------------------------------------------------------
-# CONVERT CAPITAL TRADE → INTERNAL TRADE LOG FORMAT
+# CONVERT CAPITAL TRADE → INTERNAL FORMAT
 # ---------------------------------------------------------
 
 def convert_capital_trade(raw):
-    """
-    Converts a single Capital.com trade into your upgraded trade_log.py format.
-    Compatible with:
-      - merge_trades()
-      - dashboard analytics
-      - Excel trade log
-    """
-
     try:
         deal_id = raw.get("dealId")
         epic = raw.get("epic")
@@ -99,7 +73,6 @@ def convert_capital_trade(raw):
         currency = raw.get("currency")
         instrument_name = raw.get("instrumentName")
 
-        # SL/TP fields in history can be stopLevel / limitLevel
         sl = raw.get("stopLevel")
         tp = raw.get("limitLevel")
 
@@ -109,9 +82,7 @@ def convert_capital_trade(raw):
         open_timestamp = _parse_capital_timestamp(open_ts_raw)
         close_timestamp = _parse_capital_timestamp(close_ts_raw)
 
-        # Build upgraded entry
         entry = {
-            # Existing fields (backend compatibility)
             "time": close_timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "ticker": instrument_name,
             "epic": epic,
@@ -126,7 +97,6 @@ def convert_capital_trade(raw):
             "trail": None,
             "timeframe": None,
 
-            # New fields (Excel Trade Log compatibility)
             "trade_id": deal_id,
             "open_timestamp": open_timestamp,
             "close_timestamp": close_timestamp,
@@ -139,7 +109,6 @@ def convert_capital_trade(raw):
             "notes": None,
             "fees": raw.get("charges", 0.0),
 
-            # Performance fields (filled later)
             "cumulative_pnl": None,
             "running_peak": None,
             "drawdown": None
@@ -153,15 +122,10 @@ def convert_capital_trade(raw):
 
 
 # ---------------------------------------------------------
-# MERGE INTO trade_log.json SAFELY
+# MERGE HISTORY INTO trade_log.json
 # ---------------------------------------------------------
 
 def merge_history():
-    """
-    Fetches closed trades from Capital.com and merges them into trade_log.json.
-    Avoids duplicates using dealId.
-    """
-
     print("[HISTORY] Fetching closed trades...")
     closed_trades = fetch_closed_trades()
 
@@ -170,15 +134,17 @@ def merge_history():
         return
 
     log = trade_log.load_raw_log()
-    existing_ids = {entry.get("dealId") for entry in log}
+
+    # ⭐ FIXED: Only skip if CLOSED already exists
+    existing_pairs = {(e.get("dealId"), e.get("status")) for e in log}
 
     added = 0
 
     for raw in closed_trades:
         deal_id = raw.get("dealId")
 
-        # Skip duplicates
-        if deal_id in existing_ids:
+        # Skip only if CLOSED already exists
+        if (deal_id, "CLOSED") in existing_pairs:
             continue
 
         entry = convert_capital_trade(raw)
@@ -196,11 +162,6 @@ def merge_history():
 # ---------------------------------------------------------
 
 def get_closed_trade_by_deal(deal_id):
-    """
-    Fetch a single closed trade from Capital.com history by dealId.
-    Returns an internal-format entry or None.
-    """
-
     trades = fetch_closed_trades()
     for raw in trades:
         if raw.get("dealId") == deal_id:
