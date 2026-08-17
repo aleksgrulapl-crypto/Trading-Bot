@@ -1,166 +1,173 @@
-<div class="grid">
-    <!-- Analytics / Summary -->
-    <div class="card">
-        <div class="card-header">
-            <div class="card-title">Performance Snapshot</div>
-            <div class="card-subtitle">Live metrics from completed trades</div>
+<div id="dashboard-inner">
+
+    <div class="grid">
+        <!-- Analytics / Summary -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Performance Snapshot</div>
+                <div class="card-subtitle">Live metrics from completed trades</div>
+            </div>
+
+            <div class="metrics-row">
+                <div class="metric">
+                    <div class="metric-label">Win Rate</div>
+                    <div class="metric-value metric-neutral">
+                        {{ analytics.win_rate|default('—') }}%
+                    </div>
+                </div>
+
+                <div class="metric">
+                    <div class="metric-label">Expectancy / Trade</div>
+                    <div class="metric-value {% if analytics.expectancy and analytics.expectancy >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+                        {{ analytics.expectancy|default('—') }}
+                    </div>
+                </div>
+
+                <div class="metric">
+                    <div class="metric-label">Trades</div>
+                    <div class="metric-value metric-neutral">
+                        {{ analytics.trade_count|default('—') }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="metrics-row" style="margin-top: 10px;">
+                <div class="metric">
+                    <div class="metric-label">Profit / Loss</div>
+                    <div class="metric-value {% if analytics.total_pl and analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+                        {{ analytics.total_pl|default('—') }}
+                    </div>
+                </div>
+
+                <div class="metric">
+                    <div class="metric-label">Max Drawdown</div>
+                    <div class="metric-value metric-bad">
+                        {{ analytics.max_drawdown|default('—') }}
+                    </div>
+                </div>
+
+                <div class="metric">
+                    <div class="metric-label">Average Win / Loss</div>
+                    <div class="metric-value metric-neutral">
+                        W {{ analytics.avg_win|default('—') }} / L {{ analytics.avg_loss|default('—') }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="small" style="margin-top: 10px;">
+                Story in brief: {{ analytics.story|default('Discipline and controlled losses define the curve.') }}
+            </div>
         </div>
 
-        <div class="metrics-row">
-            <div class="metric">
-                <div class="metric-label">Win Rate</div>
-                <div class="metric-value metric-neutral">
-                    {{ analytics.win_rate|default('—') }}%
+        <!-- Account / Positions -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Account & Open Positions</div>
+                <div class="card-subtitle">
+                    Live positions from Capital.com
                 </div>
             </div>
 
-            <div class="metric">
-                <div class="metric-label">Expectancy / Trade</div>
-                <div class="metric-value {% if analytics.expectancy and analytics.expectancy >= 0 %}metric-good{% else %}metric-bad{% endif %}">
-                    {{ analytics.expectancy|default('—') }}
-                </div>
-            </div>
+            {% if positions %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Ticker</th>
+                        <th>Side</th>
+                        <th>Size</th>
+                        <th>Entry</th>
+                        <th>Current</th>
+                        <th>SL / TP</th>
+                        <th>PnL</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for p in positions %}
+                    <tr>
+                        <td>{{ p.ticker }}</td>
 
-            <div class="metric">
-                <div class="metric-label">Trades</div>
-                <div class="metric-value metric-neutral">
-                    {{ analytics.trade_count|default('—') }}
-                </div>
-            </div>
-        </div>
+                        <td>
+                            {% if p.side == 'BUY' %}
+                                <span class="pill pill-long">Long</span>
+                            {% else %}
+                                <span class="pill pill-short">Short</span>
+                            {% endif %}
+                        </td>
 
-        <div class="metrics-row" style="margin-top: 10px;">
-            <div class="metric">
-                <div class="metric-label">Profit / Loss</div>
-                <div class="metric-value {% if analytics.total_pl and analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
-                    {{ analytics.total_pl|default('—') }}
-                </div>
-            </div>
+                        <td>{{ p.size }}</td>
+                        <td>{{ p.entry_price|default('—') }}</td>
+                        <td>{{ p.current_price|default('—') }}</td>
+                        <td>{{ p.sl|default('—') }} / {{ p.tp|default('—') }}</td>
 
-            <div class="metric">
-                <div class="metric-label">Max Drawdown</div>
-                <div class="metric-value metric-bad">
-                    {{ analytics.max_drawdown|default('—') }}
-                </div>
-            </div>
-
-            <div class="metric">
-                <div class="metric-label">Average Win / Loss</div>
-                <div class="metric-value metric-neutral">
-                    W {{ analytics.avg_win|default('—') }} / L {{ analytics.avg_loss|default('—') }}
-                </div>
-            </div>
-        </div>
-
-        <div class="small" style="margin-top: 10px;">
-            Story in brief: {{ analytics.story|default('Discipline and risk define the curve — keep losses controlled.') }}
+                        <td class="{% if p.pnl and p.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+                            {{ p.pnl|default('—') }}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="small">No open positions.</div>
+            {% endif %}
         </div>
     </div>
 
-    <!-- Account / Positions -->
-    <div class="card">
-        <div class="card-header">
-            <div class="card-title">Account & Open Positions</div>
-            <div class="card-subtitle">
-                Live positions from Capital.com
+    <!-- Completed Trades -->
+    <div class="grid-full">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Completed Trades</div>
+                <div class="card-subtitle">Capital + Excel imported trades</div>
             </div>
+
+            {% if trades %}
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Entered</th>
+                        <th>Exited</th>
+                        <th>Ticker</th>
+                        <th>Side</th>
+                        <th>Size</th>
+                        <th>Entry / Exit</th>
+                        <th>PnL</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for t in trades %}
+                    <tr>
+                        <td>{{ t.time_entered|default('—') }}</td>
+                        <td>{{ t.time_exited|default('—') }}</td>
+
+                        <td>{{ t.ticker }}</td>
+
+                        <td>
+                            {% if t.side == 'BUY' %}
+                                <span class="pill pill-long">Long</span>
+                            {% else %}
+                                <span class="pill pill-short">Short</span>
+                            {% endif %}
+                        </td>
+
+                        <td>{{ t.size }}</td>
+
+                        <td>
+                            {{ t.entry_price|default('—') }}
+                            →
+                            {{ t.exit_price|default('—') }}
+                        </td>
+
+                        <td class="{% if t.pnl and t.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+                            {{ t.pnl|default('—') }}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="small">No completed trades yet.</div>
+            {% endif %}
         </div>
-
-        {% if positions %}
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>Ticker</th>
-                    <th>Side</th>
-                    <th>Size</th>
-                    <th>Entry</th>
-                    <th>Current</th>
-                    <th>SL / TP</th>
-                    <th>PnL</th>
-                </tr>
-            </thead>
-            <tbody>
-            {% for p in positions %}
-                <tr>
-                    <td>{{ p.ticker }}</td>
-
-                    <td>
-                        {% if p.side == 'BUY' %}
-                            <span class="pill pill-long">Long</span>
-                        {% else %}
-                            <span class="pill pill-short">Short</span>
-                        {% endif %}
-                    </td>
-
-                    <td>{{ p.size }}</td>
-                    <td>{{ p.entry_price|default('—') }}</td>
-                    <td>{{ p.current_price|default('—') }}</td>
-                    <td>{{ p.sl|default('—') }} / {{ p.tp|default('—') }}</td>
-
-                    <td class="{% if p.pnl and p.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
-                        {{ p.pnl|default('—') }}
-                    </td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <div class="small">No open positions.</div>
-        {% endif %}
     </div>
-</div>
 
-<!-- Trade Log -->
-<div class="grid-full">
-    <div class="card">
-        <div class="card-header">
-            <div class="card-title">Completed Trades</div>
-            <div class="card-subtitle">Capital + Excel imported trades</div>
-        </div>
-
-        {% if trades %}
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>Time</th>
-                    <th>Ticker</th>
-                    <th>Side</th>
-                    <th>Size</th>
-                    <th>Entry / Exit</th>
-                    <th>PnL</th>
-                    <th>Checklist</th>
-                    <th>Notes</th>
-                </tr>
-            </thead>
-            <tbody>
-            {% for t in trades %}
-                <tr>
-                    <td>{{ t.close_timestamp or t.open_timestamp }}</td>
-                    <td>{{ t.ticker }}</td>
-
-                    <td>
-                        {% if t.side == 'BUY' %}
-                            <span class="pill pill-long">Long</span>
-                        {% else %}
-                            <span class="pill pill-short">Short</span>
-                        {% endif %}
-                    </td>
-
-                    <td>{{ t.size }}</td>
-                    <td>{{ t.entry_price }} → {{ t.exit_price }}</td>
-
-                    <td class="{% if t.pnl and t.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
-                        {{ t.pnl|default('—') }}
-                    </td>
-
-                    <td>{{ t.checklist_passed|default('Yes') }}</td>
-                    <td class="small">{{ t.notes|default('') }}</td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <div class="small">No completed trades yet.</div>
-        {% endif %}
-    </div>
 </div>
