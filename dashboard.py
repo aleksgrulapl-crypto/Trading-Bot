@@ -34,6 +34,17 @@ def normalize_trades(trades):
     normalized = []
 
     for t in trades:
+        # unify dealId / dealReference / trade_id
+        deal_id = (
+            t.get("dealId")
+            or t.get("deal_id")
+            or t.get("trade_id")
+            or t.get("dealReference")
+            or t.get("reference")
+        )
+
+        t["dealId"] = str(deal_id) if deal_id is not None else "None"
+
         t.setdefault("open_timestamp", t.get("time"))
         t.setdefault("close_timestamp", t.get("time"))
 
@@ -69,8 +80,9 @@ def dedupe_trades(trades):
     unique = []
 
     for i, t in enumerate(trades):
+        # use unified dealId
         key = (
-            str(t.get("trade_id") or t.get("dealId")),
+            str(t.get("dealId")),
             str(t.get("close_timestamp") or t.get("time")),
         )
 
@@ -306,14 +318,13 @@ def dashboard_data():
 
     analytics = compute_analytics(combined_trades)
 
-    # ⭐ FIX: update shared_state BEFORE rendering
+    # update shared_state BEFORE rendering
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
     session.shared_state["trade_log"] = combined_trades
     session.shared_state["daily_report"] = daily_report
     session.shared_state["analytics"] = analytics
 
-    # Now render partial with fresh analytics
     html = render_template(
         "dashboard_partial.html",
         cache_bust=time.time(),
