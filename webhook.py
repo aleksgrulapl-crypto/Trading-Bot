@@ -1,3 +1,7 @@
+# ============================
+# WEBHOOK MODULE (SL/TP + CLEAN TRADE LOGGING)
+# ============================
+
 from flask import Flask, request, jsonify, render_template, redirect
 import json
 import time
@@ -17,8 +21,8 @@ from close_position import close_position as close_position_module
 
 app = Flask(__name__)
 
-app.config['DEBUG'] = True
-app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.config["DEBUG"] = True
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.jinja_env.auto_reload = True
 app.jinja_env.cache = {}
 app.url_map.strict_slashes = False
@@ -38,6 +42,7 @@ def webhook():
 
     alert = None
 
+    # Parse alert (JSON → fallback to raw string)
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
@@ -54,6 +59,7 @@ def webhook():
                 print("[WEBHOOK] PARSE ERROR:", e3, flush=True)
                 return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
+    # Blocked alert handling (risk filters, etc.)
     if alert.get("blocked"):
         print(f"[WEBHOOK] ALERT BLOCKED: {alert.get('reason')}", flush=True)
 
@@ -67,7 +73,7 @@ def webhook():
             sl=alert.get("sl"),
             tp=alert.get("tp"),
             timestamp=timestamp(),
-            timeframe=alert.get("timeframe")
+            timeframe=alert.get("timeframe"),
         )
 
         return jsonify({"status": "blocked", "reason": alert.get("reason")}), 200
@@ -78,12 +84,19 @@ def webhook():
     tp_price = alert["tp"]
     timeframe = alert.get("timeframe")
 
-    print(f"[WEBHOOK] Parsed alert → symbol={symbol}, action={action}, SL={sl_price}, TP={tp_price}, TF={timeframe}", flush=True)
+    print(
+        f"[WEBHOOK] Parsed alert → symbol={symbol}, action={action}, SL={sl_price}, TP={tp_price}, TF={timeframe}",
+        flush=True,
+    )
 
+    # EPIC lookup
     epic_data = session.verify_epic(symbol)
     epic = epic_data.get("epic")
 
-    print(f"[WEBHOOK] EPIC lookup → symbol={symbol}, epic={epic}, source={epic_data.get('source')}", flush=True)
+    print(
+        f"[WEBHOOK] EPIC lookup → symbol={symbol}, epic={epic}, source={epic_data.get('source')}",
+        flush=True,
+    )
 
     if not epic:
         print("[WEBHOOK] EPIC lookup failed:", symbol, flush=True)
@@ -98,11 +111,12 @@ def webhook():
             sl=sl_price,
             tp=tp_price,
             timestamp=timestamp(),
-            timeframe=timeframe
+            timeframe=timeframe,
         )
 
         return jsonify({"status": "blocked", "reason": "epic_lookup_failed"}), 200
 
+    # Market snapshot
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
         print("[WEBHOOK] Market snapshot unavailable for:", epic, flush=True)
@@ -117,7 +131,7 @@ def webhook():
             sl=sl_price,
             tp=tp_price,
             timestamp=timestamp(),
-            timeframe=timeframe
+            timeframe=timeframe,
         )
 
         return jsonify({"status": "blocked", "reason": "market_snapshot_unavailable"}), 200
@@ -139,7 +153,7 @@ def webhook():
             sl=sl_price,
             tp=tp_price,
             timestamp=timestamp(),
-            timeframe=timeframe
+            timeframe=timeframe,
         )
 
         return jsonify({"status": "blocked", "reason": "price_unavailable"}), 200
@@ -147,11 +161,12 @@ def webhook():
     entry_price = (bid + offer) / 2
     print(f"[WEBHOOK] Entry price midpoint: {entry_price}", flush=True)
 
+    # Sizing (includes SL/TP risk logic)
     size_info = calculate_size(
         entry_price=entry_price,
         sl_price=sl_price,
         tp_price=tp_price,
-        direction=action
+        direction=action,
     )
 
     if size_info["blocked"]:
@@ -167,7 +182,7 @@ def webhook():
             sl=sl_price,
             tp=tp_price,
             timestamp=timestamp(),
-            timeframe=timeframe
+            timeframe=timeframe,
         )
 
         return jsonify({"status": "blocked", "reason": size_info["reason"]}), 200
@@ -178,10 +193,11 @@ def webhook():
     print("[WEBHOOK] Final TP:", tp_price, flush=True)
     print("[WEBHOOK] Final SIZE:", size, flush=True)
 
+    # Place order
     result = place_order(epic, action, size, sl_price, tp_price)
-
     session.update_last_trade()
 
+    # Log OPEN trade in clean format
     try:
         deal_id = None
 
@@ -192,6 +208,8 @@ def webhook():
                 or result.get("deal_id")
             )
 
+        ts = timestamp()
+
         log_trade(
             ticker=symbol,
             epic=epic,
@@ -201,11 +219,14 @@ def webhook():
             price=entry_price,
             sl=sl_price,
             tp=tp_price,
-            timestamp=timestamp(),
-            timeframe=timeframe
+            timestamp=ts,
+            timeframe=timeframe,
         )
 
-        print(f"[WEBHOOK] OPEN TRADE LOGGED → {symbol} {action} size={size} dealId={deal_id}", flush=True)
+        print(
+            f"[WEBHOOK] OPEN TRADE LOGGED → {symbol} {action} size={size} dealId={deal_id}",
+            flush=True,
+        )
 
     except Exception as e:
         print(f"[WEBHOOK] log_trade failed: {e}", flush=True)
@@ -213,6 +234,7 @@ def webhook():
     return jsonify({"status": "ok", "result": result}), 200
 
 
+# Dashboard blueprint
 app.register_blueprint(dashboard_blueprint)
 
 

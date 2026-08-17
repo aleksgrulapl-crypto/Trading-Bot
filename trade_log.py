@@ -1,5 +1,5 @@
 # ============================
-# TRADE LOG MODULE (CLEAN FORMAT)
+# TRADE LOG MODULE (CLEAN FORMAT — FIXED OPEN/CLOSED MERGE)
 # ============================
 
 import json
@@ -58,7 +58,7 @@ def clean_trade(entry):
         "entry_price": float(entry.get("entry_price")) if entry.get("entry_price") else None,
         "exit_price": float(entry.get("exit_price")) if entry.get("exit_price") else None,
 
-        "pnl": float(entry.get("pnl")) if entry.get("pnl") else None,
+        "pnl": float(entry.get("pnl")) if entry.get("pnl") is not None else None,
 
         "status": entry.get("status") or ("OPEN" if entry.get("exit_price") in (None, "—") else "CLOSED")
     }
@@ -97,23 +97,43 @@ def log_trade(ticker, epic, deal_id, side, size, price, sl, tp, timestamp, timef
 def log_close(ticker, epic, deal_id, direction, size, entry_price, close_price, pnl, sl, tp, timestamp, timeframe):
     log = load_raw_log()
 
-    # Remove any existing OPEN entry for this dealId
-    log = [t for t in log if t.get("dealId") != deal_id]
+    # Try to find existing OPEN entry for this dealId
+    found = False
+    for t in log:
+        if t.get("dealId") == deal_id:
+            # Update existing entry in place
+            t["exit_price"] = close_price
+            t["pnl"] = pnl
+            t["time_exited"] = timestamp
+            t["status"] = "CLOSED"
 
-    entry = {
-        "dealId": deal_id,
-        "ticker": ticker,
-        "side": direction,
-        "size": size,
-        "entry_price": entry_price,
-        "exit_price": close_price,
-        "pnl": pnl,
-        "time_entered": None,   # will be filled by merge
-        "time_exited": timestamp,
-        "status": "CLOSED"
-    }
+            # Ensure entry_price is set
+            if entry_price is not None:
+                t["entry_price"] = entry_price
 
-    log.append(clean_trade(entry))
+            # Ensure side/direction is consistent
+            if direction:
+                t["side"] = direction
+
+            found = True
+            break
+
+    # If no existing entry (e.g. imported history), create a new CLOSED entry
+    if not found:
+        entry = {
+            "dealId": deal_id,
+            "ticker": ticker,
+            "side": direction,
+            "size": size,
+            "entry_price": entry_price,
+            "exit_price": close_price,
+            "pnl": pnl,
+            "time_entered": None,
+            "time_exited": timestamp,
+            "status": "CLOSED"
+        }
+        log.append(clean_trade(entry))
+
     save_log(log)
 
     print(f"[TRADE_LOG] Logged CLOSED trade → {ticker} {direction} pnl={pnl}")
@@ -126,6 +146,9 @@ def log_close(ticker, epic, deal_id, direction, size, entry_price, close_price, 
 def merge_trades(log):
     """
     Combine OPEN and CLOSED entries into unified trades.
+    Works both when:
+    - OPEN and CLOSED are separate entries
+    - CLOSED updates the original OPEN entry in place
     """
 
     merged = {}
@@ -150,6 +173,6 @@ def merge_trades(log):
             if t.get("time_exited"):
                 merged[dealId]["time_exited"] = t["time_exited"]
 
-            merged[dealId]["status"] = t.get("status", merged[dealId]["status"])
+            merged[dealId]["status"] = t.get("status", merged[dealId].get("status"))
 
     return list(merged.values())
