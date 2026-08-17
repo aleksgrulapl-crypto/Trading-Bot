@@ -7,12 +7,11 @@ import session
 from parser import parse_tradingview_alert
 from sizing import calculate_size
 from order import place_order
-from trade_log import log_trade, load_log
+from trade_log import log_trade
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS, API_MARKET
 from dashboard import dashboard as dashboard_blueprint
 from excel_import import import_excel_into_log
-import_excel_into_log("Trading Log 2026.xlsx")
 from scheduler import start_scheduler
 from utils import timestamp
 from close_position import close_position as close_position_module
@@ -22,11 +21,14 @@ app = Flask(__name__)
 # ============================
 # 🔥 TEMPLATE RELOAD FIX
 # ============================
-app.config['DEBUG'] = True
-app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.config["DEBUG"] = True
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.jinja_env.auto_reload = True
 app.jinja_env.cache = {}
 app.url_map.strict_slashes = False
+
+# Import Excel into the unified trade log on startup
+import_excel_into_log("Trading Log 2026.xlsx")
 
 
 @app.route("/webhook", methods=["POST"])
@@ -43,6 +45,9 @@ def webhook():
 
     alert = None
 
+    # ----------------------------
+    # Parse TradingView alert
+    # ----------------------------
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
@@ -75,7 +80,7 @@ def webhook():
             sl=alert.get("sl"),
             tp=alert.get("tp"),
             timestamp=timestamp(),
-            timeframe=alert.get("timeframe")
+            timeframe=alert.get("timeframe"),
         )
 
         return jsonify({"status": "blocked", "reason": alert.get("reason")}), 200
@@ -89,12 +94,18 @@ def webhook():
     tp_price = alert["tp"]
     timeframe = alert.get("timeframe")
 
-    print(f"[WEBHOOK] Parsed alert → symbol={symbol}, action={action}, SL={sl_price}, TP={tp_price}, TF={timeframe}", flush=True)
+    print(
+        f"[WEBHOOK] Parsed alert → symbol={symbol}, action={action}, SL={sl_price}, TP={tp_price}, TF={timeframe}",
+        flush=True,
+    )
 
     epic_data = session.verify_epic(symbol)
     epic = epic_data.get("epic")
 
-    print(f"[WEBHOOK] EPIC lookup → symbol={symbol}, epic={epic}, source={epic_data.get('source')}", flush=True)
+    print(
+        f"[WEBHOOK] EPIC lookup → symbol={symbol}, epic={epic}, source={epic_data.get('source')}",
+        flush=True,
+    )
 
     if not epic:
         print("[WEBHOOK] EPIC lookup failed:", symbol, flush=True)
@@ -109,7 +120,7 @@ def webhook():
             sl=sl_price,
             tp=tp_price,
             timestamp=timestamp(),
-            timeframe=timeframe
+            timeframe=timeframe,
         )
 
         return jsonify({"status": "blocked", "reason": "epic_lookup_failed"}), 200
@@ -128,7 +139,7 @@ def webhook():
             sl=sl_price,
             tp=tp_price,
             timestamp=timestamp(),
-            timeframe=timeframe
+            timeframe=timeframe,
         )
 
         return jsonify({"status": "blocked", "reason": "market_snapshot_unavailable"}), 200
@@ -150,7 +161,7 @@ def webhook():
             sl=sl_price,
             tp=tp_price,
             timestamp=timestamp(),
-            timeframe=timeframe
+            timeframe=timeframe,
         )
 
         return jsonify({"status": "blocked", "reason": "price_unavailable"}), 200
@@ -162,7 +173,7 @@ def webhook():
         entry_price=entry_price,
         sl_price=sl_price,
         tp_price=tp_price,
-        direction=action
+        direction=action,
     )
 
     if size_info["blocked"]:
@@ -178,7 +189,7 @@ def webhook():
             sl=sl_price,
             tp=tp_price,
             timestamp=timestamp(),
-            timeframe=timeframe
+            timeframe=timeframe,
         )
 
         return jsonify({"status": "blocked", "reason": size_info["reason"]}), 200
@@ -197,7 +208,7 @@ def webhook():
     session.update_last_trade()
 
     # ============================
-    # 🔥 NEW: LOG SUCCESSFUL OPEN TRADE
+    # LOG SUCCESSFUL OPEN TRADE
     # ============================
     try:
         deal_id = None
@@ -219,10 +230,13 @@ def webhook():
             sl=sl_price,
             tp=tp_price,
             timestamp=timestamp(),
-            timeframe=timeframe
+            timeframe=timeframe,
         )
 
-        print(f"[WEBHOOK] OPEN TRADE LOGGED → {symbol} {action} size={size} dealId={deal_id}", flush=True)
+        print(
+            f"[WEBHOOK] OPEN TRADE LOGGED → {symbol} {action} size={size} dealId={deal_id}",
+            flush=True,
+        )
 
     except Exception as e:
         print(f"[WEBHOOK] log_trade failed: {e}", flush=True)
@@ -256,6 +270,13 @@ def close_position(position_id):
 
 
 if __name__ == "__main__":
+    # Ensure auth/session is ready before scheduler starts
+    try:
+        auth.ensure_token()
+        print("[Webhook] Auth token ensured.", flush=True)
+    except Exception as e:
+        print(f"[Webhook] Auth ensure_token failed: {e}", flush=True)
+
     print("[Webhook] Starting scheduler...", flush=True)
     start_scheduler()
     print("[Webhook] Scheduler started.", flush=True)

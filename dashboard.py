@@ -1,5 +1,5 @@
 # ============================
-# DASHBOARD MODULE (FULLY CORRECTED)
+# DASHBOARD MODULE (FULLY CORRECTED + PERSISTENT TRADE LOG)
 # ============================
 
 import json
@@ -44,8 +44,8 @@ def normalize_trades(trades):
 
         t["dealId"] = str(deal_id) if deal_id else None
 
-        t.setdefault("open_timestamp", t.get("time"))
-        t.setdefault("close_timestamp", t.get("time"))
+        t.setdefault("open_timestamp", t.get("open_timestamp") or t.get("time"))
+        t.setdefault("close_timestamp", t.get("close_timestamp") or t.get("time"))
 
         if not t.get("ticker"):
             t["ticker"] = t.get("epic") or t.get("symbol") or "—"
@@ -249,13 +249,11 @@ def dashboard_home():
         print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
 
     capital_trades = merge_trades(load_raw_log())
-
     excel_trades = load_excel_trades()
 
     combined_raw = excel_trades + capital_trades
     combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
 
-    # ⭐ Sort newest → oldest by close/open/time
     combined_trades.sort(
         key=lambda t: t.get("close_timestamp") or t.get("open_timestamp") or t.get("time"),
         reverse=True
@@ -310,13 +308,11 @@ def dashboard_data():
         print(f"[DASHBOARD] live equity calc failed (data): {e}", flush=True)
 
     capital_trades = merge_trades(load_raw_log())
-
     excel_trades = load_excel_trades()
 
     combined_raw = excel_trades + capital_trades
     combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
 
-    # ⭐ Sort newest → oldest by close/open/time
     combined_trades.sort(
         key=lambda t: t.get("close_timestamp") or t.get("open_timestamp") or t.get("time"),
         reverse=True

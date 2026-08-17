@@ -3,7 +3,7 @@
 # ============================
 
 import session
-import trade_log
+from trade_log import save_log, load_raw_log
 from datetime import datetime
 from config import API_HISTORY_TRANSACTIONS
 
@@ -13,11 +13,20 @@ from config import API_HISTORY_TRANSACTIONS
 # ---------------------------------------------------------
 
 def _parse_capital_timestamp(value):
+    """
+    Capital.com returns timestamps in multiple formats:
+    - Unix seconds
+    - Unix milliseconds
+    - ISO strings with/without Z
+    This function normalizes all of them.
+    """
     if value is None:
         return None
 
+    # Numeric timestamps
     if isinstance(value, (int, float)):
         try:
+            # Milliseconds
             if value > 1e12:
                 dt = datetime.utcfromtimestamp(value / 1000.0)
             else:
@@ -26,6 +35,7 @@ def _parse_capital_timestamp(value):
         except Exception:
             return None
 
+    # ISO strings
     if isinstance(value, str):
         try:
             cleaned = value.replace("Z", "")
@@ -42,6 +52,9 @@ def _parse_capital_timestamp(value):
 # ---------------------------------------------------------
 
 def fetch_closed_trades():
+    """
+    Fetch closed trades from Capital.com history endpoint.
+    """
     url = f"{API_HISTORY_TRANSACTIONS}?type=POSITION"
     response = session.request("GET", url)
 
@@ -62,6 +75,10 @@ def fetch_closed_trades():
 # ---------------------------------------------------------
 
 def convert_capital_trade(raw):
+    """
+    Convert Capital.com closed trade format into our internal CLOSED trade event.
+    Fully compatible with merge_trades() and dashboard.
+    """
     try:
         deal_id = raw.get("dealId")
         epic = raw.get("epic")
@@ -84,7 +101,7 @@ def convert_capital_trade(raw):
 
         entry = {
             "time": close_timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "ticker": instrument_name,
+            "ticker": instrument_name or epic,
             "epic": epic,
             "dealId": deal_id,
             "side": (direction or "CLOSE").upper(),
@@ -126,6 +143,10 @@ def convert_capital_trade(raw):
 # ---------------------------------------------------------
 
 def merge_history():
+    """
+    Import CLOSED trades from Capital.com into our persistent trade log.
+    Only adds CLOSED trades that do not already exist.
+    """
     print("[HISTORY] Fetching closed trades...")
     closed_trades = fetch_closed_trades()
 
@@ -133,18 +154,17 @@ def merge_history():
         print("[HISTORY] No closed trades found.")
         return
 
-    log = trade_log.load_raw_log()
+    log = load_raw_log()
 
-    # ⭐ FIXED: Only skip if CLOSED already exists
-    existing_pairs = {(e.get("dealId"), e.get("status")) for e in log}
+    # Only skip if CLOSED already exists for that dealId
+    existing_closed = {e.get("dealId") for e in log if e.get("status") == "CLOSED"}
 
     added = 0
 
     for raw in closed_trades:
         deal_id = raw.get("dealId")
 
-        # Skip only if CLOSED already exists
-        if (deal_id, "CLOSED") in existing_pairs:
+        if deal_id in existing_closed:
             continue
 
         entry = convert_capital_trade(raw)
@@ -152,7 +172,7 @@ def merge_history():
             log.append(entry)
             added += 1
 
-    trade_log.save_log(log)
+    save_log(log)
 
     print(f"[HISTORY] Added {added} new closed trades from Capital.com.")
 
@@ -162,6 +182,9 @@ def merge_history():
 # ---------------------------------------------------------
 
 def get_closed_trade_by_deal(deal_id):
+    """
+    Fetch a single closed trade from Capital.com history.
+    """
     trades = fetch_closed_trades()
     for raw in trades:
         if raw.get("dealId") == deal_id:

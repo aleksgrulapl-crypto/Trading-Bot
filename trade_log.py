@@ -1,5 +1,5 @@
 # ============================
-# TRADE LOG MODULE (MERGE ENGINE + BACKWARD COMPATIBLE)
+# TRADE LOG MODULE (MERGE ENGINE + PERSISTENT DISK)
 # ============================
 
 import json
@@ -8,8 +8,10 @@ from datetime import datetime
 import copy
 import config
 
+# Use the configured persistent path (e.g. /data/trade_log.json)
 LOG_FILE = config.TRADE_LOG_FILE
 
+# Ensure directory exists
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 
 
@@ -19,7 +21,6 @@ def load_raw_log():
     If the file does not exist, create an empty log and return [].
     """
     if not os.path.exists(LOG_FILE):
-        # Initialize empty log file so downstream tools (cat, etc.) see it.
         try:
             with open(LOG_FILE, "w") as f:
                 json.dump([], f)
@@ -28,13 +29,19 @@ def load_raw_log():
         return []
     try:
         with open(LOG_FILE, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+            if isinstance(data, list):
+                return data
+            return []
     except Exception as e:
         print(f"[TRADE_LOG] Failed to load log file: {e}")
         return []
 
 
 def save_log(log):
+    """
+    Atomically save the log to disk.
+    """
     tmp_file = LOG_FILE + ".tmp"
     with open(tmp_file, "w") as f:
         json.dump(log, f, indent=4)
@@ -42,6 +49,9 @@ def save_log(log):
 
 
 def _group_key(entry):
+    """
+    Group by logical trade identifier.
+    """
     return (
         str(entry.get("trade_id") or entry.get("dealId") or entry.get("position_id")),
     )
@@ -94,6 +104,13 @@ def _compute_pnl(open_event, close_event):
 
 
 def merge_trades(raw_log):
+    """
+    Merge multiple events per trade into a single logical trade:
+    - OPEN only → stays OPEN
+    - OPEN + CLOSED → becomes CLOSED with both prices and PnL
+    - CLOSED only → stays CLOSED
+    - TRAIL_UPDATE events are folded into the base trade
+    """
     if not raw_log:
         return []
 
@@ -107,12 +124,15 @@ def merge_trades(raw_log):
     for key, entries in groups.items():
         open_event = None
         close_event = None
+        trail_events = []
 
         for e in entries:
             if _is_open_event(e) and open_event is None:
                 open_event = e
             if _is_close_event(e) and close_event is None:
                 close_event = e
+            if e.get("status") == "TRAIL_UPDATE":
+                trail_events.append(e)
 
         if open_event and close_event:
             base = copy.deepcopy(open_event)
@@ -124,7 +144,11 @@ def merge_trades(raw_log):
             base["fees"] = close_event.get("fees") if close_event.get("fees") is not None else base.get("fees", 0.0)
 
             base["exit_price"] = close_event.get("exit_price") or base.get("exit_price")
-            base["close_timestamp"] = close_event.get("close_timestamp") or close_event.get("time") or base.get("close_timestamp")
+            base["close_timestamp"] = (
+                close_event.get("close_timestamp")
+                or close_event.get("time")
+                or base.get("close_timestamp")
+            )
 
             pnl = close_event.get("pnl")
             try:
@@ -139,6 +163,11 @@ def merge_trades(raw_log):
 
             if not base.get("open_timestamp"):
                 base["open_timestamp"] = open_event.get("open_timestamp") or open_event.get("time")
+
+            # Fold trail updates into base (latest SL)
+            for t in trail_events:
+                if t.get("sl") is not None:
+                    base["sl"] = t.get("sl")
 
             merged.append(base)
 
@@ -160,36 +189,47 @@ def merge_trades(raw_log):
             merged.append(base)
 
         elif open_event and not close_event:
-            merged.append(open_event)
+            # Apply latest trail SL if any
+            base = copy.deepcopy(open_event)
+            for t in trail_events:
+                if t.get("sl") is not None:
+                    base["sl"] = t.get("sl")
+            merged.append(base)
 
     return merged
 
 
 def load_log():
-    try:
-        with open(LOG_FILE, "r") as f:
-            log = json.load(f)
-    except Exception:
-        return []
+    """
+    Load merged log, sorted newest → oldest by close/open timestamp.
+    """
+    raw = load_raw_log()
+    merged = merge_trades(raw)
 
-    # Sort newest → oldest
-    log.sort(key=lambda x: x.get("close_timestamp") or x.get("open_timestamp"), reverse=True)
-    return log
+    def _sort_key(x):
+        return x.get("close_timestamp") or x.get("open_timestamp") or x.get("time")
+
+    merged.sort(key=_sort_key, reverse=True)
+    return merged
 
 
 def log_trade(ticker, epic=None, deal_id=None, side=None, size=None,
               price=None, sl=None, tp=None, timestamp=None, timeframe=None):
-
+    """
+    Log an OPEN trade event.
+    """
     log = load_raw_log()
 
+    ts = timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     entry = {
-        "time": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "time": ts,
         "ticker": ticker,
         "epic": epic,
         "dealId": deal_id,
-        "side": side.upper(),
-        "size": float(size),
-        "entry_price": float(price),
+        "side": side.upper() if side else None,
+        "size": float(size) if size is not None else 0.0,
+        "entry_price": float(price) if price is not None else None,
         "exit_price": None,
         "pnl": None,
         "sl": sl,
@@ -198,7 +238,7 @@ def log_trade(ticker, epic=None, deal_id=None, side=None, size=None,
         "timeframe": timeframe,
 
         "trade_id": deal_id,
-        "open_timestamp": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "open_timestamp": ts,
         "close_timestamp": None,
         "currency": "USD",
         "platform": "Capital",
@@ -215,24 +255,29 @@ def log_trade(ticker, epic=None, deal_id=None, side=None, size=None,
 
     log.append(entry)
     save_log(log)
+    print(f"[TRADE_LOG] Logged OPEN trade → {ticker} {side} dealId={deal_id}")
 
 
 def log_close(ticker, epic=None, deal_id=None, direction=None, size=None,
               entry_price=None, close_price=None, pnl=None,
               sl=None, tp=None, timestamp=None, timeframe=None):
-
+    """
+    Log a CLOSED trade event (used by close_position/history).
+    """
     log = load_raw_log()
 
+    ts = timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     entry = {
-        "time": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "time": ts,
         "ticker": ticker,
         "epic": epic,
         "dealId": deal_id,
         "side": direction.upper() if direction else "CLOSE",
-        "size": float(size),
+        "size": float(size) if size is not None else 0.0,
         "entry_price": entry_price,
-        "exit_price": float(close_price),
-        "pnl": float(pnl),
+        "exit_price": float(close_price) if close_price is not None else None,
+        "pnl": float(pnl) if pnl is not None else None,
         "sl": sl,
         "tp": tp,
         "trail": None,
@@ -240,7 +285,7 @@ def log_close(ticker, epic=None, deal_id=None, direction=None, size=None,
 
         "trade_id": deal_id,
         "open_timestamp": None,
-        "close_timestamp": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "close_timestamp": ts,
         "currency": "USD",
         "platform": "Capital",
         "reason": None,
@@ -256,15 +301,20 @@ def log_close(ticker, epic=None, deal_id=None, direction=None, size=None,
 
     log.append(entry)
     save_log(log)
+    print(f"[TRADE_LOG] Logged CLOSED trade → {ticker} dealId={deal_id}")
 
 
 def log_trail_update(ticker, epic=None, deal_id=None, new_sl=None,
                      price=None, timestamp=None, timeframe=None):
-
+    """
+    Log a trailing stop update event.
+    """
     log = load_raw_log()
 
+    ts = timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     entry = {
-        "time": timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "time": ts,
         "ticker": ticker,
         "epic": epic,
         "dealId": deal_id,
@@ -299,3 +349,4 @@ def log_trail_update(ticker, epic=None, deal_id=None, new_sl=None,
 
     log.append(entry)
     save_log(log)
+    print(f"[TRADE_LOG] Logged TRAIL update → {ticker} dealId={deal_id}")

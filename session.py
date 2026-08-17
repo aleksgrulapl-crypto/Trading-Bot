@@ -67,8 +67,9 @@ def clean_structure(obj):
 # ============================
 
 def get_headers():
-    # Prevent login spam
     now = time.time()
+
+    # Prevent login spam
     if now < _cache["login_cooldown"]:
         print("[AUTH] Login cooldown active, skipping ensure_token", flush=True)
     else:
@@ -92,11 +93,23 @@ def request(method, url, json=None):
 
     # Prevent hammering API
     if now < _cache["request_cooldown"]:
-        print("[REQUEST] Cooldown active, returning cached positions/account", flush=True)
-        if "positions" in url:
-            return _cache["positions"]["data"]
-        if "accounts" in url:
-            return _cache["account"]["data"]
+        print("[REQUEST] Cooldown active, returning cached positions/account if available", flush=True)
+        if "positions" in url and _cache["positions"]["data"] is not None:
+            class DummyResponse:
+                status_code = 200
+
+                def json(self_inner):
+                    return {"positions": _cache["positions"]["data"]}
+
+            return DummyResponse()
+        if "accounts" in url and _cache["account"]["data"] is not None:
+            class DummyResponse:
+                status_code = 200
+
+                def json(self_inner):
+                    return {"accounts": [_cache["account"]["data"]]}
+
+            return DummyResponse()
 
     headers = get_headers()
 
@@ -127,7 +140,7 @@ def get_positions():
     now = time.time()
 
     # Return cached if fresh
-    if now - _cache["positions"]["ts"] < CACHE_SECONDS:
+    if now - _cache["positions"]["ts"] < CACHE_SECONDS and _cache["positions"]["data"] is not None:
         return _cache["positions"]["data"]
 
     url = f"{API_POSITIONS}?includeProfitLoss=true"
@@ -174,7 +187,7 @@ def fetch_positions_from(url: str):
 def get_account():
     now = time.time()
 
-    if now - _cache["account"]["ts"] < CACHE_SECONDS:
+    if now - _cache["account"]["ts"] < CACHE_SECONDS and _cache["account"]["data"] is not None:
         return _cache["account"]["data"]
 
     response = request("GET", API_ACCOUNTS)
@@ -248,7 +261,6 @@ def enrich_positions(raw_positions):
         size = pos.get("size")
         entry_price = pos.get("level")
 
-        current_price = None
         if direction == "SELL":
             current_price = market.get("bid")
         else:
@@ -310,7 +322,6 @@ def verify_epic(symbol: str):
 
     # 2) Try API market lookup by symbol (best-effort)
     try:
-        # Many brokers expose /markets/{symbol} or similar; we keep it simple:
         url = f"{API_MARKET}/{symbol}"
         resp = request("GET", url)
         if resp and resp.status_code == 200:
