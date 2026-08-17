@@ -1,5 +1,5 @@
 # ============================
-# DASHBOARD MODULE
+# DASHBOARD MODULE (FULLY CORRECTED)
 # ============================
 
 import json
@@ -15,6 +15,9 @@ from excel_import import load_excel_trades
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
 
+# -----------------------------
+# AUTH
+# -----------------------------
 def login_required(view):
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
@@ -24,6 +27,9 @@ def login_required(view):
     return wrapper
 
 
+# -----------------------------
+# TRADE NORMALIZATION
+# -----------------------------
 def normalize_trades(trades):
     normalized = []
 
@@ -85,6 +91,9 @@ def filter_completed(trades):
     ]
 
 
+# -----------------------------
+# ANALYTICS ENGINE
+# -----------------------------
 def compute_analytics(trades):
     if not trades:
         return {
@@ -149,6 +158,9 @@ def compute_analytics(trades):
     }
 
 
+# -----------------------------
+# LOG LOADERS
+# -----------------------------
 def load_available_log():
     try:
         with open("available_log.json") as f:
@@ -169,7 +181,7 @@ def clean_value(v):
     try:
         if v is None:
             return None
-        if isinstance(v, float) and (v != v):  # NaN check
+        if isinstance(v, float) and (v != v):  # NaN
             return None
         return v
     except:
@@ -184,6 +196,9 @@ def clean_structure(obj):
     return clean_value(obj)
 
 
+# -----------------------------
+# LOGIN
+# -----------------------------
 @dashboard.route("/dashboard/login", methods=["GET", "POST"])
 def dashboard_login():
     if request.method == "POST":
@@ -203,10 +218,12 @@ def dashboard_logout():
     return resp
 
 
+# -----------------------------
+# MAIN DASHBOARD PAGE
+# -----------------------------
 @dashboard.route("/dashboard")
 @login_required
 def dashboard_home():
-    # Force fresh account fetch for live balance context
     session._cache["account"]["ts"] = 0
 
     raw_positions = session.get_positions() or []
@@ -215,13 +232,9 @@ def dashboard_home():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
-    # 🔹 LIVE EQUITY: add open PnL from positions to account balance
+    # LIVE EQUITY
     try:
-        open_pnl = sum(
-            p.get("pnl", 0) or 0
-            for p in positions
-            if p.get("pnl") is not None
-        )
+        open_pnl = sum(p.get("pnl", 0) or 0 for p in positions)
         if account.get("balance") is not None:
             account["balance"] = round(account["balance"] + open_pnl, 2)
     except Exception as e:
@@ -233,16 +246,17 @@ def dashboard_home():
     combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
 
     daily_report = session.get_daily_report()
-
     available_log = load_available_log()
     equity_log = load_equity_log()
 
     analytics = compute_analytics(combined_trades)
 
+    # Update shared state
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
     session.shared_state["trade_log"] = combined_trades
     session.shared_state["daily_report"] = daily_report
+    session.shared_state["analytics"] = analytics
 
     return render_template(
         "dashboard.html",
@@ -259,10 +273,12 @@ def dashboard_home():
     )
 
 
+# -----------------------------
+# AJAX REFRESH ENDPOINT (FULLY FIXED)
+# -----------------------------
 @dashboard.route("/dashboard/data")
 @login_required
 def dashboard_data():
-    # Force fresh account fetch for live balance in AJAX refresh
     session._cache["account"]["ts"] = 0
 
     raw_positions = session.get_positions() or []
@@ -271,13 +287,9 @@ def dashboard_data():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
-    # 🔹 LIVE EQUITY: add open PnL from positions to account balance
+    # LIVE EQUITY
     try:
-        open_pnl = sum(
-            p.get("pnl", 0) or 0
-            for p in positions
-            if p.get("pnl") is not None
-        )
+        open_pnl = sum(p.get("pnl", 0) or 0 for p in positions)
         if account.get("balance") is not None:
             account["balance"] = round(account["balance"] + open_pnl, 2)
     except Exception as e:
@@ -289,11 +301,17 @@ def dashboard_data():
     combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
 
     daily_report = session.get_daily_report()
-
     available_log = load_available_log()
     equity_log = load_equity_log()
 
     analytics = compute_analytics(combined_trades)
+
+    # Update shared state BEFORE rendering
+    session.shared_state["account"] = account
+    session.shared_state["positions"] = positions
+    session.shared_state["trade_log"] = combined_trades
+    session.shared_state["daily_report"] = daily_report
+    session.shared_state["analytics"] = analytics
 
     html = render_template(
         "dashboard_partial.html",
@@ -320,7 +338,9 @@ def dashboard_data():
     }))
 
 
-
+# -----------------------------
+# CLOSE POSITION
+# -----------------------------
 @dashboard.route("/dashboard/close/<position_id>")
 @login_required
 def dashboard_close(position_id):
@@ -338,6 +358,9 @@ def dashboard_close(position_id):
     return redirect("/dashboard")
 
 
+# -----------------------------
+# DEBUG ENDPOINT
+# -----------------------------
 @dashboard.route("/dashboard/debug")
 @login_required
 def dashboard_debug():
