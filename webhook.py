@@ -42,7 +42,6 @@ def webhook():
 
     alert = None
 
-    # Parse alert (JSON → fallback to raw string)
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
@@ -59,7 +58,6 @@ def webhook():
                 print("[WEBHOOK] PARSE ERROR:", e3, flush=True)
                 return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
-    # Blocked alert handling (risk filters, etc.)
     if alert.get("blocked"):
         print(f"[WEBHOOK] ALERT BLOCKED: {alert.get('reason')}", flush=True)
 
@@ -89,7 +87,6 @@ def webhook():
         flush=True,
     )
 
-    # EPIC lookup
     epic_data = session.verify_epic(symbol)
     epic = epic_data.get("epic")
 
@@ -116,7 +113,6 @@ def webhook():
 
         return jsonify({"status": "blocked", "reason": "epic_lookup_failed"}), 200
 
-    # Market snapshot
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
         print("[WEBHOOK] Market snapshot unavailable for:", epic, flush=True)
@@ -161,7 +157,6 @@ def webhook():
     entry_price = (bid + offer) / 2
     print(f"[WEBHOOK] Entry price midpoint: {entry_price}", flush=True)
 
-    # Sizing (includes SL/TP risk logic)
     size_info = calculate_size(
         entry_price=entry_price,
         sl_price=sl_price,
@@ -193,11 +188,10 @@ def webhook():
     print("[WEBHOOK] Final TP:", tp_price, flush=True)
     print("[WEBHOOK] Final SIZE:", size, flush=True)
 
-    # Place order
     result = place_order(epic, action, size, sl_price, tp_price)
+
     session.update_last_trade()
 
-    # Log OPEN trade in clean format
     try:
         deal_id = None
 
@@ -234,7 +228,6 @@ def webhook():
     return jsonify({"status": "ok", "result": result}), 200
 
 
-# Dashboard blueprint
 app.register_blueprint(dashboard_blueprint)
 
 

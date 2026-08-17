@@ -4,65 +4,29 @@
 
 import os
 
-# -----------------------------------------
-# API BASE
-# -----------------------------------------
-
 API_BASE = "https://api-capital.backend-capital.com"
 
-# -----------------------------------------
-# AUTH & SESSION
-# -----------------------------------------
-
 API_LOGIN = f"{API_BASE}/api/v1/session"
-API_REFRESH = None   # CFD accounts do not support refresh tokens
-
-# -----------------------------------------
-# ACCOUNT & BALANCE
-# -----------------------------------------
+API_REFRESH = None
 
 API_ACCOUNTS = f"{API_BASE}/api/v1/accounts"
 API_ACCOUNT = f"{API_BASE}/api/v1/accounts"
-
-# -----------------------------------------
-# POSITIONS & MARKET DATA
-# -----------------------------------------
 
 API_POSITIONS = f"{API_BASE}/api/v1/positions"
 API_MARKET = f"{API_BASE}/api/v1/markets"
 API_HISTORY_TRANSACTIONS = "https://api-capital.backend-capital.com/api/v1/history/transactions"
 
-# -----------------------------------------
-# USER CREDENTIALS
-# -----------------------------------------
-
 CAPITAL_API_KEY = os.getenv("CAPITAL_API_KEY")
 CAPITAL_USERNAME = os.getenv("CAPITAL_USERNAME")
 CAPITAL_PASSWORD = os.getenv("CAPITAL_PASSWORD")
 
-# -----------------------------------------
-# RISK SETTINGS (FULLY UPDATED)
-# -----------------------------------------
-
-# Max positions per ticker
 MAX_POSITIONS_PER_TICKER = 3
-
-# Fraction of available balance used per trade (required by sizing.py)
-RISK_PER_TRADE = 0.50   # 50%
-
-# Legacy equity percent (still used by some modules)
+RISK_PER_TRADE = 0.50
 EQUITY_PERCENT = 0.50
-
-# Leverage (Capital.com US stocks = 5:1)
 LEVERAGE = 5
 
-# Fixed SL/TP percentages (used by FixedSLTP module)
-FIXED_SL_PERC = 0.10   # 10%
-FIXED_TP_PERC = 0.20   # 20%
-
-# -----------------------------------------
-# TICKER SETTINGS (MIN SIZE)
-# -----------------------------------------
+FIXED_SL_PERC = 0.10
+FIXED_TP_PERC = 0.20
 
 TICKER_SETTINGS = {
     "NVDA": {"min_size": 0.1},
@@ -84,10 +48,6 @@ TICKER_SETTINGS = {
     "PLUG": {"min_size": 0.1},
 }
 
-# -----------------------------------------
-# DASHBOARD SETTINGS
-# -----------------------------------------
-
 DASHBOARD_TITLE = "AG Capital Trader"
 DASHBOARD_PASSWORD = "Killen123%"
 TIMEZONE = "Europe/London"
@@ -99,12 +59,7 @@ DAILY_REPORT_MINUTE = 0
 TRADE_LOG_FILE = "/data/trade_log.json"
 DAILY_REPORT_FILE = "/tmp/daily_report.json"
 
-# Market cache TTL (used by MarketData)
 CACHE_TTL_SECONDS = 2
-
-# -----------------------------------------
-# EPIC MAPPING (RAW TICKERS)
-# -----------------------------------------
 
 EPIC_MAP = {
     "NVDA": "NVDA",
@@ -119,12 +74,6 @@ EPIC_MAP = {
     "PLTR": "PLTR"
 }
 
-# -----------------------------------------
-# TRAILING STOP SETTINGS (NEW)
-# -----------------------------------------
-
-# Activate trailing SL once profit reaches +50%
-TRAIL_ACTIVATION_PERC = 0.50
-
-# Trailing SL moves to 25% of max profit
-TRAIL_SL_PERC = 0.25
+# Trailing stop settings (Option A)
+TRAIL_ACTIVATION_PERC = 0.50   # activate at +50% profit
+TRAIL_SL_PERC = 0.30           # move SL to 30% of profit (one-time)

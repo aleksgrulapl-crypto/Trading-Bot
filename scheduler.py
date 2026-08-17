@@ -13,6 +13,7 @@ import report
 from utils import timestamp
 
 from history import merge_history
+from trail_sl import run_trailing_sl
 
 UK_TZ = pytz.timezone("Europe/London")
 
@@ -164,13 +165,20 @@ scheduler = Scheduler()
 
 
 def start_scheduler():
-    # Temporarily disable all jobs to reduce API hits and log spam.
-    # You can re-enable any of these later when you want them back:
+    # Core jobs you can enable as needed:
 
+    # Daily report + equity
     # scheduler.add_daily_job(21, 0, run_daily_report)
     # scheduler.add_daily_job(21, 0, log_equity)
+
+    # Hourly available log
     # scheduler.add_hourly_job(0, log_available)
+
+    # Closed trades import (Capital history)
     # scheduler.add_interval_job(300, import_closed_trades)
 
+    # One-time trailing SL (Option A, 50% activation, 30% trail)
+    scheduler.add_interval_job(60, run_trailing_sl)
+
     scheduler.start()
-    print("[Scheduler] Started background scheduler (jobs currently disabled).")
+    print("[Scheduler] Started background scheduler (TrailSL enabled, other jobs currently disabled).")
