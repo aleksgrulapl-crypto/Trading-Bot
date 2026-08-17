@@ -206,7 +206,7 @@ def dashboard_logout():
 @dashboard.route("/dashboard")
 @login_required
 def dashboard_home():
-    # 🔹 Force fresh account fetch for live balance
+    # Force fresh account fetch for live balance context
     session._cache["account"]["ts"] = 0
 
     raw_positions = session.get_positions() or []
@@ -214,6 +214,18 @@ def dashboard_home():
 
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
+
+    # 🔹 LIVE EQUITY: add open PnL from positions to account balance
+    try:
+        open_pnl = sum(
+            p.get("pnl", 0) or 0
+            for p in positions
+            if p.get("pnl") is not None
+        )
+        if account.get("balance") is not None:
+            account["balance"] = round(account["balance"] + open_pnl, 2)
+    except Exception as e:
+        print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
 
     capital_trades = load_log()
     excel_trades = load_excel_trades()
@@ -250,7 +262,7 @@ def dashboard_home():
 @dashboard.route("/dashboard/data")
 @login_required
 def dashboard_data():
-    # 🔹 Force fresh account fetch for live balance in AJAX refresh
+    # Force fresh account fetch for live balance in AJAX refresh
     session._cache["account"]["ts"] = 0
 
     raw_positions = session.get_positions() or []
@@ -258,6 +270,18 @@ def dashboard_data():
 
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
+
+    # 🔹 LIVE EQUITY: add open PnL from positions to account balance
+    try:
+        open_pnl = sum(
+            p.get("pnl", 0) or 0
+            for p in positions
+            if p.get("pnl") is not None
+        )
+        if account.get("balance") is not None:
+            account["balance"] = round(account["balance"] + open_pnl, 2)
+    except Exception as e:
+        print(f"[DASHBOARD] live equity calc failed (data): {e}", flush=True)
 
     capital_trades = load_log()
     excel_trades = load_excel_trades()
