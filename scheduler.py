@@ -1,5 +1,5 @@
 # ============================
-# SCHEDULER MODULE (RESTORED + MODERNISED + SAFE + HISTORY IMPORT)
+# SCHEDULER MODULE (FINAL — TrailSL + History Import)
 # ============================
 
 import threading
@@ -61,7 +61,7 @@ def log_equity():
 def run_daily_report():
     try:
         report.generate_daily_report()
-        session.shared_state["daily_report"] = session.get_daily_report()
+        session.shared_state["daily_report"] = report.get_daily_report()
         print("[Scheduler] Daily report generated.")
     except Exception as e:
         print(f"[Scheduler] Error generating daily report: {e}")
@@ -165,20 +165,11 @@ scheduler = Scheduler()
 
 
 def start_scheduler():
-    # Core jobs you can enable as needed:
-
-    # Daily report + equity
-    # scheduler.add_daily_job(21, 0, run_daily_report)
-    # scheduler.add_daily_job(21, 0, log_equity)
-
-    # Hourly available log
-    # scheduler.add_hourly_job(0, log_available)
-
     # Closed trades import (Capital history)
-    # scheduler.add_interval_job(300, import_closed_trades)
+    scheduler.add_interval_job(60, import_closed_trades)
 
     # One-time trailing SL (Option A, 50% activation, 30% trail)
     scheduler.add_interval_job(60, run_trailing_sl)
 
     scheduler.start()
-    print("[Scheduler] Started background scheduler (TrailSL enabled, other jobs currently disabled).")
+    print("[Scheduler] Started background scheduler (TrailSL + history import enabled).")

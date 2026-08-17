@@ -44,7 +44,6 @@ def run_trailing_sl():
         if not deal_id or entry_price is None or current_price is None:
             continue
 
-        # Unrealized profit in price terms
         if direction == "BUY":
             profit = current_price - entry_price
         else:
@@ -58,10 +57,11 @@ def run_trailing_sl():
         if profit_perc < TRAIL_ACTIVATION_PERC:
             continue
 
-        # One-time trailing SL level
-        trail_sl = entry_price + profit * TRAIL_SL_PERC if direction == "BUY" else entry_price - profit * TRAIL_SL_PERC
+        if direction == "BUY":
+            trail_sl = entry_price + profit * TRAIL_SL_PERC
+        else:
+            trail_sl = entry_price - profit * TRAIL_SL_PERC
 
-        # Only move SL if new SL is tighter than old one (for BUY: higher; for SELL: lower)
         if sl is not None:
             if direction == "BUY" and trail_sl <= sl:
                 continue

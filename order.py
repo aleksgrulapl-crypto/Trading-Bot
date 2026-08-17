@@ -1,10 +1,9 @@
 # ============================
-# ORDER MODULE (FINAL — CLEAN, NO DUPLICATE LOGGING)
+# ORDER MODULE (FINAL — CLEAN, NO DUPLICATE LOGGING, SAFE SL=0/TP=0)
 # ============================
 
 import session
 from config import API_POSITIONS, API_MARKET
-from utils import timestamp
 
 
 def clamp_price(value):
@@ -18,19 +17,25 @@ def validate_and_correct_levels(direction, midpoint, sl, tp):
     sl_c = clamp_price(sl) if sl is not None else None
     tp_c = clamp_price(tp) if tp is not None else None
 
-    if sl_c is None or tp_c is None:
+    # Treat 0 as "no level"
+    if sl_c == 0:
+        sl_c = None
+    if tp_c == 0:
+        tp_c = None
+
+    if sl_c is None and tp_c is None:
         return None, None
 
     if direction.lower() == "buy":
-        if sl_c >= midpoint:
+        if sl_c is not None and sl_c >= midpoint:
             sl_c = midpoint * 0.99
-        if tp_c <= midpoint:
+        if tp_c is not None and tp_c <= midpoint:
             tp_c = midpoint * 1.01
 
     if direction.lower() == "sell":
-        if sl_c <= midpoint:
+        if sl_c is not None and sl_c <= midpoint:
             sl_c = midpoint * 1.01
-        if tp_c >= midpoint:
+        if tp_c is not None and tp_c >= midpoint:
             tp_c = midpoint * 0.99
 
     return clamp_price(sl_c), clamp_price(tp_c)

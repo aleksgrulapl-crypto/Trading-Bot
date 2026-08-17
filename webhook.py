@@ -1,5 +1,5 @@
 # ============================
-# WEBHOOK MODULE (SL/TP + CLEAN TRADE LOGGING)
+# WEBHOOK MODULE (FINAL — CLEAN OPEN LOGGING, SL/TP SAFE)
 # ============================
 
 from flask import Flask, request, jsonify, render_template, redirect
@@ -254,11 +254,15 @@ def close_position(position_id):
 
 
 if __name__ == "__main__":
-    try:
-        auth.ensure_token()
-        print("[Webhook] Auth token ensured.", flush=True)
-    except Exception as e:
-        print(f"[Webhook] Auth ensure_token failed: {e}", flush=True)
+    # Retry auth until success (Option A)
+    while True:
+        try:
+            auth.ensure_token()
+            print("[Webhook] Auth token ensured.", flush=True)
+            break
+        except Exception as e:
+            print(f"[Webhook] Auth ensure_token failed: {e}", flush=True)
+            time.sleep(10)
 
     print("[Webhook] Starting scheduler...", flush=True)
     start_scheduler()
