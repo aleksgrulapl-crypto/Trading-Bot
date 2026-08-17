@@ -306,13 +306,14 @@ def dashboard_data():
 
     analytics = compute_analytics(combined_trades)
 
-    # Update shared state BEFORE rendering
+    # ⭐ FIX: update shared_state BEFORE rendering
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
     session.shared_state["trade_log"] = combined_trades
     session.shared_state["daily_report"] = daily_report
     session.shared_state["analytics"] = analytics
 
+    # Now render partial with fresh analytics
     html = render_template(
         "dashboard_partial.html",
         cache_bust=time.time(),
