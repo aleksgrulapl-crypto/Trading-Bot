@@ -152,6 +152,21 @@ def get_positions():
         return shared_state.get("positions", [])
 
 
+# 🔹 used by /raw endpoint in webhook.py
+def fetch_positions_from(url: str):
+    """
+    Raw positions passthrough for /raw endpoint.
+    """
+    response = request("GET", url)
+    if not response:
+        return {}
+    try:
+        return response.json()
+    except Exception as e:
+        print(f"[POSITIONS] fetch_positions_from parse failed: {e}", flush=True)
+        return {}
+
+
 # ============================
 # ACCOUNT (CACHED)
 # ============================
@@ -266,6 +281,58 @@ def enrich_positions(raw_positions):
         })
 
     return enriched
+
+
+# ============================
+# EPIC RESOLUTION (NEW)
+# ============================
+
+def verify_epic(symbol: str):
+    """
+    Resolve symbol → epic in a way that never crashes webhook.
+
+    Returns dict:
+      {
+        "epic": <epic or None>,
+        "symbol": <symbol>,
+        "source": "map" | "api" | "none"
+      }
+    """
+
+    # 1) Try static EPIC_MAP first
+    epic = EPIC_MAP.get(symbol)
+    if epic:
+        return {
+            "epic": epic,
+            "symbol": symbol,
+            "source": "map"
+        }
+
+    # 2) Try API market lookup by symbol (best-effort)
+    try:
+        # Many brokers expose /markets/{symbol} or similar; we keep it simple:
+        url = f"{API_MARKET}/{symbol}"
+        resp = request("GET", url)
+        if resp and resp.status_code == 200:
+            data = resp.json()
+            snap = data.get("snapshot", {})
+            epic_from_api = data.get("epic") or snap.get("epic")
+            if epic_from_api:
+                return {
+                    "epic": epic_from_api,
+                    "symbol": symbol,
+                    "source": "api"
+                }
+    except Exception as e:
+        print(f"[EPIC] API lookup failed for {symbol}: {e}", flush=True)
+
+    # 3) Fallback: no epic found, but do NOT crash
+    print(f"[EPIC] No epic found for symbol {symbol}", flush=True)
+    return {
+        "epic": None,
+        "symbol": symbol,
+        "source": "none"
+    }
 
 
 # ============================
