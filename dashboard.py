@@ -259,10 +259,14 @@ def dashboard_home():
     except Exception as e:
         print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
 
-    capital_trades = load_log()
-    excel_trades = load_excel_trades()
-    combined_raw = capital_trades + excel_trades
-    combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
+from trade_log import load_raw_log, merge_trades
+
+capital_trades = merge_trades(load_raw_log())
+excel_trades = load_excel_trades()
+
+combined_raw = capital_trades + excel_trades
+combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
+
 
     daily_report = session.get_daily_report()
     available_log = load_available_log()
