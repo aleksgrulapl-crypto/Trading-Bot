@@ -206,6 +206,9 @@ def dashboard_logout():
 @dashboard.route("/dashboard")
 @login_required
 def dashboard_home():
+    # 🔹 Force fresh account fetch for live balance
+    session._cache["account"]["ts"] = 0
+
     raw_positions = session.get_positions() or []
     raw_account = session.get_account() or {}
 
@@ -247,6 +250,9 @@ def dashboard_home():
 @dashboard.route("/dashboard/data")
 @login_required
 def dashboard_data():
+    # 🔹 Force fresh account fetch for live balance in AJAX refresh
+    session._cache["account"]["ts"] = 0
+
     raw_positions = session.get_positions() or []
     raw_account = session.get_account() or {}
 
@@ -288,6 +294,7 @@ def dashboard_data():
         "daily_report": daily_report,
         "analytics": analytics
     }))
+
 
 
 @dashboard.route("/dashboard/close/<position_id>")
