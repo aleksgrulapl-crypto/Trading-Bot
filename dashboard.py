@@ -256,7 +256,7 @@ def dashboard_home():
 
     excel_trades = load_excel_trades()
 
-    combined_raw = capital_trades + excel_trades
+    combined_raw = excel_trades + capital_trades
     combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
 
     daily_report = session.get_daily_report()
@@ -315,7 +315,7 @@ def dashboard_data():
 
     excel_trades = load_excel_trades()
 
-    combined_raw = capital_trades + excel_trades
+    combined_raw = excel_trades + capital_trades
     combined_trades = filter_completed(normalize_trades(dedupe_trades(combined_raw)))
 
     daily_report = session.get_daily_report()
