@@ -43,20 +43,21 @@ def normalize_trades(trades):
             or t.get("reference")
         )
 
-        t["dealId"] = str(deal_id) if deal_id is not None else "None"
+        t["dealId"] = str(deal_id) if deal_id else None
 
+        # timestamps
         t.setdefault("open_timestamp", t.get("time"))
         t.setdefault("close_timestamp", t.get("time"))
 
+        # ticker fallback
         if not t.get("ticker"):
             t["ticker"] = t.get("epic") or t.get("symbol") or "—"
 
+        # side normalization
         side = t.get("side")
-        if isinstance(side, str):
-            t["side"] = side.upper()
-        else:
-            t["side"] = "SELL"
+        t["side"] = side.upper() if isinstance(side, str) else "SELL"
 
+        # numeric fields
         t.setdefault("size", t.get("size") or "—")
         t.setdefault("entry_price", t.get("entry_price") or "—")
         t.setdefault("exit_price", t.get("exit_price") or "—")
@@ -75,24 +76,22 @@ def normalize_trades(trades):
     return normalized
 
 
+
 def dedupe_trades(trades):
     seen = set()
     unique = []
 
     for i, t in enumerate(trades):
-        # robust dedupe key
-        key = (
-            str(t.get("dealId")),
-            str(t.get("open_timestamp")),
-            str(t.get("size")),
-        )
-
-        # fallback for missing dealId
-        if key[0] == "None":
+        # primary key: dealId
+        if t.get("dealId"):
+            key = ("ID", t["dealId"])
+        else:
+            # fallback key: ticker + open_timestamp + entry_price
             key = (
-                f"fallback_{i}",
+                "FALLBACK",
+                str(t.get("ticker")),
                 str(t.get("open_timestamp")),
-                str(t.get("size")),
+                str(t.get("entry_price")),
             )
 
         if key not in seen:
@@ -100,6 +99,7 @@ def dedupe_trades(trades):
             unique.append(t)
 
     return unique
+
 
 
 
