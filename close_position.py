@@ -1,92 +1,76 @@
 # ============================
-# CLOSE POSITION MODULE (FINAL STRUCTURE-FIXED VERSION)
+# CLOSE POSITION MODULE (FULLY FIXED FOR NEW TRADE FORMAT)
 # ============================
 
 import session
 from trade_log import log_close
 from utils import timestamp
+from config import API_POSITIONS
 
 
 def close_position(position_id):
     """
-    Close a position on Capital.com and log the CLOSED trade directly
-    into the persistent trade log (via log_close).
-    This version correctly understands the structure returned by get_positions().
+    Correctly closes a position using Capital.com API and logs a CLOSED trade
+    in the new clean format used by trade_log.py.
     """
 
-    # 1) Fetch current positions (raw structure from Capital.com)
-    positions = session.get_positions() or []
-    target_pos = None
-    target_mkt = None
+    # 1) Fetch enriched positions (safe structure)
+    raw_positions = session.get_positions() or []
+    enriched = session.enrich_positions(raw_positions)
 
-    for item in positions:
-        pos = item.get("position", {})
-        mkt = item.get("market", {})
-
-        deal_id = pos.get("dealId") or pos.get("positionId")
-        if str(deal_id) == str(position_id):
-            target_pos = pos
-            target_mkt = mkt
+    target = None
+    for p in enriched:
+        if str(p.get("id")) == str(position_id):
+            target = p
             break
 
-    if not target_pos:
-        print(f"[CLOSE] Position {position_id} not found in raw positions.")
+    if not target:
+        print(f"[CLOSE] Position {position_id} not found.")
         return {"status": "error", "reason": "position_not_found"}
 
-    # 2) Extract fields from the raw position/market
-    epic = target_mkt.get("epic")
-    ticker = target_mkt.get("symbol") or epic
+    ticker = target["ticker"]
+    epic = target["epic"]
+    deal_id = target["id"]
+    direction = target["direction"]
+    size = target["size"]
+    entry_price = target["price"]
+    sl = target.get("stopLevel")
+    tp = target.get("limitLevel")
+    currency = target.get("currency", "USD")
 
-    deal_id = target_pos.get("dealId") or target_pos.get("positionId")
-    direction = target_pos.get("direction") or target_pos.get("side")
-    size = target_pos.get("size")
-    entry_price = target_pos.get("level") or target_pos.get("openLevel")
-    currency = target_pos.get("currency") or "USD"
-
-    sl = target_pos.get("stopLevel")
-    tp = target_pos.get("profitLevel") or target_pos.get("limitLevel")
-
-    # 3) Send close request
+    # 2) Correct Capital.com close endpoint
+    url = f"{API_POSITIONS}/{position_id}/close"
     print(f"[CLOSE] Closing position {position_id} ({ticker})...", flush=True)
-    r = session.request("DELETE", f"{session.API_POSITIONS}/{position_id}")
+
+    r = session.request("POST", url, json={})
 
     if not r or r.status_code not in (200, 202):
-        print(f"[CLOSE] Close request failed: {r.status_code if r else 'no response'}", flush=True)
+        print(f"[CLOSE] Close request failed: {r.status_code if r else 'no response'}")
         try:
-            print(f"[CLOSE] Response: {r.text}", flush=True)
-        except Exception:
+            print(f"[CLOSE] Response: {r.text}")
+        except:
             pass
         return {"status": "error", "reason": "close_failed"}
 
     data = r.json() if r.content else {}
 
-    # 4) Extract exit price + PnL from response or fallback to position
-    exit_price = (
-        data.get("closeLevel")
-        or data.get("level")
-        or target_pos.get("closeLevel")
-        or target_pos.get("level")
-    )
-
-    pnl = (
-        data.get("profitLoss")
-        or target_pos.get("profitLoss")
-        or 0.0
-    )
+    # 3) Extract exit price + pnl
+    exit_price = data.get("closeLevel") or data.get("level")
+    pnl = data.get("profitLoss")
 
     try:
         exit_price = float(exit_price)
-    except Exception:
+    except:
         exit_price = None
 
     try:
         pnl = float(pnl)
-    except Exception:
+    except:
         pnl = 0.0
 
     close_ts = timestamp()
 
-    # 5) Log CLOSED trade
+    # 4) Log CLOSED trade in new clean format
     log_close(
         ticker=ticker,
         epic=epic,
