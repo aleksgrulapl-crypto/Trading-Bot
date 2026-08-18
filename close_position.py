@@ -1,5 +1,5 @@
 # ============================
-# CLOSE POSITION MODULE (RESTORED PIPELINE — RAW POSITIONS, SIMPLE CLOSE)
+# CLOSE POSITION MODULE (FINAL — DEALID + DEALREFERENCE SAFE)
 # ============================
 
 import session
@@ -10,19 +10,27 @@ from config import API_POSITIONS
 
 def close_position(position_id):
     """
-    Close a position using Capital.com API and log a CLOSED trade
-    using the restored trade_log format (OPEN updated in place).
+    Close a position using Capital.com API and log a CLOSED trade.
+    Supports both dealId and dealReference.
     """
 
-    # 1) Fetch RAW positions (no enrich_positions)
+    # 1) Fetch RAW positions
     raw_positions = session.get_positions() or []
 
     target = None
+
+    # Try match dealId first
     for p in raw_positions:
-        # Capital.com uses dealId for closing; position_id is expected to be dealId
         if str(p.get("dealId")) == str(position_id):
             target = p
             break
+
+    # Fallback: match dealReference (rare but possible)
+    if not target:
+        for p in raw_positions:
+            if str(p.get("dealReference")) == str(position_id):
+                target = p
+                break
 
     if not target:
         print(f"[CLOSE] Position {position_id} not found in RAW positions.")
@@ -30,22 +38,23 @@ def close_position(position_id):
 
     ticker = target.get("instrumentName") or target.get("epic") or "UNKNOWN"
     epic = target.get("epic")
-    deal_id = target.get("dealId")
 
-    # BUY or SELL
+    # True Capital.com dealId
+    deal_id = target.get("dealId") or target.get("dealReference")
+
     direction = target.get("direction") or target.get("side")
     if direction:
         direction = direction.upper()
 
     size = target.get("size")
 
-    # RAW Capital.com entry price (true entry)
-    entry_price = target.get("openLevel")
+    # True entry price
+    entry_price = target.get("openLevel") or target.get("level")
 
     sl = target.get("stopLevel")
     tp = target.get("limitLevel")
 
-    # 2) Correct Capital.com close endpoint (uses dealId)
+    # 2) Correct Capital.com close endpoint
     url = f"{API_POSITIONS}/{deal_id}/close"
     print(f"[CLOSE] Closing dealId {deal_id} ({ticker})...", flush=True)
 
@@ -77,7 +86,7 @@ def close_position(position_id):
 
     close_ts = timestamp()
 
-    # 4) Log CLOSED trade (restored format)
+    # 4) Log CLOSED trade
     log_close(
         ticker=ticker,
         epic=epic,

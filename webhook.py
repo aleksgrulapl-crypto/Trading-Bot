@@ -1,5 +1,5 @@
 # ============================
-# WEBHOOK MODULE (FINAL — CLEAN OPEN LOGGING, SL/TP SAFE)
+# WEBHOOK MODULE (FINAL — DEALREFERENCE → DEALID RESOLUTION)
 # ============================
 
 from flask import Flask, request, jsonify, render_template, redirect
@@ -195,12 +195,26 @@ def webhook():
     try:
         deal_id = None
 
+        # Step 1 — read dealReference
+        deal_ref = None
         if isinstance(result, dict):
-            deal_id = (
+            deal_ref = (
                 result.get("dealId")
                 or result.get("dealReference")
                 or result.get("deal_id")
             )
+
+        # Step 2 — convert dealReference → dealId
+        if deal_ref:
+            lookup = session.request("GET", f"{API_POSITIONS}/{deal_ref}")
+            if lookup and lookup.status_code == 200:
+                deal_id = lookup.json().get("dealId")
+                print(f"[WEBHOOK] dealReference resolved → dealId={deal_id}", flush=True)
+
+        # Step 3 — fallback
+        if not deal_id:
+            deal_id = deal_ref
+            print(f"[WEBHOOK] Using fallback dealId={deal_id}", flush=True)
 
         ts = timestamp()
 
@@ -254,7 +268,6 @@ def close_position(position_id):
 
 
 if __name__ == "__main__":
-    # Retry auth until success (Option A)
     while True:
         try:
             auth.ensure_token()
