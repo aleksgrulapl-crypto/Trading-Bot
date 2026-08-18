@@ -75,10 +75,17 @@ def get_positions():
 
     try:
         data = response.json()
-        return data.get("positions", [])
+        positions = data.get("positions", [])
+
+        # DEBUG: print one raw position to see the real ID field
+        if positions:
+            print("[DEBUG] Raw position sample:", positions[0], flush=True)
+
+        return positions
     except Exception as e:
         print(f"[SESSION] Failed to parse positions: {e}", flush=True)
         return []
+
 
 
 # ---------------------------------------------------------
