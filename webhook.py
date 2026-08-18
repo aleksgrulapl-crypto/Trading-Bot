@@ -1,17 +1,21 @@
 # ============================
-# WEBHOOK MODULE (FINAL — NO SCHEDULER, CLEAN PIPELINE)
+# WEBHOOK MODULE (FINAL — CLEAN OPEN LOGGING, SL/TP SAFE)
 # ============================
 
-from flask import Flask, request, jsonify, redirect
+from flask import Flask, request, jsonify, render_template, redirect
 import json
+import time
+import os
 
 import session
 from parser import parse_tradingview_alert
 from sizing import calculate_size
 from order import place_order
 from trade_log import log_trade
+from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS, API_MARKET
 from dashboard import dashboard as dashboard_blueprint
+from scheduler import start_scheduler
 from utils import timestamp
 from close_position import close_position as close_position_module
 
@@ -247,3 +251,22 @@ def root():
 def close_position(position_id):
     result = close_position_module(position_id)
     return jsonify(result), 200
+
+
+if __name__ == "__main__":
+    # Retry auth until success (Option A)
+    while True:
+        try:
+            auth.ensure_token()
+            print("[Webhook] Auth token ensured.", flush=True)
+            break
+        except Exception as e:
+            print(f"[Webhook] Auth ensure_token failed: {e}", flush=True)
+            time.sleep(10)
+
+    print("[Webhook] Starting scheduler...", flush=True)
+    start_scheduler()
+    print("[Webhook] Scheduler started.", flush=True)
+
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

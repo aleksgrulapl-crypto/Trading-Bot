@@ -3,11 +3,13 @@
 # ============================
 
 import time
+import requests
 from math import isnan
 
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS, API_MARKET, EPIC_MAP
 from utils import timestamp
+import report
 
 shared_state = {
     "account": {},
@@ -43,7 +45,7 @@ def clean_value(v):
         if isinstance(v, float) and isnan(v):
             return None
         return v
-    except Exception:
+    except:
         return None
 
 
@@ -62,7 +64,7 @@ def clean_structure(obj):
 def get_headers():
     now = time.time()
 
-    # Only refresh token if missing AND cooldown expired
+    # ⭐ PATCH: Only refresh token if missing AND cooldown expired
     if (auth.cst is None or auth.xst is None) and now >= _cache["login_cooldown"]:
         try:
             auth.ensure_token()
@@ -82,26 +84,22 @@ def get_headers():
 def request(method, url, json=None):
     now = time.time()
 
-    # Respect cooldown to avoid rate-limit
+    # ⭐ PATCH: Respect cooldown to avoid rate-limit
     if now < _cache["request_cooldown"]:
         print("[REQUEST] Cooldown active, returning cached positions/account if available", flush=True)
 
         if "positions" in url and _cache["positions"]["data"] is not None:
             class DummyResponse:
                 status_code = 200
-
                 def json(self_inner):
                     return {"positions": _cache["positions"]["data"]}
-
             return DummyResponse()
 
         if "accounts" in url and _cache["account"]["data"] is not None:
             class DummyResponse:
                 status_code = 200
-
                 def json(self_inner):
                     return {"accounts": [_cache["account"]["data"]]}
-
             return DummyResponse()
 
     headers = get_headers()
@@ -204,14 +202,6 @@ def get_account():
 # ---------------------------------------------------------
 
 def enrich_account(raw):
-    """
-    Capital.com account JSON typically exposes:
-    - balance: overall equity
-    - deposit: cash funds
-    - profitLoss: current PnL
-    - available: free margin
-    We derive margin as equity - available.
-    """
     if not raw:
         return {}
 
@@ -220,18 +210,10 @@ def enrich_account(raw):
     equity = clean_value(bal.get("balance", 0))
     funds = clean_value(bal.get("deposit", 0))
     pnl = clean_value(bal.get("profitLoss", 0))
-    available = clean_value(bal.get("available", 0))
+    available_raw = clean_value(bal.get("available", 0))
 
-    if equity is None:
-        equity = 0
-    if funds is None:
-        funds = 0
-    if pnl is None:
-        pnl = 0
-    if available is None:
-        available = 0
-
-    margin = equity - available
+    margin = equity - available_raw
+    available = max(0, equity - margin)
 
     margin_warning = None
     if available <= 0:
@@ -319,12 +301,17 @@ def verify_epic(symbol: str):
 
 
 # ---------------------------------------------------------
-# DAILY REPORT (LEGACY, SAFE NO-OP)
+# DAILY REPORT
 # ---------------------------------------------------------
 
 def get_daily_report():
-    # Kept for compatibility; can be wired later if needed.
-    return shared_state.get("daily_report", {})
+    try:
+        report_data = report.get_daily_report()
+        shared_state["daily_report"] = report_data
+        return report_data
+    except Exception as e:
+        print(f"[REPORT] Failed to load daily report: {e}", flush=True)
+        return shared_state.get("daily_report", {})
 
 
 def update_last_trade():
