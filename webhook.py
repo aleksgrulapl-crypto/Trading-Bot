@@ -1,5 +1,5 @@
 # ============================
-# WEBHOOK MODULE (FINAL — DEALREFERENCE → DEALID RESOLUTION)
+# WEBHOOK MODULE (FINAL — DEALREFERENCE → DEALID RESOLUTION + MATCHED ENTRY PRICE)
 # ============================
 
 from flask import Flask, request, jsonify, render_template, redirect
@@ -42,6 +42,9 @@ def webhook():
 
     alert = None
 
+    # -----------------------------
+    # Parse TradingView alert
+    # -----------------------------
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
@@ -87,6 +90,9 @@ def webhook():
         flush=True,
     )
 
+    # -----------------------------
+    # EPIC lookup
+    # -----------------------------
     epic_data = session.verify_epic(symbol)
     epic = epic_data.get("epic")
 
@@ -113,6 +119,9 @@ def webhook():
 
         return jsonify({"status": "blocked", "reason": "epic_lookup_failed"}), 200
 
+    # -----------------------------
+    # Market snapshot
+    # -----------------------------
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
         print("[WEBHOOK] Market snapshot unavailable for:", epic, flush=True)
@@ -154,9 +163,19 @@ def webhook():
 
         return jsonify({"status": "blocked", "reason": "price_unavailable"}), 200
 
-    entry_price = (bid + offer) / 2
-    print(f"[WEBHOOK] Entry price midpoint: {entry_price}", flush=True)
+    # -----------------------------
+    # ENTRY PRICE — MATCH CAPITAL.COM
+    # -----------------------------
+    if action.lower() == "buy":
+        entry_price = offer
+    else:
+        entry_price = bid
 
+    print(f"[WEBHOOK] Entry price (actual): {entry_price}", flush=True)
+
+    # -----------------------------
+    # Sizing
+    # -----------------------------
     size_info = calculate_size(
         entry_price=entry_price,
         sl_price=sl_price,
@@ -188,10 +207,16 @@ def webhook():
     print("[WEBHOOK] Final TP:", tp_price, flush=True)
     print("[WEBHOOK] Final SIZE:", size, flush=True)
 
+    # -----------------------------
+    # Place order
+    # -----------------------------
     result = place_order(epic, action, size, sl_price, tp_price)
 
     session.update_last_trade()
 
+    # -----------------------------
+    # DealReference → DealId resolution + logging
+    # -----------------------------
     try:
         deal_id = None
 
@@ -204,14 +229,14 @@ def webhook():
                 or result.get("deal_id")
             )
 
-        # Step 2 — convert dealReference → dealId
+        # Step 2 — convert dealReference → dealId (if possible)
         if deal_ref:
             lookup = session.request("GET", f"{API_POSITIONS}/{deal_ref}")
             if lookup and lookup.status_code == 200:
                 deal_id = lookup.json().get("dealId")
                 print(f"[WEBHOOK] dealReference resolved → dealId={deal_id}", flush=True)
 
-        # Step 3 — fallback
+        # Step 3 — fallback to dealReference
         if not deal_id:
             deal_id = deal_ref
             print(f"[WEBHOOK] Using fallback dealId={deal_id}", flush=True)
@@ -224,7 +249,7 @@ def webhook():
             deal_id=deal_id,
             side=action,
             size=size,
-            price=entry_price,
+            price=entry_price,  # EXACT SAME AS CAPITAL.COM ENTRY
             sl=sl_price,
             tp=tp_price,
             timestamp=ts,
@@ -241,6 +266,10 @@ def webhook():
 
     return jsonify({"status": "ok", "result": result}), 200
 
+
+# ---------------------------------------------------------
+# OTHER ROUTES
+# ---------------------------------------------------------
 
 app.register_blueprint(dashboard_blueprint)
 
@@ -266,6 +295,10 @@ def close_position(position_id):
     result = close_position_module(position_id)
     return jsonify(result), 200
 
+
+# ---------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------
 
 if __name__ == "__main__":
     while True:
