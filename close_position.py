@@ -1,5 +1,5 @@
 # ============================
-# CLOSE POSITION MODULE (FINAL — DEALID + DEALREFERENCE SAFE)
+# CLOSE POSITION MODULE (FINAL — USE CLOSE RESPONSE FOR EXIT + PNL)
 # ============================
 
 import session
@@ -11,26 +11,19 @@ from config import API_POSITIONS
 def close_position(position_id):
     """
     Close a position using Capital.com API and log a CLOSED trade.
-    Supports both dealId and dealReference.
+    - Uses raw positions to get entry details
+    - Uses close response to get exit price + pnl
+    - Appends a CLOSED row (old behaviour)
     """
 
-    # 1) Fetch RAW positions
+    # 1) Fetch RAW positions to get entry details
     raw_positions = session.get_positions() or []
 
     target = None
-
-    # Try match dealId first
     for p in raw_positions:
         if str(p.get("dealId")) == str(position_id):
             target = p
             break
-
-    # Fallback: match dealReference (rare but possible)
-    if not target:
-        for p in raw_positions:
-            if str(p.get("dealReference")) == str(position_id):
-                target = p
-                break
 
     if not target:
         print(f"[CLOSE] Position {position_id} not found in RAW positions.")
@@ -38,23 +31,18 @@ def close_position(position_id):
 
     ticker = target.get("instrumentName") or target.get("epic") or "UNKNOWN"
     epic = target.get("epic")
-
-    # True Capital.com dealId
-    deal_id = target.get("dealId") or target.get("dealReference")
+    deal_id = target.get("dealId")
 
     direction = target.get("direction") or target.get("side")
     if direction:
         direction = direction.upper()
 
     size = target.get("size")
-
-    # True entry price
     entry_price = target.get("openLevel") or target.get("level")
-
     sl = target.get("stopLevel")
     tp = target.get("limitLevel")
 
-    # 2) Correct Capital.com close endpoint
+    # 2) Close via Capital.com
     url = f"{API_POSITIONS}/{deal_id}/close"
     print(f"[CLOSE] Closing dealId {deal_id} ({ticker})...", flush=True)
 
@@ -70,7 +58,7 @@ def close_position(position_id):
 
     data = r.json() if r.content else {}
 
-    # 3) Extract exit price + pnl
+    # 3) Extract exit price + pnl from CLOSE RESPONSE
     exit_price = data.get("closeLevel") or data.get("level")
     pnl = data.get("profitLoss")
 
@@ -86,7 +74,7 @@ def close_position(position_id):
 
     close_ts = timestamp()
 
-    # 4) Log CLOSED trade
+    # 4) Append CLOSED trade (old behaviour)
     log_close(
         ticker=ticker,
         epic=epic,
