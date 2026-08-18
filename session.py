@@ -1,8 +1,9 @@
 # ============================
-# SESSION MODULE (CORRECTED + DEALREFERENCE FIX)
+# SESSION MODULE (CORRECTED + DEALREFERENCE FIX + IMPORT TIME)
 # ============================
 
 import requests
+import time
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
 from utils import timestamp
