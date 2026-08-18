@@ -1,5 +1,5 @@
 # ============================
-# TRADE LOG MODULE (STABLE OPEN/CLOSE FORMAT — NO MERGE COMPLEXITY)
+# TRADE LOG MODULE (STABLE OPEN/CLOSE FORMAT — NO MERGE)
 # ============================
 
 import json
@@ -143,7 +143,7 @@ def log_close(
             found = True
             break
 
-    # If no existing entry (e.g. rare edge case), create a new CLOSED entry
+    # If no existing entry (edge case), create a new CLOSED entry
     if not found:
         entry = {
             "dealId": deal_id,
