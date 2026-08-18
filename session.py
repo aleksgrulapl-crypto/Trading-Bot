@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (WITH DEBUG PRINT)
+# SESSION MODULE (FINAL — CORRECT CLOSE ID + POSITION SIGNATURE)
 # ============================
 
 import requests
@@ -9,7 +9,6 @@ from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
 from utils import timestamp
 import report
 
-# Shared state for dashboard
 shared_state = {
     "account": {},
     "positions": [],
@@ -22,14 +21,13 @@ shared_state = {
     "daily_report": {}
 }
 
-# Simple cache for account refresh throttling
 _cache = {
     "account": {"ts": 0, "data": {}}
 }
 
 
 # ---------------------------------------------------------
-# GET HEADERS
+# HEADERS
 # ---------------------------------------------------------
 
 def get_headers():
@@ -63,7 +61,7 @@ def request(method, url, json=None):
 
 
 # ---------------------------------------------------------
-# GET POSITIONS (DEBUG ADDED HERE)
+# GET POSITIONS
 # ---------------------------------------------------------
 
 def get_positions():
@@ -75,21 +73,14 @@ def get_positions():
 
     try:
         data = response.json()
-        positions = data.get("positions", [])
-
-        # DEBUG: print full raw position object
-        if positions:
-            print("[DEBUG] RAW POSITION FULL:", positions[0]["position"], flush=True)
-
-        return positions
-
+        return data.get("positions", [])
     except Exception as e:
         print(f"[SESSION] Failed to parse positions: {e}", flush=True)
         return []
 
 
 # ---------------------------------------------------------
-# ENRICH POSITIONS (TEMPORARY — WE WILL FIX AFTER DEBUG)
+# ENRICH POSITIONS (CORRECT CLOSE ID + SIGNATURE)
 # ---------------------------------------------------------
 
 def enrich_positions(raw_positions):
@@ -99,31 +90,40 @@ def enrich_positions(raw_positions):
         pos = item.get("position", {})
         market = item.get("market", {})
 
-        # TEMPORARY: still using dealId until we see the real close ID
+        # ✔ Correct close ID
         position_id = pos.get("dealId")
+
+        # ✔ Correct signature fields
+        ticker = market.get("symbol")
+        direction = pos.get("direction")
+        size = pos.get("size")
+        entry_price = pos.get("level")
 
         profit = pos.get("upl", 0)
 
         enriched.append({
             "id": position_id,
-            "ticker": market.get("symbol"),
+            "ticker": ticker,
             "epic": market.get("epic"),
 
-            "size": pos.get("size"),
-            "price": pos.get("level"),
+            "size": size,
+            "price": entry_price,
 
             "current_price": (
-                market.get("bid") if pos.get("direction") == "SELL"
+                market.get("bid") if direction == "SELL"
                 else market.get("offer")
             ),
 
-            "direction": pos.get("direction"),
+            "direction": direction,
             "profit": round(profit, 2),
 
             "stopLevel": pos.get("stopLevel"),
             "limitLevel": pos.get("profitLevel"),
 
-            "currency": pos.get("currency")
+            "currency": pos.get("currency"),
+
+            # ✔ Signature used to match OPEN trade → correct CLOSE
+            "signature": f"{ticker}|{direction}|{size}|{entry_price}"
         })
 
     return enriched
