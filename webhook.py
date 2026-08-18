@@ -2,7 +2,7 @@
 # WEBHOOK MODULE (FINAL — CLEAN OPEN LOGGING, SL/TP SAFE)
 # ============================
 
-from flask import Flask, request, jsonify, render_template, redirect
+from flask import Flask, request, jsonify, redirect
 import json
 import time
 import os
@@ -15,7 +15,6 @@ from trade_log import log_trade
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS, API_MARKET
 from dashboard import dashboard as dashboard_blueprint
-from scheduler import start_scheduler
 from utils import timestamp
 from close_position import close_position as close_position_module
 
@@ -264,9 +263,8 @@ if __name__ == "__main__":
             print(f"[Webhook] Auth ensure_token failed: {e}", flush=True)
             time.sleep(10)
 
-    print("[Webhook] Starting scheduler...", flush=True)
-    start_scheduler()
-    print("[Webhook] Scheduler started.", flush=True)
+    # Scheduler intentionally NOT started here in the optimized pipeline.
+    # Closed trades will be handled by a dedicated mechanism, not legacy interval jobs.
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

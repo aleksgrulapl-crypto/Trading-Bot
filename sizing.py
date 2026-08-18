@@ -3,11 +3,7 @@
 # ============================
 
 import session
-from config import (
-    MAX_POSITIONS_PER_TICKER,
-    EQUITY_PERCENT,
-    LEVERAGE
-)
+from config import EQUITY_PERCENT, LEVERAGE
 
 
 def calculate_size(entry_price, sl_price, tp_price, direction):
@@ -17,7 +13,6 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
     - Uses EQUITY_PERCENT allocation
     - Uses LEVERAGE multiplier
     - Validates SL/TP properly (direction-aware)
-    - Enforces max positions per ticker (based on actual epic, NOT direction)
     - Blocks negative balance
     """
 
@@ -27,9 +22,9 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
     account = session.get_account()
     bal = account.get("balance", {})
 
-    cash = bal.get("balance", 0)
+    cash = bal.get("deposit", 0)
     pnl = bal.get("profitLoss", 0)
-    equity = cash + pnl
+    equity = bal.get("balance", cash + pnl)
 
     # ---------------------------------------------------------
     # NEGATIVE BALANCE BLOCK
@@ -41,22 +36,6 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
             "blocked": True,
             "reason": "negative_balance"
         }
-
-    # ---------------------------------------------------------
-    # POSITION LIMIT PER TICKER
-    # ---------------------------------------------------------
-    positions = session.get_positions()
-
-    # IMPORTANT:
-    # Sizing should NOT look up epic using direction.
-    # It should NOT call verify_epic(direction).
-    # It should NOT treat BUY/SELL as a symbol.
-    #
-    # The webhook already enforces max positions per ticker using the correct epic.
-    #
-    # So sizing does NOT enforce per-ticker limits here.
-    #
-    # We REMOVE the broken epic lookup entirely.
 
     # ---------------------------------------------------------
     # VALIDATE SL/TP
@@ -97,7 +76,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction):
         }
 
     # ---------------------------------------------------------
-    # LEGACY SIZING LOGIC (RESTORED + CORRECTED)
+    # SIZING LOGIC
     # ---------------------------------------------------------
     allocation = equity * EQUITY_PERCENT
     exposure = allocation * LEVERAGE
