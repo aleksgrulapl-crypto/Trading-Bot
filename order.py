@@ -1,5 +1,5 @@
 # ============================
-# ORDER MODULE (FINAL — CLEAN, NO DUPLICATE LOGGING, SAFE SL=0/TP=0)
+# ORDER MODULE (FIXED — RETURNS NUMERIC DEALID)
 # ============================
 
 import session
@@ -91,11 +91,32 @@ def place_order(epic, direction, size, sl=None, tp=None):
     print(f"[TRADE] {direction.upper()} {epic} @ {midpoint} (size {size}) → SUCCESS", flush=True)
     print(f"[TRADE] dealReference: {deal_ref}", flush=True)
 
+    # Resolve numeric dealId from positions list
+    numeric_deal_id = None
+    try:
+        raw_positions = session.get_positions() or []
+        enriched = session.enrich_positions(raw_positions)
+
+        for p in enriched:
+            if (
+                p.get("epic") == epic
+                and p.get("side") == direction.upper()
+                and float(p.get("size") or 0) == float(size)
+            ):
+                # Optional: price proximity check
+                entry_price = p.get("entry_price")
+                if entry_price is not None:
+                    numeric_deal_id = p.get("position_id")
+                    break
+    except Exception as e:
+        print(f"[ORDER] Failed to resolve numeric dealId from positions: {e}", flush=True)
+
     session.update_last_trade()
 
     return {
         "status": "ok",
         "dealReference": deal_ref,
+        "dealId": numeric_deal_id,
         "price": midpoint,
         "sl": sl_fixed,
         "tp": tp_fixed

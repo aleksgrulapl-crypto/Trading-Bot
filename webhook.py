@@ -1,5 +1,5 @@
 # ============================
-# WEBHOOK MODULE (FINAL — DEALREFERENCE → DEALID RESOLUTION + MATCHED ENTRY PRICE)
+# WEBHOOK MODULE (FIXED — USES NUMERIC DEALID)
 # ============================
 
 from flask import Flask, request, jsonify, render_template, redirect
@@ -215,31 +215,17 @@ def webhook():
     session.update_last_trade()
 
     # -----------------------------
-    # DealReference → DealId resolution + logging
+    # DealId resolution + logging (NO positions/{dealRef} lookup)
     # -----------------------------
     try:
         deal_id = None
 
-        # Step 1 — read dealReference
-        deal_ref = None
         if isinstance(result, dict):
-            deal_ref = (
+            deal_id = (
                 result.get("dealId")
                 or result.get("dealReference")
                 or result.get("deal_id")
             )
-
-        # Step 2 — convert dealReference → dealId (if possible)
-        if deal_ref:
-            lookup = session.request("GET", f"{API_POSITIONS}/{deal_ref}")
-            if lookup and lookup.status_code == 200:
-                deal_id = lookup.json().get("dealId")
-                print(f"[WEBHOOK] dealReference resolved → dealId={deal_id}", flush=True)
-
-        # Step 3 — fallback to dealReference
-        if not deal_id:
-            deal_id = deal_ref
-            print(f"[WEBHOOK] Using fallback dealId={deal_id}", flush=True)
 
         ts = timestamp()
 
@@ -249,7 +235,7 @@ def webhook():
             deal_id=deal_id,
             side=action,
             size=size,
-            price=result.get("level") or entry_price,
+            price=result.get("price") or entry_price,
             sl=sl_price,
             tp=tp_price,
             timestamp=ts,
