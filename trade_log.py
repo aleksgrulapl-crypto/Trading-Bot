@@ -1,18 +1,31 @@
 # ============================
-# TRADE LOG MODULE (STABLE OPEN/CLOSE FORMAT — NO MERGE)
+# TRADE LOG MODULE (UNIFIED OPEN/CLOSED ROWS + RAW LOAD)
 # ============================
 
 import json
 import os
+from datetime import datetime
+import config
 
-LOG_FILE = "/data/trade_log.json"
+LOG_FILE = config.TRADE_LOG_FILE
+
+# Ensure directory exists
+os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+
+
+def _now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ---------------------------------------------------------
-# SAFE LOAD
+# RAW LOAD (for dashboard)
 # ---------------------------------------------------------
 
 def load_raw_log():
+    """
+    Load the raw trade log from disk.
+    Used by dashboard for normalization/dedupe.
+    """
     if not os.path.exists(LOG_FILE):
         return []
 
@@ -25,143 +38,123 @@ def load_raw_log():
 
 
 # ---------------------------------------------------------
-# SAFE SAVE
+# SAFE SAVE (atomic)
 # ---------------------------------------------------------
 
 def save_log(log):
+    """
+    Save the trade log using atomic write.
+    """
+    tmp_file = LOG_FILE + ".tmp"
+
     try:
-        with open(LOG_FILE, "w") as f:
+        with open(tmp_file, "w") as f:
             json.dump(log, f, indent=4)
+        os.replace(tmp_file, LOG_FILE)
     except Exception as e:
         print(f"[TRADE_LOG] Failed to save log: {e}")
 
 
 # ---------------------------------------------------------
-# CLEAN TRADE FORMAT
+# LOG OPEN TRADE (UNIFIED FORMAT)
 # ---------------------------------------------------------
 
-def clean_trade(entry):
-    """
-    Normalize a trade entry into a consistent format.
-    Used for both OPEN and CLOSED trades.
-    """
-
-    side = entry.get("side")
-    if side:
-        side = str(side).upper()
-
-    def to_float(value):
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    return {
-        "dealId": entry.get("dealId"),
-        "ticker": entry.get("ticker"),
-        "side": side,
-        "size": to_float(entry.get("size")),
-
-        "time_entered": entry.get("time_entered"),
-        "time_exited": entry.get("time_exited"),
-
-        "entry_price": to_float(entry.get("entry_price")),
-        "exit_price": to_float(entry.get("exit_price")),
-
-        "pnl": to_float(entry.get("pnl")) if entry.get("pnl") is not None else None,
-
-        "status": entry.get("status") or (
-            "OPEN" if entry.get("exit_price") in (None, "—") else "CLOSED"
-        ),
-    }
-
-
-# ---------------------------------------------------------
-# LOG OPEN TRADE
-# ---------------------------------------------------------
-
-def log_trade(ticker, epic, deal_id, side, size, price, sl, tp, timestamp, timeframe):
-    log = load_raw_log()
-
-    entry = {
-        "dealId": deal_id,
-        "ticker": ticker,
-        "side": side,
-        "size": size,
-        "entry_price": price,
-        "exit_price": None,
-        "pnl": None,
-        "time_entered": timestamp,
-        "time_exited": None,
-        "status": "OPEN",
-    }
-
-    log.append(clean_trade(entry))
-    save_log(log)
-
-    print(f"[TRADE_LOG] Logged OPEN trade → {ticker} {side} dealId={deal_id}", flush=True)
-
-
-# ---------------------------------------------------------
-# LOG CLOSED TRADE
-# ---------------------------------------------------------
-
-def log_close(
+def log_open_trade(
     ticker,
     epic,
     deal_id,
-    direction,
+    side,
     size,
     entry_price,
-    close_price,
-    pnl,
-    sl,
-    tp,
-    timestamp,
-    timeframe,
+    sl=None,
+    tp=None,
+    timeframe=None,
+    timestamp=None,
 ):
+    """
+    Log an OPEN trade in unified format.
+    Separate row, not updated later.
+    """
     log = load_raw_log()
 
-    # Try to find existing OPEN entry for this dealId
-    found = False
-    for t in log:
-        if t.get("dealId") == deal_id:
-            # Update existing entry in place
-            t["exit_price"] = close_price
-            t["pnl"] = pnl
-            t["time_exited"] = timestamp
-            t["status"] = "CLOSED"
+    entry = {
+        "dealId": str(deal_id) if deal_id else None,
+        "ticker": ticker or epic,
+        "epic": epic,
+        "side": str(side).upper() if side else None,
+        "size": float(size) if size is not None else None,
 
-            # Ensure entry_price is set
-            if entry_price is not None:
-                t["entry_price"] = entry_price
+        "entry_price": float(entry_price) if entry_price is not None else None,
+        "exit_price": None,
+        "pnl": None,
 
-            # Ensure side/direction is consistent
-            if direction:
-                t["side"] = direction
+        "time_entered": timestamp or _now(),
+        "time_exited": None,
+        "status": "OPEN",
 
-            found = True
-            break
+        "sl": sl,
+        "tp": tp,
+        "timeframe": timeframe,
+    }
 
-    # If no existing entry (edge case), create a new CLOSED entry
-    if not found:
-        entry = {
-            "dealId": deal_id,
-            "ticker": ticker,
-            "side": direction,
-            "size": size,
-            "entry_price": entry_price,
-            "exit_price": close_price,
-            "pnl": pnl,
-            "time_entered": None,
-            "time_exited": timestamp,
-            "status": "CLOSED",
-        }
-        log.append(clean_trade(entry))
-
+    log.append(entry)
     save_log(log)
 
     print(
-        f"[TRADE_LOG] Logged CLOSED trade → {ticker} {direction} pnl={pnl}",
+        f"[TRADE_LOG] Logged OPEN trade → {ticker} {side} size={size} dealId={deal_id}",
+        flush=True,
+    )
+
+
+# ---------------------------------------------------------
+# LOG CLOSED TRADE (UNIFIED FORMAT)
+# ---------------------------------------------------------
+
+def log_closed_trade(
+    ticker,
+    epic,
+    deal_id,
+    side,
+    size,
+    entry_price,
+    exit_price,
+    pnl,
+    sl=None,
+    tp=None,
+    timeframe=None,
+    time_entered=None,
+    timestamp=None,
+):
+    """
+    Log a CLOSED trade in unified format.
+Separate row, not merged with OPEN.
+    """
+    log = load_raw_log()
+
+    entry = {
+        "dealId": str(deal_id) if deal_id else None,
+        "ticker": ticker or epic,
+        "epic": epic,
+        "side": str(side).upper() if side else "CLOSE",
+        "size": float(size) if size is not None else None,
+
+        "entry_price": float(entry_price) if entry_price is not None else None,
+        "exit_price": float(exit_price) if exit_price is not None else None,
+        "pnl": float(pnl) if pnl is not None else None,
+
+        "time_entered": time_entered,
+        "time_exited": timestamp or _now(),
+        "status": "CLOSED",
+
+        "sl": sl,
+        "tp": tp,
+        "timeframe": timeframe,
+    }
+
+    log.append(entry)
+    save_log(log)
+
+    print(
+        f"[TRADE_LOG] Logged CLOSED trade → {ticker} CLOSE size={size} pnl={pnl}",
         flush=True,
     )

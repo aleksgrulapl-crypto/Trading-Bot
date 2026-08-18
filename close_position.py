@@ -1,157 +1,96 @@
 # ============================
-# CLOSE POSITION MODULE (FINAL — NEW FORMAT + OLD BEHAVIOUR RESTORED)
+# CLOSE POSITION MODULE (UNIFIED CLOSED LOGGING)
 # ============================
 
 import session
-import requests
-from trade_log import load_raw_log, log_close
+from auth import auth
+from trade_log import log_closed_trade
 from utils import timestamp
 from config import API_POSITIONS
 
 
 def close_position(position_id):
     """
-    Close a position using Capital.com API and log a CLOSED trade.
-    NEW FORMAT (entry_price + exit_price + pnl + dealId + sl + tp + timeframe)
-    OLD BEHAVIOUR RESTORED (numeric dealId + enriched positions)
+    Close a position using Capital.com API and log a CLOSED trade
+    as a separate row in unified format. No merging with OPEN.
     """
 
-    # ---------------------------------------------------------
-    # 1) Find OPEN trade in trade_log (dealId = dealReference)
-    # ---------------------------------------------------------
-    log = load_raw_log()
-    open_entry = None
-
-    for t in log:
-        if str(t.get("dealId")) == str(position_id) and t.get("exit_price") in (None, "—"):
-            open_entry = t
-            break
-
-    if not open_entry:
-        print(f"[CLOSE] No OPEN trade found for dealId {position_id}")
-        return {"status": "error", "reason": "open_trade_not_found"}
-
-    # Extract OPEN trade details
-    ticker = open_entry.get("ticker")
-    epic = open_entry.get("epic")
-    deal_ref = open_entry.get("dealId")  # this is dealReference
-    direction = open_entry.get("side")
-    size = open_entry.get("size")
-    entry_price = open_entry.get("entry_price")
-    sl = open_entry.get("sl")
-    tp = open_entry.get("tp")
-    timeframe = open_entry.get("timeframe")
-
-    # ---------------------------------------------------------
-    # 2) Resolve numeric dealId from dealReference
-    # ---------------------------------------------------------
-    numeric_id = None
-
-    lookup = session.request("GET", f"{API_POSITIONS}/{deal_ref}")
-    if lookup and lookup.status_code == 200:
-        numeric_id = lookup.json().get("dealId")
-
-    if not numeric_id:
-        # fallback: Capital.com still accepts dealReference for closing
-        numeric_id = deal_ref
-
-    print(f"[CLOSE] Using numeric dealId={numeric_id}", flush=True)
-
-    # ---------------------------------------------------------
-    # 3) Authenticated CLOSE request
-    # ---------------------------------------------------------
-    url = f"{API_POSITIONS}/{numeric_id}/close"
-    headers = session.auth_headers()
-
-    print(f"[CLOSE] Closing {ticker} dealId={numeric_id}...", flush=True)
+    auth.ensure_token()
 
     try:
-        r = requests.post(url, json={}, headers=headers)
+        url = f"{API_POSITIONS}/{position_id}/close"
+        response = session.request("POST", url, json={})
+
+        if not response or response.status_code != 200:
+            print(f"[ERROR] Failed to close position {position_id}", flush=True)
+            return {
+                "status": "error",
+                "message": f"Failed to close position: {response.text if response else 'No response'}",
+            }
+
+        raw_positions = session.get_positions()
+        enriched_positions = session.enrich_positions(raw_positions)
+
+        closed = None
+        for p in enriched_positions:
+            if str(p["id"]) == str(position_id):
+                closed = p
+                break
+
+        if not closed:
+            print(f"[WARN] Closed position {position_id} not found in updated list.", flush=True)
+            session.update_last_trade()
+            return {
+                "status": "success",
+                "message": f"Position {position_id} closed (details unavailable).",
+            }
+
+        ticker = closed.get("ticker")
+        epic = closed.get("epic")
+        size = closed.get("size")
+        exit_price = closed.get("current_price")
+        pnl = closed.get("profit")
+
+        ts = timestamp()
+
+        # We don't have entry_price/time_entered from positions; leave them None.
+        log_closed_trade(
+            ticker=ticker,
+            epic=epic,
+            deal_id=None,
+            side="CLOSE",
+            size=size,
+            entry_price=None,
+            exit_price=exit_price,
+            pnl=pnl,
+            sl=closed.get("stopLevel"),
+            tp=closed.get("limitLevel"),
+            timeframe=None,
+            time_entered=None,
+            timestamp=ts,
+        )
+
+        print(f"[TRADE CLOSED] {ticker} @ {exit_price} → PnL £{pnl}", flush=True)
+
+        session.shared_state["positions"] = enriched_positions
+        session.shared_state["account"] = session.enrich_account(session.get_account())
+        session.shared_state["trade_log"] = session.shared_state["trade_log"]
+        session.shared_state["daily_report"] = session.get_daily_report()
+
+        session.update_last_trade()
+
+        return {
+            "status": "success",
+            "ticker": ticker,
+            "size": size,
+            "price": exit_price,
+            "pnl": pnl,
+            "message": f"Position {position_id} closed.",
+        }
+
     except Exception as e:
-        print(f"[CLOSE] Request exception: {e}", flush=True)
-        return {"status": "error", "reason": "request_exception"}
-
-    if not r or r.status_code not in (200, 202):
-        print(f"[CLOSE] Close request failed: {r.status_code if r else 'no response'}")
-        try:
-            print(f"[CLOSE] Response: {r.text}")
-        except:
-            pass
-        return {"status": "error", "reason": "close_failed"}
-
-    # ---------------------------------------------------------
-    # 4) Fetch updated positions (OLD WORKING BEHAVIOUR)
-    # ---------------------------------------------------------
-    raw_positions = session.get_positions()
-    enriched_positions = session.enrich_positions(raw_positions)
-
-    closed_position = None
-    for p in enriched_positions:
-        # match by numeric dealId OR epic fallback
-        if str(p.get("id")) == str(numeric_id) or str(p.get("epic")) == str(epic):
-            closed_position = p
-            break
-
-    # ---------------------------------------------------------
-    # 5) Extract exit price + pnl
-    # ---------------------------------------------------------
-    if closed_position:
-        exit_price = closed_position.get("current_price")
-        pnl = closed_position.get("profit")
-    else:
-        # fallback to close response
-        data = r.json() if r.content else {}
-        exit_price = (
-            data.get("closeLevel")
-            or data.get("level")
-            or data.get("dealConfirmation", {}).get("closeLevel")
-            or None
-        )
-        pnl = (
-            data.get("profitLoss")
-            or data.get("dealConfirmation", {}).get("profitLoss")
-            or 0.0
-        )
-
-    try:
-        exit_price = float(exit_price)
-    except:
-        exit_price = None
-
-    try:
-        pnl = float(pnl)
-    except:
-        pnl = 0.0
-
-    close_ts = timestamp()
-
-    # ---------------------------------------------------------
-    # 6) Log CLOSED trade (NEW FORMAT)
-    # ---------------------------------------------------------
-    log_close(
-        ticker=ticker,
-        epic=epic,
-        deal_id=deal_ref,      # keep dealReference for dashboard pairing
-        direction=direction,
-        size=size,
-        entry_price=entry_price,
-        close_price=exit_price,
-        pnl=pnl,
-        sl=sl,
-        tp=tp,
-        timestamp=close_ts,
-        timeframe=timeframe
-    )
-
-    print(
-        f"[CLOSE] CLOSED TRADE LOGGED → {ticker} {direction} "
-        f"size={size} entry={entry_price} exit={exit_price} pnl={pnl}",
-        flush=True,
-    )
-
-    return {
-        "status": "ok",
-        "dealId": deal_ref,
-        "exit_price": exit_price,
-        "pnl": pnl
-    }
+        print(f"[ERROR] Exception closing position {position_id}: {e}", flush=True)
+        return {
+            "status": "error",
+            "message": str(e),
+        }

@@ -1,5 +1,5 @@
 # ============================
-# WEBHOOK MODULE (FIXED — USES NUMERIC DEALID)
+# WEBHOOK MODULE (UNIFIED, STABLE, NO DEALID DEPENDENCY)
 # ============================
 
 from flask import Flask, request, jsonify, render_template, redirect
@@ -11,21 +11,22 @@ import session
 from parser import parse_tradingview_alert
 from sizing import calculate_size
 from order import place_order
-from trade_log import log_trade
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS, API_MARKET
 from dashboard import dashboard as dashboard_blueprint
 from scheduler import start_scheduler
 from utils import timestamp
+from trade_log import load_raw_log
 from close_position import close_position as close_position_module
 
 app = Flask(__name__)
-
 app.config["DEBUG"] = True
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.jinja_env.auto_reload = True
 app.jinja_env.cache = {}
 app.url_map.strict_slashes = False
+
+app.register_blueprint(dashboard_blueprint)
 
 
 @app.route("/webhook", methods=["POST"])
@@ -42,9 +43,6 @@ def webhook():
 
     alert = None
 
-    # -----------------------------
-    # Parse TradingView alert
-    # -----------------------------
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
@@ -61,28 +59,10 @@ def webhook():
                 print("[WEBHOOK] PARSE ERROR:", e3, flush=True)
                 return jsonify({"status": "error", "message": "Invalid alert"}), 200
 
-    if alert.get("blocked"):
-        print(f"[WEBHOOK] ALERT BLOCKED: {alert.get('reason')}", flush=True)
-
-        log_trade(
-            ticker=alert.get("symbol") or "UNKNOWN",
-            epic=None,
-            deal_id=None,
-            side="BLOCKED",
-            size=0,
-            price=0,
-            sl=alert.get("sl"),
-            tp=alert.get("tp"),
-            timestamp=timestamp(),
-            timeframe=alert.get("timeframe"),
-        )
-
-        return jsonify({"status": "blocked", "reason": alert.get("reason")}), 200
-
     symbol = alert["symbol"]
     action = alert["action"]
-    sl_price = alert["sl"]
-    tp_price = alert["tp"]
+    sl_price = alert.get("sl")
+    tp_price = alert.get("tp")
     timeframe = alert.get("timeframe")
 
     print(
@@ -90,9 +70,6 @@ def webhook():
         flush=True,
     )
 
-    # -----------------------------
-    # EPIC lookup
-    # -----------------------------
     epic_data = session.verify_epic(symbol)
     epic = epic_data.get("epic")
 
@@ -103,43 +80,12 @@ def webhook():
 
     if not epic:
         print("[WEBHOOK] EPIC lookup failed:", symbol, flush=True)
+        return jsonify({"status": "error", "message": "epic_lookup_failed"}), 200
 
-        log_trade(
-            ticker=symbol,
-            epic=None,
-            deal_id=None,
-            side="BLOCKED",
-            size=0,
-            price=0,
-            sl=sl_price,
-            tp=tp_price,
-            timestamp=timestamp(),
-            timeframe=timeframe,
-        )
-
-        return jsonify({"status": "blocked", "reason": "epic_lookup_failed"}), 200
-
-    # -----------------------------
-    # Market snapshot
-    # -----------------------------
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
         print("[WEBHOOK] Market snapshot unavailable for:", epic, flush=True)
-
-        log_trade(
-            ticker=symbol,
-            epic=epic,
-            deal_id=None,
-            side="BLOCKED",
-            size=0,
-            price=0,
-            sl=sl_price,
-            tp=tp_price,
-            timestamp=timestamp(),
-            timeframe=timeframe,
-        )
-
-        return jsonify({"status": "blocked", "reason": "market_snapshot_unavailable"}), 200
+        return jsonify({"status": "error", "message": "market_snapshot_unavailable"}), 200
 
     snapshot = market.json().get("snapshot", {})
     bid = snapshot.get("bid")
@@ -147,25 +93,8 @@ def webhook():
 
     if bid is None or offer is None:
         print("[WEBHOOK] Market prices unavailable for:", epic, flush=True)
+        return jsonify({"status": "error", "message": "price_unavailable"}), 200
 
-        log_trade(
-            ticker=symbol,
-            epic=epic,
-            deal_id=None,
-            side="BLOCKED",
-            size=0,
-            price=0,
-            sl=sl_price,
-            tp=tp_price,
-            timestamp=timestamp(),
-            timeframe=timeframe,
-        )
-
-        return jsonify({"status": "blocked", "reason": "price_unavailable"}), 200
-
-    # -----------------------------
-    # ENTRY PRICE — MATCH CAPITAL.COM
-    # -----------------------------
     if action.lower() == "buy":
         entry_price = offer
     else:
@@ -173,9 +102,6 @@ def webhook():
 
     print(f"[WEBHOOK] Entry price (actual): {entry_price}", flush=True)
 
-    # -----------------------------
-    # Sizing
-    # -----------------------------
     size_info = calculate_size(
         entry_price=entry_price,
         sl_price=sl_price,
@@ -185,20 +111,6 @@ def webhook():
 
     if size_info["blocked"]:
         print(f"[WEBHOOK] SIZING BLOCKED: {size_info['reason']}", flush=True)
-
-        log_trade(
-            ticker=symbol,
-            epic=epic,
-            deal_id=None,
-            side="BLOCKED",
-            size=0,
-            price=entry_price,
-            sl=sl_price,
-            tp=tp_price,
-            timestamp=timestamp(),
-            timeframe=timeframe,
-        )
-
         return jsonify({"status": "blocked", "reason": size_info["reason"]}), 200
 
     size = size_info["size"]
@@ -207,57 +119,11 @@ def webhook():
     print("[WEBHOOK] Final TP:", tp_price, flush=True)
     print("[WEBHOOK] Final SIZE:", size, flush=True)
 
-    # -----------------------------
-    # Place order
-    # -----------------------------
-    result = place_order(epic, action, size, sl_price, tp_price)
+    result = place_order(epic, action, size, sl_price, tp_price, timeframe=timeframe)
 
     session.update_last_trade()
 
-    # -----------------------------
-    # DealId resolution + logging (NO positions/{dealRef} lookup)
-    # -----------------------------
-    try:
-        deal_id = None
-
-        if isinstance(result, dict):
-            deal_id = (
-                result.get("dealId")
-                or result.get("dealReference")
-                or result.get("deal_id")
-            )
-
-        ts = timestamp()
-
-        log_trade(
-            ticker=symbol,
-            epic=epic,
-            deal_id=deal_id,
-            side=action,
-            size=size,
-            price=result.get("price") or entry_price,
-            sl=sl_price,
-            tp=tp_price,
-            timestamp=ts,
-            timeframe=timeframe,
-        )
-
-        print(
-            f"[WEBHOOK] OPEN TRADE LOGGED → {symbol} {action} size={size} dealId={deal_id}",
-            flush=True,
-        )
-
-    except Exception as e:
-        print(f"[WEBHOOK] log_trade failed: {e}", flush=True)
-
     return jsonify({"status": "ok", "result": result}), 200
-
-
-# ---------------------------------------------------------
-# OTHER ROUTES
-# ---------------------------------------------------------
-
-app.register_blueprint(dashboard_blueprint)
 
 
 @app.route("/raw")
@@ -276,15 +142,35 @@ def root():
     return redirect("/dashboard")
 
 
+@app.route("/dashboard")
+def dashboard_home():
+    raw_positions = session.get_positions() or []
+    positions = session.enrich_positions(raw_positions)
+
+    raw_account = session.get_account() or {}
+    account = session.enrich_account(raw_account)
+
+    trade_log = load_raw_log()
+    daily_report = session.get_daily_report() or {}
+
+    return render_template(
+        "dashboard.html",
+        title="AG Capital Trader",
+        cache_bust=time.time(),
+        account=account,
+        positions=positions,
+        trades=trade_log,
+        analytics=session.shared_state.get("analytics", {}),
+        system_status=session.shared_state.get("system_status", {}),
+        daily_report=daily_report,
+    )
+
+
 @app.route("/close/<position_id>", methods=["POST"])
-def close_position(position_id):
+def close_position_route(position_id):
     result = close_position_module(position_id)
     return jsonify(result), 200
 
-
-# ---------------------------------------------------------
-# MAIN
-# ---------------------------------------------------------
 
 if __name__ == "__main__":
     while True:
