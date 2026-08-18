@@ -1,132 +1,83 @@
 # ============================
-# POSITION SIZING MODULE (FINAL — CLEAN + SAFE + NO EPIC LOOKUP)
+# SIZING MODULE (FINAL — 50% AVAILABLE + LEVERAGE + SAFE SL/TP)
 # ============================
 
 import session
-from config import (
-    MAX_POSITIONS_PER_TICKER,
-    EQUITY_PERCENT,
-    LEVERAGE
-)
+import config
 
 
 def calculate_size(entry_price, sl_price, tp_price, direction):
     """
-    Correct sizing logic:
-    - Uses equity (cash + PnL)
-    - Uses EQUITY_PERCENT allocation
-    - Uses LEVERAGE multiplier
-    - Validates SL/TP properly (direction-aware)
-    - Enforces max positions per ticker (based on actual epic, NOT direction)
-    - Blocks negative balance
+    Calculate position size using:
+    - 50% of AVAILABLE equity
+    - Leverage multiplier
+    - Min size enforcement
+    - SL/TP safety validation
     """
 
-    # ---------------------------------------------------------
-    # ACCOUNT DATA
-    # ---------------------------------------------------------
-    account = session.get_account()
-    bal = account.get("balance", {})
+    # ----------------------------------------
+    # 1) Fetch account (enriched)
+    # ----------------------------------------
+    account = session.enrich_account(session.get_account())
 
-    cash = bal.get("balance", 0)
-    pnl = bal.get("profitLoss", 0)
-    equity = cash + pnl
-
-    # ---------------------------------------------------------
-    # NEGATIVE BALANCE BLOCK
-    # ---------------------------------------------------------
-    if cash <= 0:
-        print("[SIZING] Blocked: cash balance is zero or negative.", flush=True)
+    available = account.get("available", 0)
+    if available <= 0:
         return {
-            "size": 0,
             "blocked": True,
-            "reason": "negative_balance"
+            "reason": "no_available_margin"
         }
 
-    # ---------------------------------------------------------
-    # POSITION LIMIT PER TICKER
-    # ---------------------------------------------------------
-    positions = session.get_positions()
+    # ----------------------------------------
+    # 2) Apply your rule: 50% of AVAILABLE
+    # ----------------------------------------
+    equity_to_use = available * config.EQUITY_PERCENT  # 0.50
 
-    # IMPORTANT:
-    # Sizing should NOT look up epic using direction.
-    # It should NOT call verify_epic(direction).
-    # It should NOT treat BUY/SELL as a symbol.
-    #
-    # The webhook already enforces max positions per ticker using the correct epic.
-    #
-    # So sizing does NOT enforce per-ticker limits here.
-    #
-    # We REMOVE the broken epic lookup entirely.
+    # ----------------------------------------
+    # 3) Apply leverage
+    # ----------------------------------------
+    exposure = equity_to_use * config.LEVERAGE
 
-    # ---------------------------------------------------------
-    # VALIDATE SL/TP
-    # ---------------------------------------------------------
-    if sl_price is None or tp_price is None:
-        print("[SIZING] Blocked: SL/TP missing.", flush=True)
-        return {
-            "size": 0,
-            "blocked": True,
-            "reason": "missing_sl_tp"
-        }
-
-    sl_distance = abs(entry_price - sl_price)
-
-    if sl_distance <= 0:
-        print("[SIZING] Blocked: invalid SL distance.", flush=True)
-        return {
-            "size": 0,
-            "blocked": True,
-            "reason": "invalid_sl"
-        }
-
-    # Direction-aware SL validation
-    if direction.lower() == "buy" and sl_price >= entry_price:
-        print("[SIZING] Blocked: BUY SL must be below entry.", flush=True)
-        return {
-            "size": 0,
-            "blocked": True,
-            "reason": "invalid_sl_buy"
-        }
-
-    if direction.lower() == "sell" and sl_price <= entry_price:
-        print("[SIZING] Blocked: SELL SL must be above entry.", flush=True)
-        return {
-            "size": 0,
-            "blocked": True,
-            "reason": "invalid_sl_sell"
-        }
-
-    # ---------------------------------------------------------
-    # LEGACY SIZING LOGIC (RESTORED + CORRECTED)
-    # ---------------------------------------------------------
-    allocation = equity * EQUITY_PERCENT
-    exposure = allocation * LEVERAGE
+    # ----------------------------------------
+    # 4) Convert exposure → size
+    # ----------------------------------------
     raw_size = exposure / entry_price
+    size = round(raw_size, 2)
 
-    print("[SIZING] Cash:", cash, flush=True)
-    print("[SIZING] PnL:", pnl, flush=True)
-    print("[SIZING] Equity:", equity, flush=True)
-    print("[SIZING] Allocation:", allocation, flush=True)
-    print("[SIZING] Leverage:", LEVERAGE, flush=True)
-    print("[SIZING] Exposure:", exposure, flush=True)
-    print("[SIZING] Entry price:", entry_price, flush=True)
-    print("[SIZING] Raw size:", raw_size, flush=True)
+    # ----------------------------------------
+    # 5) Enforce min size per ticker
+    # ----------------------------------------
+    ticker_settings = config.TICKER_SETTINGS.get(
+        session.shared_state.get("last_symbol", ""), {}
+    )
+    min_size = ticker_settings.get("min_size", 0.1)
 
-    # ---------------------------------------------------------
-    # FINAL SIZE
-    # ---------------------------------------------------------
-    final_size = round(raw_size, 2)
+    if size < min_size:
+        size = min_size
 
-    if final_size <= 0:
-        print("[SIZING] Blocked: final size <= 0.", flush=True)
-        return {
-            "size": 0,
-            "blocked": True,
-            "reason": "invalid_size"
-        }
+    # ----------------------------------------
+    # 6) SL/TP validation (Capital.com rejects invalid SL)
+    # ----------------------------------------
+    # For BUY: SL < entry < TP
+    # For SELL: TP < entry < SL
 
+    if direction.lower() == "buy":
+        if not (sl_price < entry_price < tp_price):
+            return {
+                "blocked": True,
+                "reason": "invalid_sl_tp_buy"
+            }
+
+    if direction.lower() == "sell":
+        if not (tp_price < entry_price < sl_price):
+            return {
+                "blocked": True,
+                "reason": "invalid_sl_tp_sell"
+            }
+
+    # ----------------------------------------
+    # 7) Return final sizing
+    # ----------------------------------------
     return {
-        "size": final_size,
         "blocked": False,
-        "reason": None
+        "size": size
     }
