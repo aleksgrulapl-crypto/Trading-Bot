@@ -1,5 +1,5 @@
 # ============================
-# DASHBOARD MODULE (RESTORED OPEN/CLOSE PIPELINE — NO MERGE)
+# DASHBOARD MODULE (CLEAN FORMAT + DISK-ONLY TRADE LOG)
 # ============================
 
 import json
@@ -9,7 +9,7 @@ from flask import Blueprint, request, render_template, redirect, jsonify
 
 import session
 import config
-from trade_log import load_raw_log
+from trade_log import load_raw_log  # REMOVED merge_trades
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
@@ -28,7 +28,7 @@ def login_required(view):
 
 
 # ---------------------------------------------------------
-# NORMALIZE TRADES
+# NORMALIZE TRADES (NEW FORMAT)
 # ---------------------------------------------------------
 
 def normalize_trades(trades):
@@ -38,25 +38,33 @@ def normalize_trades(trades):
         deal_id = t.get("dealId")
         t["dealId"] = str(deal_id) if deal_id else None
 
+        # New timestamp fields
         t.setdefault("time_entered", t.get("time_entered"))
         t.setdefault("time_exited", t.get("time_exited"))
 
+        # Ticker
         if not t.get("ticker"):
             t["ticker"] = t.get("epic") or t.get("symbol") or "—"
 
+        # Side
         side = t.get("side")
         t["side"] = side.upper() if isinstance(side, str) else "SELL"
 
+        # Size
         t.setdefault("size", t.get("size") or "—")
+
+        # Prices
         t.setdefault("entry_price", t.get("entry_price") or "—")
         t.setdefault("exit_price", t.get("exit_price") or "—")
 
+        # PnL
         pnl = t.get("pnl", 0)
         try:
             t["pnl"] = float(pnl)
         except Exception:
             t["pnl"] = 0.0
 
+        # Remove checklist + notes
         t.pop("checklist_passed", None)
         t.pop("notes", None)
 
@@ -172,6 +180,62 @@ def compute_analytics(trades):
 
 
 # ---------------------------------------------------------
+# LOG LOADERS (DISABLED DAILY REPORT)
+# ---------------------------------------------------------
+
+def load_available_log():
+    return []
+
+def load_equity_log():
+    return []
+
+
+# ---------------------------------------------------------
+# CLEAN STRUCTURE
+# ---------------------------------------------------------
+
+def clean_value(v):
+    try:
+        if v is None:
+            return None
+        if isinstance(v, float) and (v != v):
+            return None
+        return v
+    except:
+        return None
+
+def clean_structure(obj):
+    if isinstance(obj, dict):
+        return {k: clean_structure(clean_value(v)) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [clean_structure(clean_value(x)) for x in obj]
+    return clean_value(obj)
+
+
+# ---------------------------------------------------------
+# LOGIN
+# ---------------------------------------------------------
+
+@dashboard.route("/dashboard/login", methods=["GET", "POST"])
+def dashboard_login():
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        if password == config.DASHBOARD_PASSWORD:
+            resp = redirect("/dashboard")
+            resp.set_cookie("dashboard_auth", "1", max_age=86400)
+            return resp
+        return render_template("login.html", error="Incorrect password", cache_bust=time.time())
+    return render_template("login.html", error=None, cache_bust=time.time())
+
+
+@dashboard.route("/dashboard/logout")
+def dashboard_logout():
+    resp = redirect("/dashboard/login")
+    resp.delete_cookie("dashboard_auth")
+    return resp
+
+
+# ---------------------------------------------------------
 # DASHBOARD HOME
 # ---------------------------------------------------------
 
@@ -193,10 +257,11 @@ def dashboard_home():
     except Exception as e:
         print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
 
-    # FIXED: NO MERGE
+    # FIXED: NO MERGE — read raw log directly
     combined_raw = load_raw_log()
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
 
+    # NEW SORT KEY
     combined_trades.sort(
         key=lambda t: (
             t.get("time_exited")
@@ -225,6 +290,66 @@ def dashboard_home():
 
 
 # ---------------------------------------------------------
+# DASHBOARD DATA (AJAX)
+# ---------------------------------------------------------
+
+@dashboard.route("/dashboard/data")
+@login_required
+def dashboard_data():
+    session._cache["account"]["ts"] = 0
+
+    raw_positions = session.get_positions() or []
+    raw_account = session.get_account() or {}
+
+    positions = session.enrich_positions(raw_positions)
+    account = session.enrich_account(raw_account)
+
+    try:
+        open_pnl = sum(p.get("pnl", 0) or 0 for p in positions)
+        if account.get("balance") is not None:
+            account["balance"] = round(account["balance"] + open_pnl, 2)
+    except Exception as e:
+        print(f"[DASHBOARD] live equity calc failed (data): {e}", flush=True)
+
+    # FIXED: NO MERGE — read raw log directly
+    combined_raw = load_raw_log()
+    combined_trades = normalize_trades(dedupe_trades(combined_raw))
+
+    combined_trades.sort(
+        key=lambda t: (
+            t.get("time_exited")
+            or t.get("time_entered")
+            or ""
+        ),
+        reverse=True
+    )
+
+    analytics = compute_analytics(filter_completed(combined_trades))
+
+    session.shared_state["account"] = account
+    session.shared_state["positions"] = positions
+    session.shared_state["trade_log"] = combined_trades
+    session.shared_state["analytics"] = analytics
+
+    html = render_template(
+        "dashboard_partial.html",
+        cache_bust=time.time(),
+        account=account,
+        positions=positions,
+        trades=combined_trades,
+        analytics=analytics
+    )
+
+    return jsonify(clean_structure({
+        "html": html,
+        "account": account,
+        "positions": positions,
+        "trades": combined_trades,
+        "analytics": analytics
+    }))
+
+
+# ---------------------------------------------------------
 # CLOSE POSITION
 # ---------------------------------------------------------
 
@@ -240,6 +365,22 @@ def dashboard_close(position_id):
 
     session.shared_state["positions"] = session.enrich_positions(raw_positions)
     session.shared_state["account"] = session.enrich_account(raw_account)
-    session.shared_state["trade_log"] = load_raw_log()
+    session.shared_state["trade_log"] = load_raw_log()  # FIXED: NO MERGE
 
     return redirect("/dashboard")
+
+
+# ---------------------------------------------------------
+# DEBUG
+# ---------------------------------------------------------
+
+@dashboard.route("/dashboard/debug")
+@login_required
+def dashboard_debug():
+    return jsonify(clean_structure({
+        "account": session.shared_state.get("account"),
+        "positions": session.shared_state.get("positions"),
+        "trade_log": session.shared_state.get("trade_log"),
+        "system_status": session.shared_state.get("system_status", {}),
+        "analytics": session.shared_state.get("analytics", {})
+    }))
