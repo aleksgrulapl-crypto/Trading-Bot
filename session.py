@@ -1,16 +1,14 @@
 # ============================
-# SESSION MODULE (STABLE + CACHED + UPDATED)
+# SESSION MODULE (CORRECTED + DEALREFERENCE FIX)
 # ============================
 
-import time
 import requests
-from math import isnan
-
 from auth import auth
-from config import API_POSITIONS, API_ACCOUNTS, API_MARKET, EPIC_MAP
+from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
 from utils import timestamp
 import report
 
+# Shared state for dashboard
 shared_state = {
     "account": {},
     "positions": [],
@@ -23,57 +21,18 @@ shared_state = {
     "daily_report": {}
 }
 
+# Simple cache for account refresh throttling
 _cache = {
-    "positions": {"data": None, "ts": 0},
-    "account": {"data": None, "ts": 0},
-    "request_cooldown": 0,
-    "login_cooldown": 0
+    "account": {"ts": 0, "data": {}}
 }
 
-CACHE_SECONDS = 5
-LOGIN_COOLDOWN_SECONDS = 30
-
 
 # ---------------------------------------------------------
-# CLEANERS
-# ---------------------------------------------------------
-
-def clean_value(v):
-    try:
-        if v is None:
-            return None
-        if isinstance(v, float) and isnan(v):
-            return None
-        return v
-    except:
-        return None
-
-
-def clean_structure(obj):
-    if isinstance(obj, dict):
-        return {k: clean_structure(clean_value(v)) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [clean_structure(clean_value(x)) for x in obj]
-    return clean_value(obj)
-
-
-# ---------------------------------------------------------
-# AUTH + REQUEST (PATCHED)
+# GET HEADERS
 # ---------------------------------------------------------
 
 def get_headers():
-    now = time.time()
-
-    # Only refresh token if missing AND cooldown expired
-    if (auth.cst is None or auth.xst is None) and now >= _cache["login_cooldown"]:
-        try:
-            auth.ensure_token()
-            shared_state["system_status"]["auth"] = "OK"
-        except Exception as e:
-            print(f"[AUTH] ensure_token failed: {e}", flush=True)
-            shared_state["system_status"]["auth"] = "ERROR"
-            _cache["login_cooldown"] = now + LOGIN_COOLDOWN_SECONDS
-
+    auth.ensure_token()
     return {
         "X-CAP-API-KEY": auth.api_key,
         "CST": auth.cst,
@@ -81,27 +40,11 @@ def get_headers():
     }
 
 
+# ---------------------------------------------------------
+# REQUEST WRAPPER
+# ---------------------------------------------------------
+
 def request(method, url, json=None):
-    now = time.time()
-
-    # Respect cooldown to avoid rate-limit
-    if now < _cache["request_cooldown"]:
-        print("[REQUEST] Cooldown active, returning cached positions/account if available", flush=True)
-
-        if "positions" in url and _cache["positions"]["data"] is not None:
-            class DummyResponse:
-                status_code = 200
-                def json(self_inner):
-                    return {"positions": _cache["positions"]["data"]}
-            return DummyResponse()
-
-        if "accounts" in url and _cache["account"]["data"] is not None:
-            class DummyResponse:
-                status_code = 200
-                def json(self_inner):
-                    return {"accounts": [_cache["account"]["data"]]}
-            return DummyResponse()
-
     headers = get_headers()
 
     try:
@@ -111,10 +54,6 @@ def request(method, url, json=None):
             print(f"[ERROR] {method} {url} → {response.status_code}", flush=True)
             print(f"[ERROR] Response: {response.text}", flush=True)
 
-            if "too-many.requests" in response.text:
-                _cache["request_cooldown"] = now + CACHE_SECONDS
-                _cache["login_cooldown"] = now + LOGIN_COOLDOWN_SECONDS
-
         return response
 
     except Exception as e:
@@ -123,112 +62,56 @@ def request(method, url, json=None):
 
 
 # ---------------------------------------------------------
-# POSITIONS
+# GET POSITIONS
 # ---------------------------------------------------------
 
 def get_positions():
-    now = time.time()
-
-    if now - _cache["positions"]["ts"] < CACHE_SECONDS and _cache["positions"]["data"] is not None:
-        return _cache["positions"]["data"]
-
     url = f"{API_POSITIONS}?includeProfitLoss=true"
     response = request("GET", url)
 
     if not response or response.status_code != 200:
-        return shared_state.get("positions", [])
+        return []
 
     try:
         data = response.json()
-        positions = data.get("positions", [])
-        positions = clean_structure(positions)
-
-        shared_state["positions"] = positions
-        _cache["positions"]["data"] = positions
-        _cache["positions"]["ts"] = now
-
-        return positions
-
+        return data.get("positions", [])
     except Exception as e:
-        print(f"[POSITIONS] Failed to parse positions: {e}", flush=True)
-        return shared_state.get("positions", [])
-
-
-def fetch_positions_from(url: str):
-    response = request("GET", url)
-    if not response:
-        return {}
-    try:
-        return response.json()
-    except Exception as e:
-        print(f"[POSITIONS] fetch_positions_from parse failed: {e}", flush=True)
-        return {}
+        print(f"[SESSION] Failed to parse positions: {e}", flush=True)
+        return []
 
 
 # ---------------------------------------------------------
-# ACCOUNT
+# GET ACCOUNT
 # ---------------------------------------------------------
 
 def get_account():
+    # throttle refresh
     now = time.time()
-
-    if now - _cache["account"]["ts"] < CACHE_SECONDS and _cache["account"]["data"] is not None:
+    if now - _cache["account"]["ts"] < 1.0:
         return _cache["account"]["data"]
 
-    response = request("GET", API_ACCOUNTS)
+    response = request("GET", API_ACCOUNT)
 
     if not response or response.status_code != 200:
-        return shared_state.get("account", {})
+        return _cache["account"]["data"]
 
     try:
         data = response.json()
         accounts = data.get("accounts", [])
-        account = accounts[0] if accounts else {}
-        account = clean_structure(account)
+        acc = accounts[0] if accounts else {}
 
-        shared_state["account"] = account
-        _cache["account"]["data"] = account
         _cache["account"]["ts"] = now
-
-        return account
+        _cache["account"]["data"] = acc
+        return acc
 
     except Exception as e:
-        print(f"[ACCOUNT] Failed to parse account: {e}", flush=True)
-        return shared_state.get("account", {})
+        print(f"[SESSION] Failed to parse account: {e}", flush=True)
+        return _cache["account"]["data"]
 
 
 # ---------------------------------------------------------
-# ENRICHERS
+# ENRICH POSITIONS (CRITICAL FIX APPLIED)
 # ---------------------------------------------------------
-
-def enrich_account(raw):
-    if not raw:
-        return {}
-
-    bal = raw.get("balance", {})
-
-    equity = clean_value(bal.get("balance", 0))
-    funds = clean_value(bal.get("deposit", 0))
-    pnl = clean_value(bal.get("profitLoss", 0))
-    available_raw = clean_value(bal.get("available", 0))
-
-    margin = equity - available_raw
-    available = max(0, equity - margin)
-
-    margin_warning = None
-    if available <= 0:
-        margin_warning = "⚠ Margin Warning: Available balance is zero or negative."
-
-    return {
-        "funds": round(funds, 2),
-        "balance": round(equity, 2),
-        "pnl": round(pnl, 2),
-        "available": round(available, 2),
-        "margin": round(margin, 2),
-        "available_color": "red" if available <= 0 else "lime",
-        "margin_warning": margin_warning
-    }
-
 
 def enrich_positions(raw_positions):
     enriched = []
@@ -237,73 +120,97 @@ def enrich_positions(raw_positions):
         pos = item.get("position", {})
         market = item.get("market", {})
 
-        profit = clean_value(pos.get("upl", 0))
-        direction = pos.get("direction")
+        # CRITICAL FIX:
+        # Capital.com uses dealReference for closing positions.
+        # dealId may be UUID or internal ID and NOT closable.
+        position_id = pos.get("dealReference") or pos.get("dealId")
 
-        # Capital.com dealId → used as position_id and for closing
-        position_id = pos.get("dealId")
-        ticker = market.get("symbol")
-        epic = market.get("epic")
-        size = pos.get("size")
-
-        # TRUE entry price from Capital.com
-        entry_price = pos.get("openLevel") or pos.get("level")
-
-        # Current price based on side
-        current_price = market.get("bid") if direction == "SELL" else market.get("offer")
-
-        sl = pos.get("stopLevel")
-        tp = pos.get("profitLevel")
-        currency = pos.get("currency")
+        profit = pos.get("upl", 0)
 
         enriched.append({
-            "position_id": position_id,
-            "ticker": ticker,
-            "epic": epic,
-            "size": size,
-            "entry_price": entry_price,
-            "current_price": current_price,
-            "side": direction,
-            "pnl": round(profit, 2) if profit is not None else None,
-            "sl": sl,
-            "tp": tp,
-            "currency": currency,
+            "id": position_id,                         # <-- FIXED
+            "ticker": market.get("symbol"),
+            "epic": market.get("epic"),
 
-            # legacy / compatibility fields
-            "id": position_id,
-            "price": entry_price,
-            "profit": round(profit, 2) if profit is not None else None,
-            "stopLevel": sl,
-            "limitLevel": tp,
-            "direction": direction
+            "size": pos.get("size"),
+            "price": pos.get("level"),
+
+            "current_price": (
+                market.get("bid") if pos.get("direction") == "SELL"
+                else market.get("offer")
+            ),
+
+            "direction": pos.get("direction"),
+            "profit": round(profit, 2),
+
+            "stopLevel": pos.get("stopLevel"),
+            "limitLevel": pos.get("profitLevel"),
+
+            "currency": pos.get("currency")
         })
 
     return enriched
 
 
 # ---------------------------------------------------------
-# EPIC RESOLUTION
+# ENRICH ACCOUNT
 # ---------------------------------------------------------
 
-def verify_epic(symbol: str):
-    epic = EPIC_MAP.get(symbol)
-    if epic:
-        return {"epic": epic, "symbol": symbol, "source": "map"}
+def enrich_account(raw):
+    if not raw:
+        return {}
 
+    bal = raw.get("balance", {})
+
+    available = bal.get("available", 0)
+    margin_warning = None
+
+    if available < 0:
+        margin_warning = "⚠ Margin Warning: Available balance is negative."
+
+    return {
+        "funds": round(bal.get("funds", 0), 2),
+        "balance": round(bal.get("balance", 0), 2),
+        "pnl": round(bal.get("profitLoss", 0), 2),
+        "margin": round(bal.get("profitLoss", 0), 2),
+        "available": round(available, 2),
+        "available_color": "red" if available < 0 else "lime",
+        "margin_warning": margin_warning
+    }
+
+
+# ---------------------------------------------------------
+# EPIC LOOKUP (RESTORED)
+# ---------------------------------------------------------
+
+def verify_epic(symbol):
+    symbol = symbol.upper()
+
+    # 1. Local mapping
+    if symbol in EPIC_MAP:
+        return {"epic": EPIC_MAP[symbol], "source": "map"}
+
+    # 2. API lookup
     try:
         url = f"{API_MARKET}/{symbol}"
-        resp = request("GET", url)
-        if resp and resp.status_code == 200:
-            data = resp.json()
-            snap = data.get("snapshot", {})
-            epic_from_api = data.get("epic") or snap.get("epic")
-            if epic_from_api:
-                return {"epic": epic_from_api, "symbol": symbol, "source": "api"}
-    except Exception as e:
-        print(f"[EPIC] API lookup failed for {symbol}: {e}", flush=True)
+        r = request("GET", url)
 
-    print(f"[EPIC] No epic found for symbol {symbol}", flush=True)
-    return {"epic": None, "symbol": symbol, "source": "none"}
+        if not r or r.status_code != 200:
+            print(f"[EPIC] API lookup failed for {symbol}", flush=True)
+            return {"epic": None, "source": "api_error"}
+
+        data = r.json()
+        epic = data.get("instrument", {}).get("epic")
+
+        if epic:
+            return {"epic": epic, "source": "api"}
+
+        print(f"[EPIC] No EPIC found for {symbol}", flush=True)
+        return {"epic": None, "source": "not_found"}
+
+    except Exception as e:
+        print(f"[EPIC] Exception during lookup: {e}", flush=True)
+        return {"epic": None, "source": "exception"}
 
 
 # ---------------------------------------------------------
@@ -317,12 +224,20 @@ def get_daily_report():
         return report_data
     except Exception as e:
         print(f"[REPORT] Failed to load daily report: {e}", flush=True)
-        return shared_state.get("daily_report", {})
+        return {}
 
+
+# ---------------------------------------------------------
+# UPDATE LAST TRADE
+# ---------------------------------------------------------
 
 def update_last_trade():
     shared_state["system_status"]["last_trade"] = timestamp()
 
+
+# ---------------------------------------------------------
+# UPDATE LAST WEBHOOK
+# ---------------------------------------------------------
 
 def update_last_webhook():
     shared_state["system_status"]["last_webhook"] = timestamp()
