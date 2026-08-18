@@ -79,6 +79,7 @@
                         <th>Current</th>
                         <th>SL / TP</th>
                         <th>PnL</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -101,6 +102,12 @@
 
                         <td class="{% if p.pnl and p.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
                             {{ p.pnl|default('—') }}
+                        </td>
+
+                        <td>
+                            <button class="pill pill-status" onclick="closePosition('{{ p.position_id }}')">
+                                Close
+                            </button>
                         </td>
                     </tr>
                 {% endfor %}

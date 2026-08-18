@@ -64,7 +64,7 @@ def clean_structure(obj):
 def get_headers():
     now = time.time()
 
-    # ⭐ PATCH: Only refresh token if missing AND cooldown expired
+    # Only refresh token if missing AND cooldown expired
     if (auth.cst is None or auth.xst is None) and now >= _cache["login_cooldown"]:
         try:
             auth.ensure_token()
@@ -84,7 +84,7 @@ def get_headers():
 def request(method, url, json=None):
     now = time.time()
 
-    # ⭐ PATCH: Respect cooldown to avoid rate-limit
+    # Respect cooldown to avoid rate-limit
     if now < _cache["request_cooldown"]:
         print("[REQUEST] Cooldown active, returning cached positions/account if available", flush=True)
 
@@ -240,12 +240,16 @@ def enrich_positions(raw_positions):
         profit = clean_value(pos.get("upl", 0))
         direction = pos.get("direction")
 
+        # Capital.com dealId → used as position_id and for closing
         position_id = pos.get("dealId")
         ticker = market.get("symbol")
         epic = market.get("epic")
         size = pos.get("size")
-        entry_price = pos.get("level")
 
+        # TRUE entry price from Capital.com
+        entry_price = pos.get("openLevel") or pos.get("level")
+
+        # Current price based on side
         current_price = market.get("bid") if direction == "SELL" else market.get("offer")
 
         sl = pos.get("stopLevel")
@@ -264,6 +268,8 @@ def enrich_positions(raw_positions):
             "sl": sl,
             "tp": tp,
             "currency": currency,
+
+            # legacy / compatibility fields
             "id": position_id,
             "price": entry_price,
             "profit": round(profit, 2) if profit is not None else None,

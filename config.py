@@ -46,6 +46,19 @@ TICKER_SETTINGS = {
     "PATH": {"min_size": 0.1},
     "JOBY": {"min_size": 0.1},
     "PLUG": {"min_size": 0.1},
+    "UNH": {"min_size": 0.1},
+    "NFLX": {"min_size": 0.1},
+    "AMAT": {"min_size": 0.1},
+    "WMT": {"min_size": 0.1},
+    "GOOGL": {"min_size": 0.1},
+    "AMZN": {"min_size": 0.1},
+    "MU": {"min_size": 0.1},
+    "CRM": {"min_size": 0.1},
+    "INTC": {"min_size": 0.1},
+    "NVAX": {"min_size": 0.1},
+    "BABA": {"min_size": 0.1},
+    "SHOP": {"min_size": 0.1},
+    "COIN": {"min_size": 0.1}
 }
 
 DASHBOARD_TITLE = "AG Capital Trader"
@@ -61,17 +74,41 @@ DAILY_REPORT_FILE = "/tmp/daily_report.json"
 
 CACHE_TTL_SECONDS = 2
 
+# ============================
+# EPIC MAP (FULL 30 TICKERS)
+# ============================
+
 EPIC_MAP = {
     "NVDA": "NVDA",
-    "MU": "MU",
     "TSLA": "TSLA",
+    "AMD": "AMD",
     "AAPL": "AAPL",
     "MSFT": "MSFT",
-    "AMD": "AMD",
+    "PLTR": "PLTR",
     "META": "META",
+    "SMCI": "SMCI",
+    "QBTS": "QBTS",
+    "IONQ": "IONQ",
+    "RKLB": "RKLB",
+    "ASTS": "ASTS",
+    "SOUN": "SOUN",
+    "OPEN": "OPEN",
+    "PATH": "PATH",
+    "JOBY": "JOBY",
+    "PLUG": "PLUG",
+    "UNH": "UNH",
+    "NFLX": "NFLX",
+    "AMAT": "AMAT",
+    "WMT": "WMT",
     "GOOGL": "GOOGL",
     "AMZN": "AMZN",
-    "PLTR": "PLTR"
+    "MU": "MU",
+    "CRM": "CRM",
+    "INTC": "INTC",
+    "NVAX": "NVAX",
+    "BABA": "BABA",
+    "SHOP": "SHOP",
+    "COIN": "COIN"
 }
 
 # Trailing stop settings (Option A)

@@ -1,5 +1,5 @@
 # ============================
-# DASHBOARD MODULE (CLEAN FORMAT + DISK-ONLY TRADE LOG)
+# DASHBOARD MODULE (FINAL — DISK LOG + CLOSE BUTTON + NEW TIMESTAMP FORMAT)
 # ============================
 
 import json
@@ -9,7 +9,7 @@ from flask import Blueprint, request, render_template, redirect, jsonify
 
 import session
 import config
-from trade_log import load_raw_log  # REMOVED merge_trades
+from trade_log import load_raw_log
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
@@ -28,45 +28,42 @@ def login_required(view):
 
 
 # ---------------------------------------------------------
-# NORMALIZE TRADES (NEW FORMAT)
+# NORMALIZE TRADES
 # ---------------------------------------------------------
 
 def normalize_trades(trades):
     normalized = []
 
     for t in trades:
+        # dealId always string
         deal_id = t.get("dealId")
         t["dealId"] = str(deal_id) if deal_id else None
 
-        # New timestamp fields
+        # timestamps (new format already applied in utils.timestamp)
         t.setdefault("time_entered", t.get("time_entered"))
         t.setdefault("time_exited", t.get("time_exited"))
 
-        # Ticker
+        # ticker fallback
         if not t.get("ticker"):
             t["ticker"] = t.get("epic") or t.get("symbol") or "—"
 
-        # Side
+        # side
         side = t.get("side")
         t["side"] = side.upper() if isinstance(side, str) else "SELL"
 
-        # Size
+        # size
         t.setdefault("size", t.get("size") or "—")
 
-        # Prices
+        # prices
         t.setdefault("entry_price", t.get("entry_price") or "—")
         t.setdefault("exit_price", t.get("exit_price") or "—")
 
-        # PnL
+        # pnl
         pnl = t.get("pnl", 0)
         try:
             t["pnl"] = float(pnl)
         except Exception:
             t["pnl"] = 0.0
-
-        # Remove checklist + notes
-        t.pop("checklist_passed", None)
-        t.pop("notes", None)
 
         normalized.append(t)
 
@@ -180,17 +177,6 @@ def compute_analytics(trades):
 
 
 # ---------------------------------------------------------
-# LOG LOADERS (DISABLED DAILY REPORT)
-# ---------------------------------------------------------
-
-def load_available_log():
-    return []
-
-def load_equity_log():
-    return []
-
-
-# ---------------------------------------------------------
 # CLEAN STRUCTURE
 # ---------------------------------------------------------
 
@@ -257,11 +243,11 @@ def dashboard_home():
     except Exception as e:
         print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
 
-    # FIXED: NO MERGE — read raw log directly
+    # Read raw log directly
     combined_raw = load_raw_log()
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
 
-    # NEW SORT KEY
+    # Sort by exit or entry timestamp (new format)
     combined_trades.sort(
         key=lambda t: (
             t.get("time_exited")
@@ -311,7 +297,6 @@ def dashboard_data():
     except Exception as e:
         print(f"[DASHBOARD] live equity calc failed (data): {e}", flush=True)
 
-    # FIXED: NO MERGE — read raw log directly
     combined_raw = load_raw_log()
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
 
@@ -365,7 +350,7 @@ def dashboard_close(position_id):
 
     session.shared_state["positions"] = session.enrich_positions(raw_positions)
     session.shared_state["account"] = session.enrich_account(raw_account)
-    session.shared_state["trade_log"] = load_raw_log()  # FIXED: NO MERGE
+    session.shared_state["trade_log"] = load_raw_log()
 
     return redirect("/dashboard")
 
