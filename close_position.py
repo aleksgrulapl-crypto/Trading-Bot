@@ -19,7 +19,7 @@ def close_position(position_id):
 
     target = None
     for p in raw_positions:
-        # Capital.com uses dealId for closing
+        # Capital.com uses dealId for closing; position_id is expected to be dealId
         if str(p.get("dealId")) == str(position_id):
             target = p
             break
@@ -39,13 +39,13 @@ def close_position(position_id):
 
     size = target.get("size")
 
-    # RAW Capital.com entry price
+    # RAW Capital.com entry price (true entry)
     entry_price = target.get("openLevel")
 
     sl = target.get("stopLevel")
     tp = target.get("limitLevel")
 
-    # 2) Correct Capital.com close endpoint (RESTORED)
+    # 2) Correct Capital.com close endpoint (uses dealId)
     url = f"{API_POSITIONS}/{deal_id}/close"
     print(f"[CLOSE] Closing dealId {deal_id} ({ticker})...", flush=True)
 
@@ -61,7 +61,7 @@ def close_position(position_id):
 
     data = r.json() if r.content else {}
 
-    # 3) Extract exit price + pnl (RESTORED)
+    # 3) Extract exit price + pnl
     exit_price = data.get("closeLevel") or data.get("level")
     pnl = data.get("profitLoss")
 
@@ -77,7 +77,7 @@ def close_position(position_id):
 
     close_ts = timestamp()
 
-    # 4) Log CLOSED trade (RESTORED FORMAT)
+    # 4) Log CLOSED trade (restored format)
     log_close(
         ticker=ticker,
         epic=epic,

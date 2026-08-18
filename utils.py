@@ -10,15 +10,17 @@ getcontext().prec = 12
 
 
 # ---------------------------------------------------------
-# TIMESTAMP (UTC + Z suffix)
+# TIMESTAMP (CUSTOM FORMAT)
 # ---------------------------------------------------------
 
 def timestamp():
     """
-    Returns an ISO-8601 UTC timestamp with Z suffix.
-    Example: 2026-08-15T00:32:11.123Z
+    Returns a UTC timestamp in format:
+    YYYY-MM-DD HH.MM.SS
+    Example: 2026-08-17 18.49.00
     """
-    return datetime.datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+    now = datetime.datetime.utcnow()
+    return now.strftime("%Y-%m-%d %H.%M.%S")
 
 
 # ---------------------------------------------------------
