@@ -1,5 +1,5 @@
 # ============================
-# SCHEDULER MODULE (FINAL — TrailSL + History Import)
+# SCHEDULER MODULE (RESTORED — TrailSL ONLY)
 # ============================
 
 import threading
@@ -9,10 +9,8 @@ import pytz
 import json
 
 import session
-import report
 from utils import timestamp
 
-from history import merge_history
 from trail_sl import run_trailing_sl
 
 UK_TZ = pytz.timezone("Europe/London")
@@ -56,24 +54,6 @@ def log_equity():
         print(f"[Scheduler] Logged daily equity: £{entry['equity']}")
     except Exception as e:
         print(f"[Scheduler] Error logging equity: {e}")
-
-
-def run_daily_report():
-    try:
-        report.generate_daily_report()
-        session.shared_state["daily_report"] = report.get_daily_report()
-        print("[Scheduler] Daily report generated.")
-    except Exception as e:
-        print(f"[Scheduler] Error generating daily report: {e}")
-
-
-def import_closed_trades():
-    try:
-        print("[Scheduler] Importing closed trades from Capital history...")
-        merge_history()
-        print("[Scheduler] Closed trades imported.")
-    except Exception as e:
-        print(f"[Scheduler] Error importing closed trades: {e}")
 
 
 class Scheduler:
@@ -165,11 +145,8 @@ scheduler = Scheduler()
 
 
 def start_scheduler():
-    # Closed trades import (Capital history)
-    scheduler.add_interval_job(60, import_closed_trades)
-
-    # One-time trailing SL (Option A, 50% activation, 30% trail)
+    # Trail SL ONLY — no history import, no daily report
     scheduler.add_interval_job(60, run_trailing_sl)
 
     scheduler.start()
-    print("[Scheduler] Started background scheduler (TrailSL + history import enabled).")
+    print("[Scheduler] Started background scheduler (TrailSL only).")
