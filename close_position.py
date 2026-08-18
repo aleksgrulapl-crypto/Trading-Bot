@@ -2,7 +2,7 @@
 # CLOSE POSITION MODULE (LOG-DRIVEN CLOSE)
 # ============================
 
-from trade_log import load_log, log_close
+from trade_log import load_raw_log, log_close
 from utils import timestamp
 from config import API_POSITIONS
 import session
