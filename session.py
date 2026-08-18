@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (CORRECTED — USE dealId FOR CLOSE)
+# SESSION MODULE (WITH DEBUG PRINT)
 # ============================
 
 import requests
@@ -63,7 +63,7 @@ def request(method, url, json=None):
 
 
 # ---------------------------------------------------------
-# GET POSITIONS
+# GET POSITIONS (DEBUG ADDED HERE)
 # ---------------------------------------------------------
 
 def get_positions():
@@ -77,18 +77,19 @@ def get_positions():
         data = response.json()
         positions = data.get("positions", [])
 
-        # Optional: keep this while testing
+        # DEBUG: print full raw position object
         if positions:
-            print("[DEBUG] Raw position sample:", positions[0], flush=True)
+            print("[DEBUG] RAW POSITION FULL:", positions[0]["position"], flush=True)
 
         return positions
+
     except Exception as e:
         print(f"[SESSION] Failed to parse positions: {e}", flush=True)
         return []
 
 
 # ---------------------------------------------------------
-# ENRICH POSITIONS (USE dealId FOR CLOSE)
+# ENRICH POSITIONS (TEMPORARY — WE WILL FIX AFTER DEBUG)
 # ---------------------------------------------------------
 
 def enrich_positions(raw_positions):
@@ -98,7 +99,7 @@ def enrich_positions(raw_positions):
         pos = item.get("position", {})
         market = item.get("market", {})
 
-        # Capital.com close endpoint expects dealId here.
+        # TEMPORARY: still using dealId until we see the real close ID
         position_id = pos.get("dealId")
 
         profit = pos.get("upl", 0)
@@ -184,17 +185,15 @@ def enrich_account(raw):
 
 
 # ---------------------------------------------------------
-# EPIC LOOKUP (RESTORED)
+# EPIC LOOKUP
 # ---------------------------------------------------------
 
 def verify_epic(symbol):
     symbol = symbol.upper()
 
-    # 1. Local mapping
     if symbol in EPIC_MAP:
         return {"epic": EPIC_MAP[symbol], "source": "map"}
 
-    # 2. API lookup
     try:
         url = f"{API_MARKET}/{symbol}"
         r = request("GET", url)
