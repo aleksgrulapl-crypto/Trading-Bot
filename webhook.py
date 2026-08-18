@@ -249,7 +249,7 @@ def webhook():
             deal_id=deal_id,
             side=action,
             size=size,
-            price=entry_price,  # EXACT SAME AS CAPITAL.COM ENTRY
+            price=result.get("level") or entry_price,
             sl=sl_price,
             tp=tp_price,
             timestamp=ts,
