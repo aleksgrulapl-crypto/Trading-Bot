@@ -243,6 +243,12 @@
 </div>
 
 <script>
+function closePosition(id) {
+    fetch(`/dashboard/close/${id}`, { method: "GET" })
+        .then(() => refreshDashboard())
+        .catch(err => console.error("Close error:", err));
+}
+
 function refreshDashboard() {
     const errorBanner = document.getElementById('error-banner');
 

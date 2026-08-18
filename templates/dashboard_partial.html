@@ -88,7 +88,7 @@
                         <td>{{ p.ticker }}</td>
 
                         <td>
-                            {% if p.side == 'BUY' %}
+                            {% if p.direction == 'BUY' %}
                                 <span class="pill pill-long">Long</span>
                             {% else %}
                                 <span class="pill pill-short">Short</span>
@@ -96,16 +96,16 @@
                         </td>
 
                         <td>{{ p.size }}</td>
-                        <td>{{ p.entry_price|default('—') }}</td>
+                        <td>{{ p.price|default('—') }}</td>
                         <td>{{ p.current_price|default('—') }}</td>
-                        <td>{{ p.sl|default('—') }} / {{ p.tp|default('—') }}</td>
+                        <td>{{ p.stopLevel|default('—') }} / {{ p.limitLevel|default('—') }}</td>
 
-                        <td class="{% if p.pnl and p.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
-                            {{ p.pnl|default('—') }}
+                        <td class="{% if p.profit and p.profit >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+                            {{ p.profit|default('—') }}
                         </td>
 
                         <td>
-                            <button class="pill pill-status" onclick="closePosition('{{ p.position_id }}')">
+                            <button class="pill pill-status" onclick="closePosition('{{ p.id }}')">
                                 Close
                             </button>
                         </td>
