@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (CORRECTED + DEALREFERENCE FIX + IMPORT TIME)
+# SESSION MODULE (CORRECTED — USE dealId FOR CLOSE)
 # ============================
 
 import requests
@@ -77,7 +77,7 @@ def get_positions():
         data = response.json()
         positions = data.get("positions", [])
 
-        # DEBUG: print one raw position to see the real ID field
+        # Optional: keep this while testing
         if positions:
             print("[DEBUG] Raw position sample:", positions[0], flush=True)
 
@@ -87,38 +87,8 @@ def get_positions():
         return []
 
 
-
 # ---------------------------------------------------------
-# GET ACCOUNT
-# ---------------------------------------------------------
-
-def get_account():
-    # throttle refresh
-    now = time.time()
-    if now - _cache["account"]["ts"] < 1.0:
-        return _cache["account"]["data"]
-
-    response = request("GET", API_ACCOUNT)
-
-    if not response or response.status_code != 200:
-        return _cache["account"]["data"]
-
-    try:
-        data = response.json()
-        accounts = data.get("accounts", [])
-        acc = accounts[0] if accounts else {}
-
-        _cache["account"]["ts"] = now
-        _cache["account"]["data"] = acc
-        return acc
-
-    except Exception as e:
-        print(f"[SESSION] Failed to parse account: {e}", flush=True)
-        return _cache["account"]["data"]
-
-
-# ---------------------------------------------------------
-# ENRICH POSITIONS (CRITICAL FIX APPLIED)
+# ENRICH POSITIONS (USE dealId FOR CLOSE)
 # ---------------------------------------------------------
 
 def enrich_positions(raw_positions):
@@ -128,15 +98,13 @@ def enrich_positions(raw_positions):
         pos = item.get("position", {})
         market = item.get("market", {})
 
-        # CRITICAL FIX:
-        # Capital.com uses dealReference for closing positions.
-        # dealId may be UUID or internal ID and NOT closable.
-        position_id = pos.get("dealReference") or pos.get("dealId")
+        # Capital.com close endpoint expects dealId here.
+        position_id = pos.get("dealId")
 
         profit = pos.get("upl", 0)
 
         enriched.append({
-            "id": position_id,                         # <-- FIXED
+            "id": position_id,
             "ticker": market.get("symbol"),
             "epic": market.get("epic"),
 
@@ -158,6 +126,34 @@ def enrich_positions(raw_positions):
         })
 
     return enriched
+
+
+# ---------------------------------------------------------
+# GET ACCOUNT
+# ---------------------------------------------------------
+
+def get_account():
+    now = time.time()
+    if now - _cache["account"]["ts"] < 1.0:
+        return _cache["account"]["data"]
+
+    response = request("GET", API_ACCOUNT)
+
+    if not response or response.status_code != 200:
+        return _cache["account"]["data"]
+
+    try:
+        data = response.json()
+        accounts = data.get("accounts", [])
+        acc = accounts[0] if accounts else {}
+
+        _cache["account"]["ts"] = now
+        _cache["account"]["data"] = acc
+        return acc
+
+    except Exception as e:
+        print(f"[SESSION] Failed to parse account: {e}", flush=True)
+        return _cache["account"]["data"]
 
 
 # ---------------------------------------------------------
