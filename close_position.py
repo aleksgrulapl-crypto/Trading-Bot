@@ -1,8 +1,9 @@
 # ============================
-# CLOSE POSITION MODULE (LOG + POSITIONS DRIVEN, MATCHES OLD FORMAT)
+# CLOSE POSITION MODULE (FINAL — AUTH + LOG-DRIVEN + EXIT FIXED)
 # ============================
 
 import session
+import requests
 from trade_log import load_raw_log, log_close
 from utils import timestamp
 from config import API_POSITIONS
@@ -11,13 +12,15 @@ from config import API_POSITIONS
 def close_position(position_id):
     """
     Close a position using Capital.com API and log a CLOSED trade.
-    - Uses trade_log to find the OPEN entry (dealId = position_id)
-    - Uses current positions to get entry_price + size
-    - Uses close response for exit_price + pnl
-    - Appends a CLOSED row (same structure as old working log)
+    - Finds OPEN trade in trade_log (dealId = dealReference)
+    - Sends authenticated close request (CST + X-SECURITY-TOKEN)
+    - Uses close response for exit price + pnl
+    - Appends CLOSED row (same structure as old working log)
     """
 
+    # ---------------------------------------------------------
     # 1) Find the OPEN trade in the log
+    # ---------------------------------------------------------
     log = load_raw_log()
     open_entry = None
 
@@ -30,8 +33,8 @@ def close_position(position_id):
         print(f"[CLOSE] No OPEN trade found for dealId {position_id}")
         return {"status": "error", "reason": "open_trade_not_found"}
 
-    # Base details from the OPEN row (matches trade_log format)
-    ticker = open_entry.get("ticker") or "UNKNOWN"
+    # Extract details from OPEN trade
+    ticker = open_entry.get("ticker")
     epic = open_entry.get("epic")
     deal_id = open_entry.get("dealId")
     direction = open_entry.get("side")
@@ -41,25 +44,19 @@ def close_position(position_id):
     tp = open_entry.get("tp")
     timeframe = open_entry.get("timeframe")
 
-    # 2) Try to refine entry_price/size from live positions (optional, but keeps values consistent)
-    raw_positions = session.get_positions() or []
-    enriched = session.enrich_positions(raw_positions)
-
-    for p in enriched:
-        # match by dealId or fallback by epic/ticker
-        if str(p.get("id")) == str(position_id) or str(p.get("dealId")) == str(position_id) or str(p.get("epic")) == str(epic):
-            # these fields are how your dashboard shows open positions
-            entry_price = p.get("price", entry_price)
-            size = p.get("size", size)
-            sl = p.get("stopLevel", sl)
-            tp = p.get("limitLevel", tp)
-            break
-
-    # 3) Call Capital.com close endpoint
+    # ---------------------------------------------------------
+    # 2) Authenticated CLOSE request
+    # ---------------------------------------------------------
     url = f"{API_POSITIONS}/{deal_id}/close"
+    headers = session.auth_headers()  # CST + X-SECURITY-TOKEN
+
     print(f"[CLOSE] Closing {ticker} dealId={deal_id}...", flush=True)
 
-    r = session.request("POST", url, json={})
+    try:
+        r = requests.post(url, json={}, headers=headers)
+    except Exception as e:
+        print(f"[CLOSE] Request exception: {e}", flush=True)
+        return {"status": "error", "reason": "request_exception"}
 
     if not r or r.status_code not in (200, 202):
         print(f"[CLOSE] Close request failed: {r.status_code if r else 'no response'}")
@@ -71,9 +68,21 @@ def close_position(position_id):
 
     data = r.json() if r.content else {}
 
-    # 4) Extract exit price + pnl from CLOSE RESPONSE
-    exit_price = data.get("closeLevel") or data.get("level")
-    pnl = data.get("profitLoss")
+    # ---------------------------------------------------------
+    # 3) Extract exit price + pnl from CLOSE RESPONSE
+    # ---------------------------------------------------------
+    exit_price = (
+        data.get("closeLevel")
+        or data.get("level")
+        or data.get("dealConfirmation", {}).get("closeLevel")
+        or None
+    )
+
+    pnl = (
+        data.get("profitLoss")
+        or data.get("dealConfirmation", {}).get("profitLoss")
+        or 0.0
+    )
 
     try:
         exit_price = float(exit_price)
@@ -87,7 +96,9 @@ def close_position(position_id):
 
     close_ts = timestamp()
 
-    # 5) Append CLOSED trade (same structure as old working log)
+    # ---------------------------------------------------------
+    # 4) Append CLOSED trade (exact old format)
+    # ---------------------------------------------------------
     log_close(
         ticker=ticker,
         epic=epic,
