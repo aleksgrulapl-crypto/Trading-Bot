@@ -1,7 +1,10 @@
-import pandas as pd
-from trade_log import load_raw_log, save_log
-import math
+# ============================
+# EXCEL IMPORT MODULE (UNIFIED FORMAT + SYNTHETIC DEALIDS)
+# ============================
 
+import pandas as pd
+import math
+from trade_log import load_raw_log, save_log
 
 COLUMN_MAP = {
     "trade_id": "Unnamed: 0",
@@ -30,7 +33,7 @@ COLUMN_MAP = {
 
 
 def _clean(value):
-    """Convert NaN → None, datetime → string, everything else unchanged."""
+    """Convert NaN → None, datetime → string."""
     if value is None:
         return None
     if isinstance(value, float) and math.isnan(value):
@@ -40,69 +43,59 @@ def _clean(value):
 
 def load_excel_trades(path="Trading Log 2026.xlsx"):
     """
-    Load trades from Excel 'Trade Log' sheet using manual column mapping.
-    Skip the first row because it contains header labels.
+    Load trades from Excel and convert them into the unified live trade format.
     """
     try:
         df = pd.read_excel(path, sheet_name="Trade Log", header=2)
     except Exception:
         return []
 
-    # Skip header row inside sheet
-    df = df.iloc[1:]
+    df = df.iloc[1:]  # skip header row inside sheet
 
     trades = []
 
     for _, row in df.iterrows():
         ticker = row.get(COLUMN_MAP["ticker"])
-        status = row.get(COLUMN_MAP["status"])
+        status_raw = row.get(COLUMN_MAP["status"])
 
-        if pd.isna(ticker) or pd.isna(status):
+        if pd.isna(ticker) or pd.isna(status_raw):
             continue
+
+        # Normalize status
+        status = str(status_raw).strip().upper()
+        if status not in ("OPEN", "CLOSED"):
+            status = "CLOSED" if row.get(COLUMN_MAP["exit_price"]) else "OPEN"
+
+        # Normalize direction
+        direction_raw = row.get(COLUMN_MAP["direction"])
+        side = str(direction_raw).upper() if isinstance(direction_raw, str) else None
 
         # PNL
         pnl_raw = row.get(COLUMN_MAP["pnl"])
         try:
             pnl = float(str(pnl_raw).replace("£", "").replace(",", "").strip())
         except Exception:
-            pnl = 0.0
+            pnl = None
 
-        direction = row.get(COLUMN_MAP["direction"])
-        side = direction.upper() if isinstance(direction, str) else direction
-
+        # Unified format entry
         entry = {
-            "time": _clean(row.get(COLUMN_MAP["close_ts"]) or row.get(COLUMN_MAP["open_ts"])),
-            "open_timestamp": _clean(row.get(COLUMN_MAP["open_ts"])),
-            "close_timestamp": _clean(row.get(COLUMN_MAP["close_ts"])),
-
+            "dealId": None,  # synthetic later
             "ticker": _clean(ticker),
-            "epic": _clean(ticker),
-            "side": _clean(side),
+            "side": side,
             "size": float(row.get(COLUMN_MAP["size"]) or 0),
+
+            "time_entered": _clean(row.get(COLUMN_MAP["open_ts"])),
+            "time_exited": _clean(row.get(COLUMN_MAP["close_ts"])),
 
             "entry_price": float(row.get(COLUMN_MAP["entry_price"]) or 0),
             "exit_price": float(row.get(COLUMN_MAP["exit_price"]) or 0),
-            "pnl": pnl,
 
+            "pnl": pnl,
+            "status": status,
+
+            # Optional fields preserved
             "sl": _clean(row.get(COLUMN_MAP["sl"])),
             "tp": _clean(row.get(COLUMN_MAP["tp"])),
-
-            "reason": _clean(row.get(COLUMN_MAP["reason"])),
-            "checklist_passed": _clean(row.get(COLUMN_MAP["checklist"])),
-            "close_source": _clean(row.get(COLUMN_MAP["close_source"])),
-            "status": _clean(status),
-            "notes": _clean(row.get(COLUMN_MAP["notes"])),
-            "fees": float(row.get(COLUMN_MAP["fees"]) or 0),
-
-            "trade_id": _clean(row.get(COLUMN_MAP["trade_id"])),
-            "currency": _clean(row.get(COLUMN_MAP["currency"])),
-            "platform": _clean(row.get(COLUMN_MAP["platform"])),
-
-            "cumulative_pnl": _clean(row.get(COLUMN_MAP["cumulative_pnl"])),
-            "running_peak": _clean(row.get(COLUMN_MAP["running_peak"])),
-            "drawdown": _clean(row.get(COLUMN_MAP["drawdown"])),
-
-            "trail": None,
             "timeframe": None,
         }
 
@@ -118,15 +111,27 @@ def import_excel_into_log(path="Trading Log 2026.xlsx"):
         return
 
     log = load_raw_log()
-    existing_ids = {t.get("trade_id") for t in log}
+
+    # Assign synthetic dealIds
+    existing_ids = {t.get("dealId") for t in log}
+    counter = 1
 
     added = 0
     for t in excel_trades:
-        tid = t.get("trade_id")
-        if tid in existing_ids:
-            continue
+        # Generate synthetic dealId
+        synthetic_id = f"excel_{counter:04d}"
+        counter += 1
+
+        # Ensure no collision
+        while synthetic_id in existing_ids:
+            synthetic_id = f"excel_{counter:04d}"
+            counter += 1
+
+        t["dealId"] = synthetic_id
+        existing_ids.add(synthetic_id)
+
         log.append(t)
         added += 1
 
     save_log(log)
-    print(f"[EXCEL IMPORT] Imported {added} Excel trades.")
+    print(f"[EXCEL IMPORT] Imported {added} Excel trades (unified format).")

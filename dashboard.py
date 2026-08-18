@@ -1,5 +1,5 @@
 # ============================
-# DASHBOARD MODULE (FINAL — DISK LOG + CLOSE BUTTON + NEW TIMESTAMP FORMAT)
+# DASHBOARD MODULE (CORRECTED — DISK LOG + CLOSE BUTTON + NEW TIMESTAMP FORMAT)
 # ============================
 
 import json
@@ -54,9 +54,12 @@ def normalize_trades(trades):
         # size
         t.setdefault("size", t.get("size") or "—")
 
-        # prices
-        t.setdefault("entry_price", t.get("entry_price") or "—")
-        t.setdefault("exit_price", t.get("exit_price") or "—")
+        # prices — preserve numeric values, only fill missing with "—"
+        if t.get("entry_price") is None:
+            t["entry_price"] = "—"
+
+        if t.get("exit_price") is None:
+            t["exit_price"] = "—"
 
         # pnl
         pnl = t.get("pnl", 0)
@@ -71,11 +74,11 @@ def normalize_trades(trades):
 
 
 # ---------------------------------------------------------
-# DEDUPE
+# DEDUPE (PREFER CLOSED OVER OPEN)
 # ---------------------------------------------------------
 
 def dedupe_trades(trades):
-    seen = set()
+    seen = {}
     unique = []
 
     for t in trades:
@@ -90,22 +93,31 @@ def dedupe_trades(trades):
                 str(t.get("entry_price")),
             )
 
-        if key not in seen:
-            seen.add(key)
+        existing_index = seen.get(key)
+
+        if existing_index is None:
+            # First time we see this key
+            seen[key] = len(unique)
             unique.append(t)
+        else:
+            # We already have an entry for this key
+            existing = unique[existing_index]
+            existing_status = existing.get("status")
+            new_status = t.get("status")
+
+            # Prefer CLOSED over OPEN
+            if existing_status != "CLOSED" and new_status == "CLOSED":
+                unique[existing_index] = t
 
     return unique
 
 
 # ---------------------------------------------------------
-# FILTER COMPLETED
+# FILTER COMPLETED (STATUS-BASED)
 # ---------------------------------------------------------
 
 def filter_completed(trades):
-    return [
-        t for t in trades
-        if t.get("status") == "CLOSED" or t.get("exit_price") not in (None, "—")
-    ]
+    return [t for t in trades if t.get("status") == "CLOSED"]
 
 
 # ---------------------------------------------------------
