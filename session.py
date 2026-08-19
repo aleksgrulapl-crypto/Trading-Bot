@@ -142,7 +142,8 @@ def enrich_positions(raw_positions):
         profit = pos.get("upl", 0)
 
         enriched.append({
-            "id": deal_id,                     # used by dashboard + close_position
+            "id": deal_id,
+            "dealReference": pos.get("dealReference"),                     # used by dashboard + close_position
             "ticker": ticker,
             "epic": market.get("epic"),
 

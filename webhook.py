@@ -247,7 +247,10 @@ def dashboard_home():
 @app.route("/close/<position_id>", methods=["POST"])
 def close_position_route(position_id):
     print(f"[DASHBOARD] Close requested for position_id={position_id}", flush=True)
-    result = close_position_module(position_id)
+    pos = _find_enriched_position(position_id)
+    deal_ref = pos.get("dealReference")
+    result = close_position_module(deal_ref)
+
     return jsonify(result), 200
 
 
