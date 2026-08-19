@@ -1,5 +1,5 @@
 # ============================
-# SCHEDULER MODULE (RESTORED — TrailSL ONLY)
+# SCHEDULER MODULE (LOCKED — TrailSL ONLY)
 # ============================
 
 import threading
@@ -26,8 +26,10 @@ def append_json_line(filename, entry):
 
 def log_available():
     try:
-        raw = session.get_account()
-        account = session.enrich_account(raw)
+        # Prevent scheduler from interfering with session during account fetch
+        with session.auth.lock:
+            raw = session.get_account()
+            account = session.enrich_account(raw)
 
         entry = {
             "timestamp": timestamp(),
@@ -42,8 +44,10 @@ def log_available():
 
 def log_equity():
     try:
-        raw = session.get_account()
-        account = session.enrich_account(raw)
+        # Prevent scheduler from interfering with session during account fetch
+        with session.auth.lock:
+            raw = session.get_account()
+            account = session.enrich_account(raw)
 
         entry = {
             "timestamp": timestamp(),
@@ -110,7 +114,9 @@ class Scheduler:
                     if now - job["last_run"] >= job["interval"]:
                         print(f"[Scheduler] Running interval job: {job['func'].__name__}")
                         try:
-                            job["func"]()
+                            # Lock session during TrailSL execution
+                            with session.auth.lock:
+                                job["func"]()
                             job["last_run"] = now
                         except Exception as e:
                             print(f"[Scheduler] Error running interval job {job['func'].__name__}: {e}")
@@ -121,7 +127,8 @@ class Scheduler:
                         if job["last_run"] != now_uk.date():
                             print(f"[Scheduler] Running daily job: {job['func'].__name__}")
                             try:
-                                job["func"]()
+                                with session.auth.lock:
+                                    job["func"]()
                                 job["last_run"] = now_uk.date()
                             except Exception as e:
                                 print(f"[Scheduler] Error running daily job {job['func'].__name__}: {e}")
@@ -132,7 +139,8 @@ class Scheduler:
                         if job["last_run"] != hour_key:
                             print(f"[Scheduler] Running hourly job: {job['func'].__name__}")
                             try:
-                                job["func"]()
+                                with session.auth.lock:
+                                    job["func"]()
                                 job["last_run"] = hour_key
                             except Exception as e:
                                 print(f"[Scheduler] Error running hourly job {job['func'].__name__}: {e}")
@@ -145,8 +153,8 @@ scheduler = Scheduler()
 
 
 def start_scheduler():
-    # Trail SL ONLY — no history import, no daily report
+    # Trail SL ONLY — locked for safety
     scheduler.add_interval_job(60, run_trailing_sl)
 
     scheduler.start()
-    print("[Scheduler] Started background scheduler (TrailSL only).")
+    print("[Scheduler] Started background scheduler (TrailSL only, locked).")

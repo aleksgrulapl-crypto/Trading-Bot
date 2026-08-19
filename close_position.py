@@ -1,5 +1,5 @@
 # ============================
-# CLOSE POSITION MODULE (FINAL — FIXED CFD CLOSE ENDPOINT)
+# CLOSE POSITION MODULE (LOCKED + CORRECT ENDPOINT FOR SHARES)
 # ============================
 
 import session
@@ -28,77 +28,82 @@ def _find_open_trade(deal_id):
 
 def close_position(position_id):
 
-    auth.ensure_token()
+    # Prevent scheduler from interfering with session during close
+    with auth.lock:
 
-    pos = _find_enriched_position(position_id)
-    open_trade = _find_open_trade(position_id)
+        auth.ensure_token()
 
-    ticker = pos.get("ticker") if pos else (open_trade.get("ticker") if open_trade else None)
-    epic = pos.get("epic") if pos else (open_trade.get("epic") if open_trade else None)
-    direction = pos.get("direction") if pos else (open_trade.get("side") if open_trade else None)
-    size = pos.get("size") if pos else (open_trade.get("size") if open_trade else None)
-    entry_price = pos.get("price") if pos else (open_trade.get("entry_price") if open_trade else None)
-    current_price = pos.get("current_price") if pos else None
+        pos = _find_enriched_position(position_id)
+        open_trade = _find_open_trade(position_id)
 
-    pnl = None
-    try:
-        if direction and entry_price is not None and current_price is not None and size is not None:
-            if direction.upper() == "BUY":
-                pnl = (current_price - entry_price) * float(size)
-            else:
-                pnl = (entry_price - current_price) * float(size)
-    except Exception as e:
-        print(f"[CLOSE] Failed to compute PnL: {e}", flush=True)
+        ticker = pos.get("ticker") if pos else (open_trade.get("ticker") if open_trade else None)
+        epic = pos.get("epic") if pos else (open_trade.get("epic") if open_trade else None)
+        direction = pos.get("direction") if pos else (open_trade.get("side") if open_trade else None)
+        size = pos.get("size") if pos else (open_trade.get("size") if open_trade else None)
+        entry_price = pos.get("price") if pos else (open_trade.get("entry_price") if open_trade else None)
+        current_price = pos.get("current_price") if pos else None
 
-    sl = open_trade.get("sl") if open_trade else None
-    tp = open_trade.get("tp") if open_trade else None
-    timeframe = open_trade.get("timeframe") if open_trade else None
-    time_entered = open_trade.get("time_entered") if open_trade else None
+        pnl = None
+        try:
+            if direction and entry_price is not None and current_price is not None and size is not None:
+                if direction.upper() == "BUY":
+                    pnl = (current_price - entry_price) * float(size)
+                else:
+                    pnl = (entry_price - current_price) * float(size)
+        except Exception as e:
+            print(f"[CLOSE] Failed to compute PnL: {e}", flush=True)
 
-    # --- NEW PRIMARY CFD CLOSE ENDPOINT ---
-    try:
-        url = f"{API_POSITIONS}/close-position"
-        payload = {"dealReference": position_id}
+        sl = open_trade.get("sl") if open_trade else None
+        tp = open_trade.get("tp") if open_trade else None
+        timeframe = open_trade.get("timeframe") if open_trade else None
+        time_entered = open_trade.get("time_entered") if open_trade else None
 
-        print(f"[CLOSE] URL → {url}", flush=True)
-        print(f"[CLOSE] PAYLOAD → {payload}", flush=True)
+        # ---------------------------------------------------------
+        # CORRECT CLOSE ENDPOINT FOR SHARES (instrumentType = SHARES)
+        # ---------------------------------------------------------
+        try:
+            url = f"{API_POSITIONS}/{position_id}/close"
 
-        response = session.request("PUT", url, json=payload)
+            print(f"[CLOSE] URL → {url}", flush=True)
 
-        if not response:
-            print("[CLOSE] No response from close-position", flush=True)
-            return {"status": "error", "message": "no_response"}
+            response = session.request("POST", url, json={})
 
-        print(f"[CLOSE] STATUS → {response.status_code}", flush=True)
-        print(f"[CLOSE] RESPONSE → {response.text}", flush=True)
+            if not response:
+                print("[CLOSE] No response from /close endpoint", flush=True)
+                return {"status": "error", "message": "no_response"}
 
-        if response.status_code != 200:
-            return {"status": "error", "message": response.text}
+            print(f"[CLOSE] STATUS → {response.status_code}", flush=True)
+            print(f"[CLOSE] RESPONSE → {response.text}", flush=True)
 
-    except Exception as e:
-        print(f"[CLOSE] Exception: {e}", flush=True)
-        return {"status": "error", "message": str(e)}
+            if response.status_code != 200:
+                return {"status": "error", "message": response.text}
 
-    # --- Log CLOSED trade ---
-    try:
-        log_closed_trade(
-            ticker=ticker,
-            epic=epic,
-            deal_id=position_id,
-            side=direction,
-            size=size,
-            entry_price=entry_price,
-            exit_price=current_price,
-            pnl=pnl,
-            sl=sl,
-            tp=tp,
-            timeframe=timeframe,
-            time_entered=time_entered,
-            timestamp=timestamp()
-        )
-    except Exception as e:
-        print(f"[CLOSE] Failed to log CLOSED trade: {e}", flush=True)
+        except Exception as e:
+            print(f"[CLOSE] Exception: {e}", flush=True)
+            return {"status": "error", "message": str(e)}
 
-    session.update_last_trade()
+        # ---------------------------------------------------------
+        # LOG CLOSED TRADE
+        # ---------------------------------------------------------
+        try:
+            log_closed_trade(
+                ticker=ticker,
+                epic=epic,
+                deal_id=position_id,
+                side=direction,
+                size=size,
+                entry_price=entry_price,
+                exit_price=current_price,
+                pnl=pnl,
+                sl=sl,
+                tp=tp,
+                timeframe=timeframe,
+                time_entered=time_entered,
+                timestamp=timestamp()
+            )
+        except Exception as e:
+            print(f"[CLOSE] Failed to log CLOSED trade: {e}", flush=True)
 
-    return {"status": "success", "message": f"Position {position_id} closed."}
+        session.update_last_trade()
+
+        return {"status": "success", "message": f"Position {position_id} closed."}
