@@ -1,108 +1,130 @@
 # ============================
-# CLOSE POSITION MODULE (EXECUTION-BASED LOGGING)
+# CLOSE POSITION MODULE (CORRECTED — USE ENRICHED POSITION + TRADE LOG)
 # ============================
 
 import session
 from auth import auth
-from trade_log import log_closed_trade
+from trade_log import load_raw_log, log_closed_trade
 from utils import timestamp
 from config import API_POSITIONS
-import time
 
 
-def close_position(deal_id):
+def _find_enriched_position(position_id):
+    """
+    Find the enriched position (from session.enrich_positions)
+    matching the given position_id (dealId).
+    """
+    raw_positions = session.get_positions() or []
+    enriched = session.enrich_positions(raw_positions) or []
+
+    for p in enriched:
+        if str(p.get("id")) == str(position_id):
+            return p
+
+    return None
+
+
+def _find_open_trade(deal_id):
+    """
+    Find the last OPEN trade in the log matching the given dealId.
+    """
+    log = load_raw_log() or []
+
+    for entry in reversed(log):
+        if entry.get("status") == "OPEN" and str(entry.get("dealId")) == str(deal_id):
+            return entry
+
+    return None
+
+
+def close_position(position_id):
     """
     Close a position using Capital.com API and log a CLOSED trade
-    using execution data from the close response (exit price + realised PnL).
+    in unified format, using both the current position snapshot
+    and the existing OPEN trade from the log.
     """
 
     auth.ensure_token()
 
+    # Snapshot BEFORE closing (for price/pnl)
+    pos = _find_enriched_position(position_id)
+
+    if not pos:
+        print(f"[CLOSE] No enriched position found for id={position_id}", flush=True)
+
+    # Try to find matching OPEN trade in the log
+    open_trade = _find_open_trade(position_id)
+
+    # Prepare fields for logging
+    ticker = pos.get("ticker") if pos else (open_trade.get("ticker") if open_trade else None)
+    epic = pos.get("epic") if pos else (open_trade.get("epic") if open_trade else None)
+    direction = pos.get("direction") if pos else (open_trade.get("side") if open_trade else None)
+    size = pos.get("size") if pos else (open_trade.get("size") if open_trade else None)
+    entry_price = pos.get("price") if pos else (open_trade.get("entry_price") if open_trade else None)
+
+    current_price = pos.get("current_price") if pos else None
+
+    # Compute pnl if we have enough data
+    pnl = None
     try:
-        # Snapshot current positions to get context (ticker, epic, size, SL/TP)
-        raw_positions = session.get_positions() or []
-        enriched_positions = session.enrich_positions(raw_positions)
+        if direction and entry_price is not None and current_price is not None and size is not None:
+            if direction.upper() == "BUY":
+                pnl = (current_price - entry_price) * float(size)
+            else:
+                pnl = (entry_price - current_price) * float(size)
+    except Exception as e:
+        print(f"[CLOSE] Failed to compute PnL: {e}", flush=True)
 
-        context = None
-        for p in enriched_positions:
-            if str(p.get("id")) == str(deal_id):
-                context = p
-                break
+    # SL/TP/timeframe/time_entered from open trade if available
+    sl = open_trade.get("sl") if open_trade else None
+    tp = open_trade.get("tp") if open_trade else None
+    timeframe = open_trade.get("timeframe") if open_trade else None
+    time_entered = open_trade.get("time_entered") if open_trade else None
 
-        if not context:
-            print(f"[WARN] No context found for dealId {deal_id} before close.", flush=True)
-
-        # Correct endpoint: close by dealId
-        url = f"{API_POSITIONS}/{deal_id}/close"
-
-        # Capital.com typically accepts an empty JSON body for this
+    # --- Call Capital.com close endpoint ---
+    try:
+        url = f"{API_POSITIONS}/{position_id}/close"
         response = session.request("POST", url, json={})
 
         if not response or response.status_code != 200:
-            print(f"[ERROR] Failed to close position {deal_id}", flush=True)
+            print(f"[ERROR] Failed to close position {position_id}", flush=True)
+            print(f"[ERROR] Response: {response.text if response else 'No response'}", flush=True)
             return {
                 "status": "error",
-                "message": f"Failed to close position: {response.text if response else 'No response'}",
+                "message": f"Failed to close position {position_id}"
             }
 
-        # Parse execution details from response
-        try:
-            data = response.json()
-        except Exception as e:
-            print(f"[ERROR] Failed to parse close response for {deal_id}: {e}", flush=True)
-            data = {}
+    except Exception as e:
+        print(f"[ERROR] Exception during close for {position_id}: {e}", flush=True)
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
-        exit_price = data.get("closeLevel") or data.get("level") or None
-        pnl = data.get("profitLoss") or data.get("pnl") or None
-
-        # Fallbacks from context if response is incomplete
-        ticker = context.get("ticker") if context else None
-        epic = context.get("epic") if context else None
-        size = context.get("size") if context else None
-        sl = context.get("stopLevel") if context else None
-        tp = context.get("limitLevel") if context else None
-
-        ts = timestamp()
-
+    # --- Log CLOSED trade in unified format ---
+    try:
         log_closed_trade(
             ticker=ticker,
             epic=epic,
-            deal_id=deal_id,
-            side="CLOSE",
+            deal_id=position_id,
+            side=direction,
             size=size,
-            entry_price=None,
-            exit_price=exit_price,
+            entry_price=entry_price,
+            exit_price=current_price,
             pnl=pnl,
             sl=sl,
             tp=tp,
-            timeframe=None,
-            time_entered=None,
-            timestamp=ts,
+            timeframe=timeframe,
+            time_entered=time_entered,
+            timestamp=timestamp()
         )
-
-        print(f"[TRADE CLOSED] {ticker} @ {exit_price} → PnL £{pnl}", flush=True)
-
-        # Refresh shared state (positions will no longer include this dealId)
-        time.sleep(0.2)
-        session.shared_state["positions"] = session.enrich_positions(session.get_positions() or [])
-        session.shared_state["account"] = session.enrich_account(session.get_account() or {})
-        session.shared_state["trade_log"] = session.shared_state["trade_log"]
-        session.shared_state["daily_report"] = session.get_daily_report()
-
-        session.update_last_trade()
-
-        return {
-            "status": "success",
-            "ticker": ticker,
-            "size": size,
-            "price": exit_price,
-            "pnl": pnl,
-            "message": f"Position {deal_id} closed.",
-        }
-
     except Exception as e:
-        print(f"[ERROR] Exception closing position {deal_id}: {e}", flush=True)
-        return {
-            "status": "error",
-            "message": str(e),
-        }
+        print(f"[CLOSE] Failed to log CLOSED trade for {position_id}: {e}", flush=True)
+
+    # Update system status
+    session.update_last_trade()
+
+    return {
+        "status": "success",
+        "message": f"Position {position_id} closed."
+    }

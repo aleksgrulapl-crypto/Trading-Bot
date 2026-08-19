@@ -1,5 +1,5 @@
 # ============================
-# ORDER MODULE (CORRECTED — REAL DEALID MAPPING)
+# ORDER MODULE (ROBUST DEALID MAPPING + UNIFIED OPEN LOGGING)
 # ============================
 
 import time
@@ -13,7 +13,7 @@ from trade_log import log_open_trade
 def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
     """
     Place a BUY/SELL market order and log an OPEN trade
-    using the REAL Capital.com dealId (not dealReference).
+    in unified format, with robust dealId mapping.
     """
 
     auth.ensure_token()
@@ -71,31 +71,31 @@ def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
     print(f"[TRADE] dealReference: {deal_ref}", flush=True)
 
     # ---------------------------------------------------------
-    # 4. WAIT FOR POSITION TO APPEAR
-    # ---------------------------------------------------------
-    time.sleep(0.4)
-
-    raw_positions = session.get_positions() or []
-    enriched_positions = session.enrich_positions(raw_positions)
-
-    # ---------------------------------------------------------
-    # 5. MATCH dealReference → REAL dealId
+    # 4. ROBUST DEALID MAPPING (RETRY WINDOW)
     # ---------------------------------------------------------
     real_deal_id = None
 
-    for item in raw_positions:
-        pos = item.get("position", {})
-        if pos.get("dealReference") == deal_ref:
-            real_deal_id = pos.get("dealId")
+    for attempt in range(20):  # 20 × 0.15s ≈ 3 seconds
+        time.sleep(0.15)
+
+        raw_positions = session.get_positions() or []
+
+        for item in raw_positions:
+            pos = item.get("position", {})
+            if pos.get("dealReference") == deal_ref:
+                real_deal_id = pos.get("dealId")
+                break
+
+        if real_deal_id:
             break
 
-    if not real_deal_id:
-        print("[WARN] Could not map dealReference → dealId. Logging OPEN trade with dealId=None.", flush=True)
-    else:
+    if real_deal_id:
         print(f"[ORDER] Mapped dealReference → dealId: {real_deal_id}", flush=True)
+    else:
+        print("[WARN] Could not map dealReference → dealId after retries. Logging OPEN trade with dealId=None.", flush=True)
 
     # ---------------------------------------------------------
-    # 6. LOG OPEN TRADE (NOW WITH REAL dealId)
+    # 5. LOG OPEN TRADE (UNIFIED FORMAT)
     # ---------------------------------------------------------
     ts = timestamp()
 

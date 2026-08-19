@@ -1,8 +1,7 @@
 # ============================
-# SESSION MODULE (FULL RAW DEBUG + DEALID AS ID)
+# SESSION MODULE (CORRECTED — STABLE POSITION PIPELINE)
 # ============================
 
-import requests
 import time
 import pprint
 from auth import auth
@@ -11,7 +10,7 @@ from utils import timestamp
 import report
 
 # ---------------------------------------------------------
-# CLEAN SHARED STATE ON STARTUP
+# SHARED STATE
 # ---------------------------------------------------------
 
 shared_state = {
@@ -66,10 +65,21 @@ def request(method, url, json=None):
 
 
 # ---------------------------------------------------------
-# GET POSITIONS (FULL RAW DEBUG)
+# GET POSITIONS (RAW)
 # ---------------------------------------------------------
 
 def get_positions():
+    """
+    Fetch raw positions from Capital.com.
+    Returns the raw API structure:
+    [
+        {
+            "position": {...},
+            "market": {...}
+        },
+        ...
+    ]
+    """
     url = f"{API_POSITIONS}?includeProfitLoss=true"
     response = request("GET", url)
 
@@ -81,7 +91,7 @@ def get_positions():
         positions = data.get("positions", [])
 
         if positions:
-            print("\n[DEBUG] FULL RAW POSITION OBJECT:")
+            print("\n[DEBUG] RAW POSITION SAMPLE:")
             pprint.pprint(positions[0], width=200)
             print("\n")
 
@@ -93,37 +103,42 @@ def get_positions():
 
 
 # ---------------------------------------------------------
-# ENRICH POSITIONS (ID = dealId)
+# ENRICH POSITIONS (DASHBOARD FORMAT)
 # ---------------------------------------------------------
 
 def enrich_positions(raw_positions):
+    """
+    Convert raw Capital.com positions into dashboard-friendly objects.
+    ID = dealId (correct for closing).
+    """
     enriched = []
 
     for item in raw_positions:
         pos = item.get("position", {})
         market = item.get("market", {})
 
-        position_id = pos.get("dealId")
-
+        deal_id = pos.get("dealId")
         ticker = market.get("symbol")
         direction = pos.get("direction")
         size = pos.get("size")
         entry_price = pos.get("level")
 
+        # Current price depends on direction
+        current_price = (
+            market.get("bid") if direction == "SELL"
+            else market.get("offer")
+        )
+
         profit = pos.get("upl", 0)
 
         enriched.append({
-            "id": position_id,
+            "id": deal_id,                     # used by dashboard + close_position
             "ticker": ticker,
             "epic": market.get("epic"),
 
             "size": size,
             "price": entry_price,
-
-            "current_price": (
-                market.get("bid") if direction == "SELL"
-                else market.get("offer")
-            ),
+            "current_price": current_price,
 
             "direction": direction,
             "profit": round(profit, 2),
@@ -133,6 +148,7 @@ def enrich_positions(raw_positions):
 
             "currency": pos.get("currency"),
 
+            # Used for dedupe / debugging
             "signature": f"{ticker}|{direction}|{size}|{entry_price}"
         })
 
@@ -241,16 +257,11 @@ def get_daily_report():
 
 
 # ---------------------------------------------------------
-# UPDATE LAST TRADE
+# UPDATE LAST TRADE / WEBHOOK
 # ---------------------------------------------------------
 
 def update_last_trade():
     shared_state["system_status"]["last_trade"] = timestamp()
-
-
-# ---------------------------------------------------------
-# UPDATE LAST WEBHOOK
-# ---------------------------------------------------------
 
 def update_last_webhook():
     shared_state["system_status"]["last_webhook"] = timestamp()
