@@ -1,9 +1,10 @@
 # ============================
-# SESSION MODULE (RESET + CORRECT CLOSE ID)
+# SESSION MODULE (RESET + FULL RAW DEBUG)
 # ============================
 
 import requests
 import time
+import pprint
 from auth import auth
 from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
 from utils import timestamp
@@ -65,7 +66,7 @@ def request(method, url, json=None):
 
 
 # ---------------------------------------------------------
-# GET POSITIONS
+# GET POSITIONS (FULL RAW DEBUG ADDED)
 # ---------------------------------------------------------
 
 def get_positions():
@@ -77,14 +78,23 @@ def get_positions():
 
     try:
         data = response.json()
-        return data.get("positions", [])
+        positions = data.get("positions", [])
+
+        # ⭐ FULL RAW DEBUG — prints entire object, not just "position"
+        if positions:
+            print("\n[DEBUG] FULL RAW POSITION OBJECT:")
+            pprint.pprint(positions[0], width=200)
+            print("\n")
+
+        return positions
+
     except Exception as e:
         print(f"[SESSION] Failed to parse positions: {e}", flush=True)
         return []
 
 
 # ---------------------------------------------------------
-# ENRICH POSITIONS (CORRECT CLOSE ID + SIGNATURE)
+# ENRICH POSITIONS (TEMPORARY — WILL UPDATE AFTER DEBUG)
 # ---------------------------------------------------------
 
 def enrich_positions(raw_positions):
@@ -94,7 +104,8 @@ def enrich_positions(raw_positions):
         pos = item.get("position", {})
         market = item.get("market", {})
 
-        position_id = pos.get("dealId")  # ✔ correct close ID
+        # TEMPORARY — we will replace this once we see the real close ID
+        position_id = pos.get("dealId")
 
         ticker = market.get("symbol")
         direction = pos.get("direction")
