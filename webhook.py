@@ -148,45 +148,55 @@ def webhook():
 
 @app.route("/debug/tokens")
 def debug_tokens():
-    auth.ensure_token()
-    return {
-        "api_key": auth.api_key,
-        "cst": auth.cst,
-        "xst": auth.xst
-    }
+    try:
+        auth.ensure_token()
+        return jsonify({
+            "api_key": auth.api_key,
+            "cst": auth.cst,
+            "xst": auth.xst
+        }), 200
+    except Exception as e:
+        print(f"[DEBUG] ensure_token failed: {e}", flush=True)
+        return jsonify({"error": "ensure_token_failed", "details": str(e)}), 500
 
 
 @app.route("/debug/epic/<symbol>")
 def debug_epic(symbol):
-    return session.verify_epic(symbol)
+    data = session.verify_epic(symbol)
+    return jsonify(data), 200
 
 
 @app.route("/debug/market/<epic>")
 def debug_market(epic):
     r = session.request("GET", f"{API_MARKET}/{epic}")
-    return r.json() if r else {"error": "no response"}
+    if not r:
+        return jsonify({"error": "no response"}), 500
+    return jsonify(r.json()), 200
 
 
 @app.route("/debug/positions")
 def debug_positions():
     raw = session.get_positions()
     enriched = session.enrich_positions(raw)
-    return {"raw": raw, "enriched": enriched}
+    return jsonify({"raw": raw, "enriched": enriched}), 200
 
 
 @app.route("/debug/sizing/<symbol>/<action>/<price>/<sl>/<tp>")
 def debug_sizing(symbol, action, price, sl, tp):
-    return calculate_size(
+    info = calculate_size(
         entry_price=float(price),
         sl_price=float(sl),
         tp_price=float(tp),
         direction=action
     )
+    return jsonify(info), 200
 
 
 @app.route("/debug/order/<epic>/<action>/<size>")
 def debug_order(epic, action, size):
-    return place_order(epic, action, float(size))
+    result = place_order(epic, action, float(size))
+    return jsonify(result), 200
+
 
 
 # ============================
