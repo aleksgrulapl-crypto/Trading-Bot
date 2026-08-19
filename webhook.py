@@ -198,6 +198,32 @@ def debug_order(epic, action, size):
     result = place_order(epic, action, float(size))
     return jsonify(result), 200
 
+@app.route("/debug/close-test/<deal_id>", methods=["GET"])
+def debug_close_test(deal_id):
+    from config import API_POSITIONS
+
+    # 1) Try POST /positions/{dealId}/close
+    url1 = f"{API_POSITIONS}/{deal_id}/close"
+    print(f"[TEST] POST {url1}", flush=True)
+    r1 = session.request("POST", url1, json={})
+    s1 = r1.status_code if r1 else None
+    t1 = r1.text if r1 else None
+
+    # 2) Try PUT /positions/close-position with both fields
+    url2 = f"{API_POSITIONS}/close-position"
+    payload = {
+        "dealId": deal_id,
+        "dealReference": f"p_{deal_id}",
+    }
+    print(f"[TEST] PUT {url2} payload={payload}", flush=True)
+    r2 = session.request("PUT", url2, json=payload)
+    s2 = r2.status_code if r2 else None
+    t2 = r2.text if r2 else None
+
+    return jsonify({
+        "post_close": {"status": s1, "body": t1},
+        "put_close_position": {"status": s2, "body": t2},
+    }), 200
 
 # ============================
 # RAW + DASHBOARD
