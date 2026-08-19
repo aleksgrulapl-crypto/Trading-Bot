@@ -1,5 +1,5 @@
 # ============================
-# CLOSE POSITION MODULE (UNIFIED CLOSED LOGGING)
+# CLOSE POSITION MODULE (CFD-CORRECT ENDPOINT)
 # ============================
 
 import session
@@ -9,40 +9,49 @@ from utils import timestamp
 from config import API_POSITIONS
 
 
-def close_position(position_id):
+def close_position(deal_id):
     """
-    Close a position using Capital.com API and log a CLOSED trade
-    as a separate row in unified format. No merging with OPEN.
+    Correct CFD close:
+    POST /positions/close
+    Payload: { "dealId": "<dealId>" }
     """
 
     auth.ensure_token()
 
     try:
-        url = f"{API_POSITIONS}/{position_id}/close"
-        response = session.request("POST", url, json={})
+        # ⭐ Correct CFD endpoint
+        url = f"{API_POSITIONS}/close"
+
+        # ⭐ Correct CFD payload
+        payload = {"dealId": deal_id}
+
+        response = session.request("POST", url, json=payload)
 
         if not response or response.status_code != 200:
-            print(f"[ERROR] Failed to close position {position_id}", flush=True)
+            print(f"[ERROR] Failed to close position {deal_id}", flush=True)
             return {
                 "status": "error",
                 "message": f"Failed to close position: {response.text if response else 'No response'}",
             }
 
+        # Refresh positions
         raw_positions = session.get_positions()
         enriched_positions = session.enrich_positions(raw_positions)
 
+        # Find closed position details
         closed = None
         for p in enriched_positions:
-            if str(p["id"]) == str(position_id):
+            if str(p.get("dealId")) == str(deal_id) or str(p.get("id")) == str(deal_id):
                 closed = p
                 break
 
+        # If not found, still return success
         if not closed:
-            print(f"[WARN] Closed position {position_id} not found in updated list.", flush=True)
+            print(f"[WARN] Closed position {deal_id} not found in updated list.", flush=True)
             session.update_last_trade()
             return {
                 "status": "success",
-                "message": f"Position {position_id} closed (details unavailable).",
+                "message": f"Position {deal_id} closed (details unavailable).",
             }
 
         ticker = closed.get("ticker")
@@ -53,11 +62,10 @@ def close_position(position_id):
 
         ts = timestamp()
 
-        # We don't have entry_price/time_entered from positions; leave them None.
         log_closed_trade(
             ticker=ticker,
             epic=epic,
-            deal_id=None,
+            deal_id=deal_id,
             side="CLOSE",
             size=size,
             entry_price=None,
@@ -85,11 +93,11 @@ def close_position(position_id):
             "size": size,
             "price": exit_price,
             "pnl": pnl,
-            "message": f"Position {position_id} closed.",
+            "message": f"Position {deal_id} closed.",
         }
 
     except Exception as e:
-        print(f"[ERROR] Exception closing position {position_id}: {e}", flush=True)
+        print(f"[ERROR] Exception closing position {deal_id}: {e}", flush=True)
         return {
             "status": "error",
             "message": str(e),
