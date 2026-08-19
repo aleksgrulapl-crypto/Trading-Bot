@@ -13,6 +13,8 @@ from utils import timestamp
 
 from trail_sl import run_trailing_sl
 
+from history_sync import sync_closed_trades
+
 UK_TZ = pytz.timezone("Europe/London")
 
 
