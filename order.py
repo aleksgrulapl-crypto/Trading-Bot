@@ -71,14 +71,16 @@ def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
     print(f"[TRADE] dealReference: {deal_ref}", flush=True)
 
     # ---------------------------------------------------------
-    # 4. ROBUST DEALID MAPPING (RETRY WINDOW)
+    # 4. ROBUST DEALID MAPPING (RAW POSITIONS — FIXED)
     # ---------------------------------------------------------
     real_deal_id = None
 
     for attempt in range(20):  # 20 × 0.15s ≈ 3 seconds
         time.sleep(0.15)
 
-        raw_positions = session.get_positions() or []
+        # ⭐ FIX: Fetch RAW positions, not enriched ones
+        raw = session.request("GET", API_POSITIONS)
+        raw_positions = raw.json().get("positions", []) if raw else []
 
         for item in raw_positions:
             pos = item.get("position", {})
