@@ -12,7 +12,7 @@ from parser import parse_tradingview_alert
 from sizing import calculate_size
 from order import place_order
 from auth import auth
-from config import API_ACCOUNTS, API_MARKET
+from config import API_ACCOUNTS, API_MARKET, API_BASE
 from dashboard import dashboard as dashboard_blueprint
 from scheduler import start_scheduler
 from trade_log import load_raw_log
@@ -246,6 +246,25 @@ def debug_history3():
     url = f"{API_BASE}/api/v1/history/activity"
     r = session.request("GET", url)
     return jsonify(r.json() if r else {"error": "no response"}), 200
+
+@app.route("/debug/history4")
+def debug_history4():
+    url = f"{API_BASE}/api/v1/history/transactions?type=POSITION&max=200"
+    r = session.request("GET", url)
+    return jsonify(r.json() if r else {"error": "no response"}), 200
+
+@app.route("/debug/history5")
+def debug_history5():
+    url = f"{API_BASE}/api/v1/history/transactions?types=POSITION"
+    r = session.request("GET", url)
+    return jsonify(r.json() if r else {"error": "no response"}), 200
+
+@app.route("/debug/history6")
+def debug_history6():
+    url = f"{API_BASE}/api/v1/history/activity?max=200"
+    r = session.request("GET", url)
+    return jsonify(r.json() if r else {"error": "no response"}), 200
+
 
 # ============================
 # RAW + DASHBOARD
