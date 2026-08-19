@@ -34,6 +34,10 @@ def close_position(deal_id):
                 "message": f"Failed to close position: {response.text if response else 'No response'}",
             }
 
+        # ⭐ Allow Capital.com to update the position list
+        import time
+        time.sleep(0.5)
+
         # Refresh positions
         raw_positions = session.get_positions()
         enriched_positions = session.enrich_positions(raw_positions)

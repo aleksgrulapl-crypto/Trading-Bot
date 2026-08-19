@@ -103,8 +103,8 @@ def enrich_positions(raw_positions):
         pos = item.get("position", {})
         market = item.get("market", {})
 
-        # ⭐ Correct close ID
-        position_id = pos.get("workingOrderId")
+        # ⭐ Correct CFD close ID
+        position_id = pos.get("dealId")
 
         ticker = market.get("symbol")
         direction = pos.get("direction")
@@ -114,7 +114,7 @@ def enrich_positions(raw_positions):
         profit = pos.get("upl", 0)
 
         enriched.append({
-            "id": position_id,  # ⭐ correct close ID
+            "id": position_id,  # ⭐ now correct
             "ticker": ticker,
             "epic": market.get("epic"),
 
