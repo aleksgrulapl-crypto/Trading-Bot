@@ -229,6 +229,23 @@ def debug_close_test(deal_id):
         "put_close_position": {"status": s2, "body": t2},
     }), 200
 
+@app.route("/debug/history")
+def debug_history():
+    from config import API_HISTORY_TRANSACTIONS
+    r = session.request("GET", f"{API_HISTORY_TRANSACTIONS}?max=200")
+    return jsonify(r.json() if r else {"error": "no response"}), 200
+
+@app.route("/debug/history2")
+def debug_history2():
+    url = f"{API_BASE}/api/v1/history/positions"
+    r = session.request("GET", url)
+    return jsonify(r.json() if r else {"error": "no response"}), 200
+
+@app.route("/debug/history3")
+def debug_history3():
+    url = f"{API_BASE}/api/v1/history/activity"
+    r = session.request("GET", url)
+    return jsonify(r.json() if r else {"error": "no response"}), 200
 
 # ============================
 # RAW + DASHBOARD
