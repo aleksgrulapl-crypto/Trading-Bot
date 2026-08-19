@@ -1,5 +1,5 @@
 # ============================
-# SYNC CLOSED TRADES (STABLE VERSION)
+# SYNC CLOSED TRADES (PATCHED + STABLE)
 # ============================
 
 import time
@@ -8,8 +8,9 @@ from trade_log import load_raw_log, log_closed_trade
 from utils import timestamp
 from config import API_MARKET
 
-_last_close_cache = {}       # dealId → True (prevents double logging)
-_snapshot_cache = {}         # epic → (bid, offer, ts)
+_last_positions = set()       # previous cycle positions
+_last_close_cache = {}        # dealId → True (debounce)
+_snapshot_cache = {}          # epic → (bid, offer, ts)
 
 
 def get_snapshot(epic):
@@ -19,14 +20,16 @@ def get_snapshot(epic):
     """
     now = time.time()
 
+    # Use cached snapshot if fresh
     if epic in _snapshot_cache:
         bid, offer, ts = _snapshot_cache[epic]
         if now - ts < 3:
             return bid, offer
 
+    # Fetch fresh snapshot
     r = session.request("GET", f"{API_MARKET}/{epic}")
     if not r or r.status_code != 200:
-        print(f"[SYNC] Market snapshot unavailable for {epic}")
+        print(f"[SYNC] Snapshot unavailable for {epic}")
         return None, None
 
     snapshot = r.json().get("snapshot", {})
@@ -43,21 +46,35 @@ def get_snapshot(epic):
 
 def sync_closed_trades():
     """
-    Detect CLOSED trades by disappearance.
-    Compute exit price using cached market snapshot.
-    Prevent double logging.
+    Detect CLOSED trades safely:
+    - Protect against rate limits
+    - Protect against empty /positions
+    - Protect against instant open→close bugs
+    - Protect against snapshot failures
+    - Prevent duplicate CLOSED logs
     """
 
+    global _last_positions
+
+    # Load trade log
     log = load_raw_log()
     open_trades = [t for t in log if t.get("status") == "OPEN"]
 
     if not open_trades:
         return
 
-    raw_positions = session.get_positions() or []
-    enriched_positions = session.enrich_positions(raw_positions) or []
-    live_ids = set(str(p.get("id")) for p in enriched_positions)
+    # Fetch current positions
+    raw_positions = session.get_positions()
 
+    # Rate-limit or empty response → skip cycle
+    if raw_positions is None or raw_positions == []:
+        print("[SYNC] Positions unavailable (rate limit) → skipping")
+        return
+
+    enriched_positions = session.enrich_positions(raw_positions) or []
+    current_positions = set(str(p.get("id")) for p in enriched_positions)
+
+    # Process each open trade
     for trade in open_trades:
         deal_id = str(trade.get("dealId"))
 
@@ -66,10 +83,20 @@ def sync_closed_trades():
             continue
 
         # Still open → skip
-        if deal_id in live_ids:
+        if deal_id in current_positions:
             continue
 
-        # CLOSED detected
+        # Only treat disappearance as close if it existed previously
+        if deal_id not in _last_positions:
+            continue
+
+        # Prevent instant open→close bugs
+        time_entered = trade.get("time_entered")
+        if timestamp() - time_entered < 3:
+            print("[SYNC] Trade too new → ignoring disappearance")
+            continue
+
+        # Fetch snapshot
         epic = trade.get("epic")
         direction = trade.get("side")
         size = float(trade.get("size"))
@@ -77,10 +104,13 @@ def sync_closed_trades():
 
         bid, offer = get_snapshot(epic)
         if bid is None or offer is None:
+            print("[SYNC] Snapshot unavailable → skipping close detection")
             continue
 
+        # Compute exit price
         exit_price = offer if direction.lower() == "buy" else bid
 
+        # Compute PnL
         if direction.lower() == "buy":
             pnl = (exit_price - entry_price) * size
         else:
@@ -88,6 +118,7 @@ def sync_closed_trades():
 
         print(f"[SYNC] CLOSED detected → epic={epic}, exit={exit_price}, pnl={pnl}")
 
+        # Log CLOSED trade
         log_closed_trade(
             ticker=trade.get("ticker"),
             epic=epic,
@@ -100,9 +131,12 @@ def sync_closed_trades():
             sl=trade.get("sl"),
             tp=trade.get("tp"),
             timeframe=trade.get("timeframe"),
-            time_entered=trade.get("time_entered"),
+            time_entered=time_entered,
             timestamp=timestamp()
         )
 
-        # Prevent double logging
+        # Debounce
         _last_close_cache[deal_id] = True
+
+    # Update previous positions
+    _last_positions = current_positions.copy()
