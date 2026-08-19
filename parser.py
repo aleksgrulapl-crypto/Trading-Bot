@@ -1,5 +1,5 @@
 # ============================
-# TradingView Alert Parser (STRICT + EXIT-SIGNAL BLOCKING)
+# TradingView Alert Parser (STRICT + EXIT-SIGNAL BLOCKING + NORMALIZED TF)
 # ============================
 
 PLACEHOLDER_VALUES = {"{{alert_message}}", "", None}
@@ -31,27 +31,18 @@ def parse_tradingview_alert(data):
 # ============================
 
 def parse_raw_alert_strict(raw: str):
-    """
-    Expected clean format:
-    BUY|NVDA|SL:123|TP:130|TF:5M
-    """
-
     if raw in PLACEHOLDER_VALUES:
         return block_alert("placeholder_payload", raw=raw)
 
     parts = raw.split("|")
-
     if len(parts) < 4:
         return block_alert("malformed_raw_alert", raw=raw)
 
     # Direction
     direction_raw = parts[0].strip().lower()
-
-    # Ignore exit signals entirely
     if direction_raw.startswith("exit"):
         return block_alert("ignored_exit_signal", raw=raw)
 
-    # Normal BUY/SELL
     direction = direction_raw.split(" ")[0]
     if direction not in ("buy", "sell"):
         return block_alert("missing_direction", raw=raw)
@@ -65,7 +56,6 @@ def parse_raw_alert_strict(raw: str):
     tp = None
     timeframe = None
 
-    # Parse SL/TP/TF from any position
     for part in parts:
         part = part.strip()
 
@@ -76,7 +66,7 @@ def parse_raw_alert_strict(raw: str):
             tp = safe_float_or_none(part.replace("TP:", "").strip())
 
         elif part.upper().startswith("TF:"):
-            timeframe = part.replace("TF:", "").strip().upper()
+            timeframe = normalize_timeframe(part.replace("TF:", "").strip())
 
     if sl is None or tp is None:
         return block_alert("missing_sl_tp", raw=raw)
@@ -103,13 +93,11 @@ def parse_json_alert_strict(data):
     quantity = safe_float_or_none(data.get("quantity", 1))
     payload_raw = data.get("payload")
 
-    # Ignore exit signals
     if direction_raw.startswith("exit"):
         return block_alert("ignored_exit_signal", raw=data)
 
     direction = direction_raw.split(" ")[0]
 
-    # Basic validation
     if not symbol:
         return block_alert("missing_symbol", raw=data)
 
@@ -119,18 +107,16 @@ def parse_json_alert_strict(data):
     if quantity is None:
         return block_alert("invalid_quantity", raw=data)
 
-    # Payload validation
     if payload_raw in PLACEHOLDER_VALUES:
         return block_alert("placeholder_payload", raw=data)
 
-    # Parse payload
     try:
         payload = parse_payload_strict(payload_raw)
     except Exception:
         return block_alert("malformed_payload", raw=data)
 
-    sl = payload.get("sl")
-    tp = payload.get("tp")
+    sl = safe_float_or_none(payload.get("sl"))
+    tp = safe_float_or_none(payload.get("tp"))
 
     if sl is None or tp is None:
         return block_alert("missing_sl_tp", raw=data)
@@ -142,7 +128,7 @@ def parse_json_alert_strict(data):
         "quantity": quantity,
         "sl": sl,
         "tp": tp,
-        "timeframe": payload.get("timeframe"),
+        "timeframe": normalize_timeframe(payload.get("timeframe")),
         "raw": payload_raw
     }
 
@@ -152,22 +138,14 @@ def parse_json_alert_strict(data):
 # ============================
 
 def parse_payload_strict(payload: str):
-    """
-    Expected clean format:
-    BUY|NVDA|SL:123|TP:130|TF:5M
-    """
-
     if payload in PLACEHOLDER_VALUES:
         raise ValueError("placeholder payload")
 
     parts = payload.split("|")
-
     if len(parts) < 4:
         raise ValueError("malformed payload")
 
     direction_raw = parts[0].strip().lower()
-
-    # Ignore exit signals
     if direction_raw.startswith("exit"):
         raise ValueError("exit signal ignored")
 
@@ -193,7 +171,7 @@ def parse_payload_strict(payload: str):
             tp = safe_float_or_none(part.replace("TP:", "").strip())
 
         elif part.upper().startswith("TF:"):
-            timeframe = part.replace("TF:", "").strip().upper()
+            timeframe = normalize_timeframe(part.replace("TF:", "").strip())
 
     if sl is None or tp is None:
         raise ValueError("missing SL/TP")
@@ -212,11 +190,6 @@ def parse_payload_strict(payload: str):
 # ============================
 
 def block_alert(reason, raw):
-    """
-    Returns a structured blocked alert object.
-    Logged by webhook and displayed in dashboard.
-    """
-
     return {
         "blocked": True,
         "reason": reason,
@@ -239,3 +212,34 @@ def safe_float_or_none(value):
         return float(value)
     except Exception:
         return None
+
+
+def normalize_timeframe(tf):
+    """
+    Normalize timeframe strings:
+    - "5" → "5M"
+    - "5m" → "5M"
+    - "15" → "15M"
+    - "1h" → "1H"
+    - "1H" → "1H"
+    """
+    if not tf:
+        return None
+
+    tf = tf.strip().upper()
+
+    # If numeric only → assume minutes
+    if tf.isdigit():
+        return f"{tf}M"
+
+    # If ends with M or H → already valid
+    if tf.endswith("M") or tf.endswith("H"):
+        return tf
+
+    # If ends with lowercase m/h → normalize
+    if tf.endswith("M".lower()):
+        return tf[:-1] + "M"
+    if tf.endswith("H".lower()):
+        return tf[:-1] + "H"
+
+    return tf

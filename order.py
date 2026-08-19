@@ -1,5 +1,5 @@
 # ============================
-# ORDER MODULE (ROBUST DEALID MAPPING + UNIFIED OPEN LOGGING)
+# ORDER MODULE (CONFIRMS-BASED DEALID MAPPING + UNIFIED OPEN LOGGING)
 # ============================
 
 import time
@@ -13,7 +13,7 @@ from trade_log import log_open_trade
 def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
     """
     Place a BUY/SELL market order and log an OPEN trade
-    in unified format, with robust dealId mapping.
+    in unified format, with robust dealId mapping via confirms endpoint.
     """
 
     auth.ensure_token()
@@ -71,30 +71,30 @@ def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
     print(f"[TRADE] dealReference: {deal_ref}", flush=True)
 
     # ---------------------------------------------------------
-    # 4. ROBUST DEALID MAPPING (RAW POSITIONS — FIXED)
+    # 4. DEALID MAPPING VIA CONFIRMS ENDPOINT (CORRECT)
     # ---------------------------------------------------------
     real_deal_id = None
 
-    for attempt in range(20):  # 20 × 0.15s ≈ 3 seconds
-        time.sleep(0.15)
+    # Small retry window in case confirm is not immediately ready
+    for attempt in range(10):  # 10 × 0.2s = 2 seconds
+        time.sleep(0.2)
 
-        # ⭐ FIX: Fetch RAW positions, not enriched ones
-        raw = session.request("GET", API_POSITIONS)
-        raw_positions = raw.json().get("positions", []) if raw else []
+        confirm = session.request("GET", f"{API_POSITIONS}/confirms/{deal_ref}")
+        if not confirm:
+            continue
 
-        for item in raw_positions:
-            pos = item.get("position", {})
-            if pos.get("dealReference") == deal_ref:
-                real_deal_id = pos.get("dealId")
+        if confirm.status_code == 200:
+            body = confirm.json()
+            real_deal_id = body.get("dealId")
+            if real_deal_id:
                 break
-
-        if real_deal_id:
-            break
+        else:
+            print(f"[ORDER] Confirm attempt {attempt+1} failed: {confirm.status_code} {confirm.text}", flush=True)
 
     if real_deal_id:
-        print(f"[ORDER] Mapped dealReference → dealId: {real_deal_id}", flush=True)
+        print(f"[ORDER] Mapped dealReference → dealId via confirms: {real_deal_id}", flush=True)
     else:
-        print("[WARN] Could not map dealReference → dealId after retries. Logging OPEN trade with dealId=None.", flush=True)
+        print("[WARN] Could not map dealReference → dealId via confirms. Logging OPEN trade with dealId=None.", flush=True)
 
     # ---------------------------------------------------------
     # 5. LOG OPEN TRADE (UNIFIED FORMAT)

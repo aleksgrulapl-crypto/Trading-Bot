@@ -331,12 +331,17 @@ def dashboard_data():
 
 
 # ---------------------------------------------------------
-# CLOSE POSITION
+# CLOSE POSITION (FIXED)
 # ---------------------------------------------------------
 
 @dashboard.route("/dashboard/close/<position_id>")
 @login_required
 def dashboard_close(position_id):
+    """
+    Dashboard close:
+    - position_id is the real dealId (from enrich_positions → id)
+    - pass it directly to close_position_module
+    """
     from close_position import close_position
 
     close_position(position_id)

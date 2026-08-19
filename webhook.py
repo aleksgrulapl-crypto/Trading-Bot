@@ -198,6 +198,7 @@ def debug_order(epic, action, size):
     result = place_order(epic, action, float(size))
     return jsonify(result), 200
 
+
 @app.route("/debug/close-test/<deal_id>", methods=["GET"])
 def debug_close_test(deal_id):
     print("[TEST] auth.session =", auth.session, flush=True)
@@ -227,6 +228,7 @@ def debug_close_test(deal_id):
         "post_close": {"status": s1, "body": t1},
         "put_close_position": {"status": s2, "body": t2},
     }), 200
+
 
 # ============================
 # RAW + DASHBOARD
@@ -275,11 +277,13 @@ def dashboard_home():
 
 @app.route("/close/<position_id>", methods=["POST"])
 def close_position_route(position_id):
+    """
+    Dashboard close:
+    - position_id is the dealId (from enrich_positions → id)
+    - pass it directly to close_position_module
+    """
     print(f"[DASHBOARD] Close requested for position_id={position_id}", flush=True)
-    pos = _find_enriched_position(position_id)
-    deal_ref = pos.get("dealReference")
-    result = close_position_module(deal_ref)
-
+    result = close_position_module(position_id)
     return jsonify(result), 200
 
 

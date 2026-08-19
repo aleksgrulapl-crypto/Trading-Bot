@@ -1,3 +1,7 @@
+# ============================
+# CLOSE POSITION MODULE (FINAL — CORRECT DEALID + UNIFIED LOGGING)
+# ============================
+
 import session
 from auth import auth
 from trade_log import load_raw_log, log_closed_trade
@@ -25,20 +29,20 @@ def _find_open_trade(deal_id):
 def close_position(position_id):
     """
     Close a position using Capital.com API + log closed trade.
-    Mirrors the original working behavior:
-    - POST /positions/{position_id}/close
-    - headers only, no JSON body
+    Uses the correct endpoint:
+        POST /positions/{dealId}/close
     """
 
-    # Ensure authenticated (same as old version)
-    auth.login()
+    # Ensure authenticated
+    auth.ensure_token()
 
-    # --- Call close endpoint (old behavior, new constants) ---
+    # ---------------------------------------------------------
+    # 1. SEND CLOSE REQUEST
+    # ---------------------------------------------------------
     try:
         url = f"{API_POSITIONS}/{position_id}/close"
         print(f"[CLOSE] URL → {url}", flush=True)
 
-        # No JSON body, just headers via session.request
         response = session.request("POST", url)
 
         if not response:
@@ -49,19 +53,15 @@ def close_position(position_id):
         print(f"[CLOSE] RESPONSE → {response.text}", flush=True)
 
         if response.status_code != 200:
-            return {
-                "status": "error",
-                "message": response.text
-            }
+            return {"status": "error", "message": response.text}
 
     except Exception as e:
         print(f"[CLOSE] Exception during close: {e}", flush=True)
-        return {
-            "status": "error",
-            "message": str(e)
-        }
+        return {"status": "error", "message": str(e)}
 
-    # --- Fetch updated positions and log closed trade (adapted from old version) ---
+    # ---------------------------------------------------------
+    # 2. FETCH UPDATED POSITION SNAPSHOT
+    # ---------------------------------------------------------
     try:
         pos = _find_enriched_position(position_id)
         open_trade = _find_open_trade(position_id)
@@ -71,7 +71,11 @@ def close_position(position_id):
         direction = pos.get("direction") if pos else (open_trade.get("side") if open_trade else None)
         size = pos.get("size") if pos else (open_trade.get("size") if open_trade else None)
         entry_price = pos.get("price") if pos else (open_trade.get("entry_price") if open_trade else None)
+
+        # After closing, current_price may be None → fallback to open_trade
         current_price = pos.get("current_price") if pos else None
+
+        # pnl from raw positions (upl) or fallback to None
         pnl = pos.get("profit") if pos else None
 
         sl = open_trade.get("sl") if open_trade else None
@@ -79,6 +83,9 @@ def close_position(position_id):
         timeframe = open_trade.get("timeframe") if open_trade else None
         time_entered = open_trade.get("time_entered") if open_trade else None
 
+        # ---------------------------------------------------------
+        # 3. LOG CLOSED TRADE
+        # ---------------------------------------------------------
         log_closed_trade(
             ticker=ticker,
             epic=epic,
@@ -100,7 +107,4 @@ def close_position(position_id):
 
     session.update_last_trade()
 
-    return {
-        "status": "success",
-        "message": f"Position {position_id} closed."
-    }
+    return {"status": "success", "message": f"Position {position_id} closed."}
