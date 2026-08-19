@@ -158,3 +158,20 @@ Separate row, not merged with OPEN.
         f"[TRADE_LOG] Logged CLOSED trade → {ticker} CLOSE size={size} pnl={pnl}",
         flush=True,
     )
+
+# ---------------------------------------------------------
+# RESET LOG (WIPE EVERYTHING)
+# ---------------------------------------------------------
+
+def reset_log():
+    """
+    Hard reset: wipe all trades from the log file.
+    Use when you want a clean slate.
+    """
+    try:
+        with open(LOG_FILE, "w") as f:
+            json.dump([], f)
+        print("[TRADE_LOG] Log reset — all trades cleared", flush=True)
+    except Exception as e:
+        print(f"[TRADE_LOG] Failed to reset log: {e}", flush=True)
+

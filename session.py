@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (FINAL — CORRECT CLOSE ID + POSITION SIGNATURE)
+# SESSION MODULE (RESET + CORRECT CLOSE ID)
 # ============================
 
 import requests
@@ -8,6 +8,10 @@ from auth import auth
 from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
 from utils import timestamp
 import report
+
+# ---------------------------------------------------------
+# CLEAN SHARED STATE ON STARTUP
+# ---------------------------------------------------------
 
 shared_state = {
     "account": {},
@@ -90,10 +94,8 @@ def enrich_positions(raw_positions):
         pos = item.get("position", {})
         market = item.get("market", {})
 
-        # ✔ Correct close ID
-        position_id = pos.get("dealId")
+        position_id = pos.get("dealId")  # ✔ correct close ID
 
-        # ✔ Correct signature fields
         ticker = market.get("symbol")
         direction = pos.get("direction")
         size = pos.get("size")
@@ -122,7 +124,6 @@ def enrich_positions(raw_positions):
 
             "currency": pos.get("currency"),
 
-            # ✔ Signature used to match OPEN trade → correct CLOSE
             "signature": f"{ticker}|{direction}|{size}|{entry_price}"
         })
 
