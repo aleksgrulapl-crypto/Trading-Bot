@@ -12,7 +12,7 @@ from parser import parse_tradingview_alert
 from sizing import calculate_size
 from order import place_order
 from auth import auth
-from config import API_POSITIONS, API_ACCOUNTS, API_MARKET
+from config import API_ACCOUNTS, API_MARKET
 from dashboard import dashboard as dashboard_blueprint
 from scheduler import start_scheduler
 from trade_log import load_raw_log
@@ -205,9 +205,8 @@ def debug_order(epic, action, size):
 
 @app.route("/raw")
 def raw_positions():
-    # If fetch_positions_from doesn't exist in your current session.py,
-    # switch this to session.get_positions()
-    return jsonify(session.fetch_positions_from(API_POSITIONS))
+    raw = session.get_positions()
+    return jsonify(raw)
 
 
 @app.route("/raw/account")
@@ -230,7 +229,6 @@ def dashboard_home():
     account = session.enrich_account(raw_account)
 
     trade_log = load_raw_log()
-    # If get_daily_report doesn't exist, you can safely set daily_report = {}
     daily_report = session.get_daily_report() or {}
 
     return render_template(
@@ -248,6 +246,7 @@ def dashboard_home():
 
 @app.route("/close/<position_id>", methods=["POST"])
 def close_position_route(position_id):
+    print(f"[DASHBOARD] Close requested for position_id={position_id}", flush=True)
     result = close_position_module(position_id)
     return jsonify(result), 200
 

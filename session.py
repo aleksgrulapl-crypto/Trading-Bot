@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (CORRECTED — STABLE POSITION PIPELINE)
+# SESSION MODULE (DIAGNOSTIC — STABLE POSITION PIPELINE)
 # ============================
 
 import time
@@ -39,7 +39,9 @@ def get_headers():
     return {
         "X-CAP-API-KEY": auth.api_key,
         "CST": auth.cst,
-        "X-SECURITY-TOKEN": auth.xst
+        "X-SECURITY-TOKEN": auth.xst,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
     }
 
 
@@ -49,6 +51,14 @@ def get_headers():
 
 def request(method, url, json=None):
     headers = get_headers()
+
+    # Log specifically for close-position calls
+    if "/positions/" in url and "/close" in url:
+        print("[SESSION] CLOSE REQUEST", flush=True)
+        print("[SESSION] METHOD  →", method, flush=True)
+        print("[SESSION] URL     →", url, flush=True)
+        print("[SESSION] HEADERS →", headers, flush=True)
+        print("[SESSION] BODY    →", json, flush=True)
 
     try:
         response = auth.session.request(method, url, headers=headers, json=json)

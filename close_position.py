@@ -1,5 +1,5 @@
 # ============================
-# CLOSE POSITION MODULE (CORRECTED — USE ENRICHED POSITION + TRADE LOG)
+# CLOSE POSITION MODULE (DIAGNOSTIC + SAFE LOGGING)
 # ============================
 
 import session
@@ -81,17 +81,54 @@ def close_position(position_id):
     timeframe = open_trade.get("timeframe") if open_trade else None
     time_entered = open_trade.get("time_entered") if open_trade else None
 
-    # --- Call Capital.com close endpoint ---
+    # --- Call Capital.com close endpoint (primary) ---
     try:
         url = f"{API_POSITIONS}/{position_id}/close"
+        print(f"[CLOSE] URL → {url}", flush=True)
+
         response = session.request("POST", url, json={})
 
-        if not response or response.status_code != 200:
-            print(f"[ERROR] Failed to close position {position_id}", flush=True)
-            print(f"[ERROR] Response: {response.text if response else 'No response'}", flush=True)
+        if not response:
+            print(f"[CLOSE] No response object returned for {url}", flush=True)
             return {
                 "status": "error",
-                "message": f"Failed to close position {position_id}"
+                "message": "no_response_from_close_endpoint"
+            }
+
+        print(f"[CLOSE] STATUS → {response.status_code}", flush=True)
+        print(f"[CLOSE] RESPONSE → {response.text}", flush=True)
+
+        # If primary endpoint fails with 404, try alternative close-position endpoint
+        if response.status_code == 404:
+            alt_url = f"{API_POSITIONS}/close-position"
+            alt_payload = {"dealId": position_id}
+            print(f"[CLOSE] 404 on primary, trying alt endpoint → {alt_url}", flush=True)
+            print(f"[CLOSE] ALT PAYLOAD → {alt_payload}", flush=True)
+
+            alt_response = session.request("POST", alt_url, json=alt_payload)
+
+            if not alt_response:
+                print(f"[CLOSE] No response from alt endpoint {alt_url}", flush=True)
+                return {
+                    "status": "error",
+                    "message": "no_response_from_alt_close_endpoint"
+                }
+
+            print(f"[CLOSE] ALT STATUS → {alt_response.status_code}", flush=True)
+            print(f"[CLOSE] ALT RESPONSE → {alt_response.text}", flush=True)
+
+            if alt_response.status_code != 200:
+                return {
+                    "status": "error",
+                    "message": f"Alt close endpoint failed: {alt_response.text}"
+                }
+
+            response = alt_response  # treat alt as the effective close
+
+        elif response.status_code != 200:
+            return {
+                "status": "error",
+                "message": f"Failed to close position: {response.text}",
             }
 
     except Exception as e:
