@@ -1,5 +1,5 @@
 # ============================
-# CLOSE POSITION MODULE (CFD-CORRECT ENDPOINT)
+# CLOSE POSITION MODULE (CFD — USE PUT)
 # ============================
 
 import session
@@ -7,25 +7,23 @@ from auth import auth
 from trade_log import log_closed_trade
 from utils import timestamp
 from config import API_POSITIONS
+import time
 
 
 def close_position(deal_id):
     """
     Correct CFD close:
-    POST /positions/close
-    Payload: { "dealId": "<dealId>" }
+    PUT /positions/<dealId>/close
+    Payload: {}
     """
 
     auth.ensure_token()
 
     try:
-        # ⭐ Correct CFD endpoint
-        url = f"{API_POSITIONS}/close"
+        # ⭐ Correct CFD endpoint (PUT, not POST)
+        url = f"{API_POSITIONS}/{deal_id}/close"
 
-        # ⭐ Correct CFD payload
-        payload = {"dealId": deal_id}
-
-        response = session.request("POST", url, json=payload)
+        response = session.request("PUT", url, json={})
 
         if not response or response.status_code != 200:
             print(f"[ERROR] Failed to close position {deal_id}", flush=True)
@@ -35,17 +33,15 @@ def close_position(deal_id):
             }
 
         # ⭐ Allow Capital.com to update the position list
-        import time
         time.sleep(0.5)
 
-        # Refresh positions
         raw_positions = session.get_positions()
         enriched_positions = session.enrich_positions(raw_positions)
 
         # Find closed position details
         closed = None
         for p in enriched_positions:
-            if str(p.get("dealId")) == str(deal_id) or str(p.get("id")) == str(deal_id):
+            if str(p.get("id")) == str(deal_id):
                 closed = p
                 break
 
