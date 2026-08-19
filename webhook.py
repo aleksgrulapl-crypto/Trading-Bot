@@ -1,5 +1,5 @@
 # ============================
-# WEBHOOK MODULE (REVERTED + DEBUG SAFE)
+# WEBHOOK MODULE (REVERTED + DEBUG SAFE, CLEANED)
 # ============================
 
 from flask import Flask, request, jsonify, render_template, redirect
@@ -15,7 +15,6 @@ from auth import auth
 from config import API_POSITIONS, API_ACCOUNTS, API_MARKET
 from dashboard import dashboard as dashboard_blueprint
 from scheduler import start_scheduler
-from utils import timestamp
 from trade_log import load_raw_log
 from close_position import close_position as close_position_module
 
@@ -73,7 +72,8 @@ def webhook():
     timeframe = alert.get("timeframe")
 
     print(
-        f"[WEBHOOK] Parsed alert → symbol={symbol}, action={action}, SL={sl_price}, TP={tp_price}, TF={timeframe}",
+        f"[WEBHOOK] Parsed alert → symbol={symbol}, action={action}, SL={sl_price}, "
+        f"TP={tp_price}, TF={timeframe}",
         flush=True,
     )
 
@@ -84,7 +84,8 @@ def webhook():
     epic = epic_data.get("epic")
 
     print(
-        f"[WEBHOOK] EPIC lookup → symbol={symbol}, epic={epic}, source={epic_data.get('source')}",
+        f"[WEBHOOK] EPIC lookup → symbol={symbol}, epic={epic}, "
+        f"source={epic_data.get('source')}",
         flush=True,
     )
 
@@ -198,13 +199,14 @@ def debug_order(epic, action, size):
     return jsonify(result), 200
 
 
-
 # ============================
 # RAW + DASHBOARD
 # ============================
 
 @app.route("/raw")
 def raw_positions():
+    # If fetch_positions_from doesn't exist in your current session.py,
+    # switch this to session.get_positions()
     return jsonify(session.fetch_positions_from(API_POSITIONS))
 
 
@@ -228,6 +230,7 @@ def dashboard_home():
     account = session.enrich_account(raw_account)
 
     trade_log = load_raw_log()
+    # If get_daily_report doesn't exist, you can safely set daily_report = {}
     daily_report = session.get_daily_report() or {}
 
     return render_template(
