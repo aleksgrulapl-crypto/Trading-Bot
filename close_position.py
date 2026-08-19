@@ -58,7 +58,7 @@ def close_position(position_id):
     # --- NEW PRIMARY CFD CLOSE ENDPOINT ---
     try:
         url = f"{API_POSITIONS}/close-position"
-        payload = {"dealId": position_id}
+        payload = {"dealReference": f"p_{position_id}"}
 
         print(f"[CLOSE] URL → {url}", flush=True)
         print(f"[CLOSE] PAYLOAD → {payload}", flush=True)
