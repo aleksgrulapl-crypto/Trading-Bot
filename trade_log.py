@@ -1,5 +1,5 @@
 # ============================
-# TRADE LOG MODULE (UNIFIED OPEN/CLOSED ROWS + RAW LOAD)
+# TRADE LOG MODULE (REVERTED — SIMPLE OPEN/CLOSED ROWS)
 # ============================
 
 import json
@@ -14,17 +14,17 @@ os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 
 
 def _now():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ---------------------------------------------------------
-# RAW LOAD (for dashboard)
+# RAW LOAD
 # ---------------------------------------------------------
 
 def load_raw_log():
     """
     Load the raw trade log from disk.
-    Used by dashboard for normalization/dedupe.
+    No merging, no normalization.
     """
     if not os.path.exists(LOG_FILE):
         return []
@@ -38,7 +38,7 @@ def load_raw_log():
 
 
 # ---------------------------------------------------------
-# SAFE SAVE (atomic)
+# SAFE SAVE (ATOMIC)
 # ---------------------------------------------------------
 
 def save_log(log):
@@ -56,7 +56,7 @@ def save_log(log):
 
 
 # ---------------------------------------------------------
-# LOG OPEN TRADE (UNIFIED FORMAT)
+# LOG OPEN TRADE (REVERTED)
 # ---------------------------------------------------------
 
 def log_open_trade(
@@ -72,8 +72,8 @@ def log_open_trade(
     timestamp=None,
 ):
     """
-    Log an OPEN trade in unified format.
-    Separate row, not updated later.
+    Log an OPEN trade.
+    No merging, no unification.
     """
     log = load_raw_log()
 
@@ -101,13 +101,13 @@ def log_open_trade(
     save_log(log)
 
     print(
-        f"[TRADE_LOG] Logged OPEN trade → {ticker} {side} size={size} dealId={deal_id}",
+        f"[TRADE_LOG] Logged OPEN trade → {ticker} {side} size={size}",
         flush=True,
     )
 
 
 # ---------------------------------------------------------
-# LOG CLOSED TRADE (UNIFIED FORMAT)
+# LOG CLOSED TRADE (REVERTED)
 # ---------------------------------------------------------
 
 def log_closed_trade(
@@ -126,8 +126,8 @@ def log_closed_trade(
     timestamp=None,
 ):
     """
-    Log a CLOSED trade in unified format.
-Separate row, not merged with OPEN.
+    Log a CLOSED trade.
+    No merging with OPEN.
     """
     log = load_raw_log()
 
@@ -135,7 +135,7 @@ Separate row, not merged with OPEN.
         "dealId": str(deal_id) if deal_id else None,
         "ticker": ticker or epic,
         "epic": epic,
-        "side": str(side).upper() if side else "CLOSE",
+        "side": str(side).upper() if side else None,
         "size": float(size) if size is not None else None,
 
         "entry_price": float(entry_price) if entry_price is not None else None,
@@ -155,18 +155,18 @@ Separate row, not merged with OPEN.
     save_log(log)
 
     print(
-        f"[TRADE_LOG] Logged CLOSED trade → {ticker} CLOSE size={size} pnl={pnl}",
+        f"[TRADE_LOG] Logged CLOSED trade → {ticker} CLOSE pnl={pnl}",
         flush=True,
     )
 
+
 # ---------------------------------------------------------
-# RESET LOG (WIPE EVERYTHING)
+# RESET LOG
 # ---------------------------------------------------------
 
 def reset_log():
     """
     Hard reset: wipe all trades from the log file.
-    Use when you want a clean slate.
     """
     try:
         with open(LOG_FILE, "w") as f:
@@ -174,4 +174,3 @@ def reset_log():
         print("[TRADE_LOG] Log reset — all trades cleared", flush=True)
     except Exception as e:
         print(f"[TRADE_LOG] Failed to reset log: {e}", flush=True)
-
