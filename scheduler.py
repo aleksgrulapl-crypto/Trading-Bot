@@ -146,9 +146,9 @@ scheduler = Scheduler()
 
 def start_scheduler():
     # Trail SL ONLY — no history import, no daily report
-    scheduler.add_interval_job(60, run_trailing_sl)
-    
-    scheduler.add_interval_job(5, sync_closed_trades)
+    scheduler.schedule(5, run_trailing_sl)
+    scheduler.schedule(60, import_closed_trades)
+
 
     scheduler.start()
     print("[Scheduler] Started background scheduler (TrailSL only).")
