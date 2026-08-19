@@ -124,7 +124,8 @@ def get_positions():
 def enrich_positions(raw_positions):
     """
     Convert raw Capital.com positions into dashboard-friendly objects.
-    ID = dealId (correct for closing).
+    id  = dealId (for legacy use)
+    dealId = explicit field for close button and logging.
     """
     enriched = []
 
@@ -138,7 +139,6 @@ def enrich_positions(raw_positions):
         size = pos.get("size")
         entry_price = pos.get("level")
 
-        # Current price depends on direction
         current_price = (
             market.get("bid") if direction == "SELL"
             else market.get("offer")
@@ -147,8 +147,11 @@ def enrich_positions(raw_positions):
         profit = pos.get("upl", 0)
 
         enriched.append({
+            # ✅ both id and dealId populated
             "id": deal_id,
-            "dealReference": pos.get("dealReference"),                     # used by dashboard + close_position
+            "dealId": deal_id,
+
+            "dealReference": pos.get("dealReference"),
             "ticker": ticker,
             "epic": market.get("epic"),
 
@@ -164,12 +167,10 @@ def enrich_positions(raw_positions):
 
             "currency": pos.get("currency"),
 
-            # Used for dedupe / debugging
-            "signature": f"{ticker}|{direction}|{size}|{entry_price}"
+            "signature": f"{ticker}|{direction}|{size}|{entry_price}",
         })
 
     return enriched
-
 
 # ---------------------------------------------------------
 # GET ACCOUNT
