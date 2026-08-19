@@ -1,5 +1,5 @@
 # ============================
-# WEBHOOK MODULE (UNIFIED, STABLE, NO DEALID DEPENDENCY)
+# WEBHOOK MODULE (REVERTED + DEBUG SAFE)
 # ============================
 
 from flask import Flask, request, jsonify, render_template, redirect
@@ -29,6 +29,10 @@ app.url_map.strict_slashes = False
 app.register_blueprint(dashboard_blueprint)
 
 
+# ============================
+# MAIN WEBHOOK
+# ============================
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     session.update_last_webhook()
@@ -43,6 +47,9 @@ def webhook():
 
     alert = None
 
+    # -----------------------------
+    # Parse TradingView alert
+    # -----------------------------
     try:
         data = request.get_json(force=True)
         alert = parse_tradingview_alert(data)
@@ -70,6 +77,9 @@ def webhook():
         flush=True,
     )
 
+    # -----------------------------
+    # EPIC lookup (reverted)
+    # -----------------------------
     epic_data = session.verify_epic(symbol)
     epic = epic_data.get("epic")
 
@@ -82,6 +92,9 @@ def webhook():
         print("[WEBHOOK] EPIC lookup failed:", symbol, flush=True)
         return jsonify({"status": "error", "message": "epic_lookup_failed"}), 200
 
+    # -----------------------------
+    # Market snapshot
+    # -----------------------------
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
         print("[WEBHOOK] Market snapshot unavailable for:", epic, flush=True)
@@ -95,13 +108,13 @@ def webhook():
         print("[WEBHOOK] Market prices unavailable for:", epic, flush=True)
         return jsonify({"status": "error", "message": "price_unavailable"}), 200
 
-    if action.lower() == "buy":
-        entry_price = offer
-    else:
-        entry_price = bid
+    entry_price = offer if action.lower() == "buy" else bid
 
     print(f"[WEBHOOK] Entry price (actual): {entry_price}", flush=True)
 
+    # -----------------------------
+    # Sizing
+    # -----------------------------
     size_info = calculate_size(
         entry_price=entry_price,
         sl_price=sl_price,
@@ -119,12 +132,66 @@ def webhook():
     print("[WEBHOOK] Final TP:", tp_price, flush=True)
     print("[WEBHOOK] Final SIZE:", size, flush=True)
 
+    # -----------------------------
+    # Place order (reverted pipeline)
+    # -----------------------------
     result = place_order(epic, action, size, sl_price, tp_price, timeframe=timeframe)
 
     session.update_last_trade()
 
     return jsonify({"status": "ok", "result": result}), 200
 
+
+# ============================
+# DEBUG ROUTES
+# ============================
+
+@app.route("/debug/tokens")
+def debug_tokens():
+    auth.ensure_token()
+    return {
+        "api_key": auth.api_key,
+        "cst": auth.cst,
+        "xst": auth.xst
+    }
+
+
+@app.route("/debug/epic/<symbol>")
+def debug_epic(symbol):
+    return session.verify_epic(symbol)
+
+
+@app.route("/debug/market/<epic>")
+def debug_market(epic):
+    r = session.request("GET", f"{API_MARKET}/{epic}")
+    return r.json() if r else {"error": "no response"}
+
+
+@app.route("/debug/positions")
+def debug_positions():
+    raw = session.get_positions()
+    enriched = session.enrich_positions(raw)
+    return {"raw": raw, "enriched": enriched}
+
+
+@app.route("/debug/sizing/<symbol>/<action>/<price>/<sl>/<tp>")
+def debug_sizing(symbol, action, price, sl, tp):
+    return calculate_size(
+        entry_price=float(price),
+        sl_price=float(sl),
+        tp_price=float(tp),
+        direction=action
+    )
+
+
+@app.route("/debug/order/<epic>/<action>/<size>")
+def debug_order(epic, action, size):
+    return place_order(epic, action, float(size))
+
+
+# ============================
+# RAW + DASHBOARD
+# ============================
 
 @app.route("/raw")
 def raw_positions():
@@ -171,6 +238,10 @@ def close_position_route(position_id):
     result = close_position_module(position_id)
     return jsonify(result), 200
 
+
+# ============================
+# BOOTSTRAP
+# ============================
 
 if __name__ == "__main__":
     while True:
