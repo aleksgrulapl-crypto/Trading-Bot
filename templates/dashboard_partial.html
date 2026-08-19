@@ -105,9 +105,9 @@
                         </td>
 
                         <td>
-                            <button class="pill pill-status" onclick="closePosition('{{ p.id }}')">
+                            <a href="/dashboard/close/{{ p.id }}" class="pill pill-status">
                                 Close
-                            </button>
+                            </a>
                         </td>
                     </tr>
                 {% endfor %}
@@ -151,8 +151,10 @@
                         <td>
                             {% if t.side == 'BUY' %}
                                 <span class="pill pill-long">Long</span>
-                            {% else %}
+                            {% elif t.side == 'SELL' %}
                                 <span class="pill pill-short">Short</span>
+                            {% else %}
+                                <span class="pill pill-status">{{ t.side|default('—') }}</span>
                             {% endif %}
                         </td>
 

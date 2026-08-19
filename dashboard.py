@@ -35,33 +35,25 @@ def normalize_trades(trades):
     normalized = []
 
     for t in trades:
-        # dealId always string
-        deal_id = t.get("dealId")
-        t["dealId"] = str(deal_id) if deal_id else None
+        t["dealId"] = str(t.get("dealId")) if t.get("dealId") else None
 
-        # timestamps (new format already applied in utils.timestamp)
         t.setdefault("time_entered", t.get("time_entered"))
         t.setdefault("time_exited", t.get("time_exited"))
 
-        # ticker fallback
         if not t.get("ticker"):
             t["ticker"] = t.get("epic") or t.get("symbol") or "—"
 
-        # side
         side = t.get("side")
         t["side"] = side.upper() if isinstance(side, str) else "SELL"
 
-        # size
         t.setdefault("size", t.get("size") or "—")
 
-        # prices — preserve numeric values, only fill missing with "—"
         if t.get("entry_price") is None:
             t["entry_price"] = "—"
 
         if t.get("exit_price") is None:
             t["exit_price"] = "—"
 
-        # pnl
         pnl = t.get("pnl", 0)
         try:
             t["pnl"] = float(pnl)
@@ -96,24 +88,18 @@ def dedupe_trades(trades):
         existing_index = seen.get(key)
 
         if existing_index is None:
-            # First time we see this key
             seen[key] = len(unique)
             unique.append(t)
         else:
-            # We already have an entry for this key
             existing = unique[existing_index]
-            existing_status = existing.get("status")
-            new_status = t.get("status")
-
-            # Prefer CLOSED over OPEN
-            if existing_status != "CLOSED" and new_status == "CLOSED":
+            if existing.get("status") != "CLOSED" and t.get("status") == "CLOSED":
                 unique[existing_index] = t
 
     return unique
 
 
 # ---------------------------------------------------------
-# FILTER COMPLETED (STATUS-BASED)
+# FILTER COMPLETED
 # ---------------------------------------------------------
 
 def filter_completed(trades):
@@ -255,11 +241,9 @@ def dashboard_home():
     except Exception as e:
         print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
 
-    # Read raw log directly
     combined_raw = load_raw_log()
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
 
-    # Sort by exit or entry timestamp (new format)
     combined_trades.sort(
         key=lambda t: (
             t.get("time_exited")
