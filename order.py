@@ -1,7 +1,8 @@
 # ============================
-# ORDER MODULE (REVERTED — OLD LOGIC, NO DEALID MAPPING)
+# ORDER MODULE (ROBUST DEALID MAPPING + UNIFIED OPEN LOGGING)
 # ============================
 
+import time
 import session
 from auth import auth
 from config import API_POSITIONS, API_MARKET
@@ -11,20 +12,15 @@ from trade_log import log_open_trade
 
 def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
     """
-    Reverted order logic:
-    - Fetch market snapshot
-    - Determine entry price
-    - Send order immediately
-    - Log OPEN trade immediately (no dealId dependency)
-    - Do NOT map dealReference → dealId
-    - Do NOT wait for positions to appear
+    Place a BUY/SELL market order and log an OPEN trade
+    in unified format, with robust dealId mapping.
     """
 
     auth.ensure_token()
 
-    # -----------------------------------------
+    # ---------------------------------------------------------
     # 1. MARKET SNAPSHOT
-    # -----------------------------------------
+    # ---------------------------------------------------------
     market = session.request("GET", f"{API_MARKET}/{epic}")
     if not market or market.status_code != 200:
         print(f"[ERROR] Market snapshot unavailable for {epic}", flush=True)
@@ -40,9 +36,9 @@ def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
 
     entry_price = offer if direction.lower() == "buy" else bid
 
-    # -----------------------------------------
+    # ---------------------------------------------------------
     # 2. BUILD ORDER PAYLOAD
-    # -----------------------------------------
+    # ---------------------------------------------------------
     payload = {
         "epic": epic,
         "direction": direction.upper(),
@@ -59,9 +55,9 @@ def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
 
     print("[ORDER] Sending payload:", payload, flush=True)
 
-    # -----------------------------------------
+    # ---------------------------------------------------------
     # 3. SEND ORDER
-    # -----------------------------------------
+    # ---------------------------------------------------------
     response = session.request("POST", API_POSITIONS, json=payload)
     if not response or response.status_code >= 400:
         print(f"[ERROR] Order failed for {epic} ({direction})", flush=True)
@@ -74,15 +70,39 @@ def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
     print(f"[TRADE] {direction.upper()} {epic} @ {entry_price} (size {size}) → SUCCESS", flush=True)
     print(f"[TRADE] dealReference: {deal_ref}", flush=True)
 
-    # -----------------------------------------
-    # 4. LOG OPEN TRADE (NO DEALID)
-    # -----------------------------------------
+    # ---------------------------------------------------------
+    # 4. ROBUST DEALID MAPPING (RETRY WINDOW)
+    # ---------------------------------------------------------
+    real_deal_id = None
+
+    for attempt in range(20):  # 20 × 0.15s ≈ 3 seconds
+        time.sleep(0.15)
+
+        raw_positions = session.get_positions() or []
+
+        for item in raw_positions:
+            pos = item.get("position", {})
+            if pos.get("dealReference") == deal_ref:
+                real_deal_id = pos.get("dealId")
+                break
+
+        if real_deal_id:
+            break
+
+    if real_deal_id:
+        print(f"[ORDER] Mapped dealReference → dealId: {real_deal_id}", flush=True)
+    else:
+        print("[WARN] Could not map dealReference → dealId after retries. Logging OPEN trade with dealId=None.", flush=True)
+
+    # ---------------------------------------------------------
+    # 5. LOG OPEN TRADE (UNIFIED FORMAT)
+    # ---------------------------------------------------------
     ts = timestamp()
 
     log_open_trade(
         ticker=epic,
         epic=epic,
-        deal_id=None,           # old system did NOT rely on dealId
+        deal_id=real_deal_id,
         side=direction,
         size=size,
         entry_price=entry_price,
@@ -97,5 +117,6 @@ def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
     return {
         "status": "ok",
         "dealReference": deal_ref,
+        "dealId": real_deal_id,
         "price": entry_price,
     }

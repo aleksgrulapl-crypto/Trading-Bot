@@ -1,16 +1,16 @@
 # ============================
-# SESSION MODULE (REVERTED — OLD LOGIC, SIMPLE & STABLE)
+# SESSION MODULE (CORRECTED — STABLE POSITION PIPELINE)
 # ============================
 
 import time
 import pprint
 from auth import auth
-from config import API_POSITIONS, API_ACCOUNT, API_MARKET
+from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
 from utils import timestamp
-
+import report
 
 # ---------------------------------------------------------
-# SHARED STATE (unchanged)
+# SHARED STATE
 # ---------------------------------------------------------
 
 shared_state = {
@@ -63,27 +63,6 @@ def request(method, url, json=None):
         print(f"[ERROR] Request failed: {e}", flush=True)
         return None
 
-# ---------------------------------------------------------
-# EPIC LOOKUP (REVERTED — SIMPLE & STABLE)
-# ---------------------------------------------------------
-
-from config import EPIC_MAP
-
-def verify_epic(symbol):
-    """
-    Reverted EPIC lookup:
-    - First check EPIC_MAP
-    - Otherwise use the symbol directly
-    - No API lookup
-    - No instrument metadata
-    """
-    symbol = str(symbol).upper()
-
-    if symbol in EPIC_MAP:
-        return {"epic": EPIC_MAP[symbol], "source": "map"}
-
-    # Fallback: use symbol as epic (old pipeline behavior)
-    return {"epic": symbol, "source": "fallback"}
 
 # ---------------------------------------------------------
 # GET POSITIONS (RAW)
@@ -91,8 +70,15 @@ def verify_epic(symbol):
 
 def get_positions():
     """
-    Reverted: return raw positions exactly as Capital.com provides them.
-    No enrichment, no transformation.
+    Fetch raw positions from Capital.com.
+    Returns the raw API structure:
+    [
+        {
+            "position": {...},
+            "market": {...}
+        },
+        ...
+    ]
     """
     url = f"{API_POSITIONS}?includeProfitLoss=true"
     response = request("GET", url)
@@ -117,48 +103,56 @@ def get_positions():
 
 
 # ---------------------------------------------------------
-# PARSE POSITIONS (OLD LOGIC)
+# ENRICH POSITIONS (DASHBOARD FORMAT)
 # ---------------------------------------------------------
 
-def parse_positions(raw_positions):
+def enrich_positions(raw_positions):
     """
-    Reverted: simple, stable parsing.
-    Extract only the fields needed for closing + dashboard.
+    Convert raw Capital.com positions into dashboard-friendly objects.
+    ID = dealId (correct for closing).
     """
-    parsed = []
+    enriched = []
 
     for item in raw_positions:
         pos = item.get("position", {})
         market = item.get("market", {})
 
-        parsed.append({
-            "id": pos.get("dealId"),          # OLD SYSTEM USED THIS DIRECTLY
-            "ticker": market.get("symbol"),
+        deal_id = pos.get("dealId")
+        ticker = market.get("symbol")
+        direction = pos.get("direction")
+        size = pos.get("size")
+        entry_price = pos.get("level")
+
+        # Current price depends on direction
+        current_price = (
+            market.get("bid") if direction == "SELL"
+            else market.get("offer")
+        )
+
+        profit = pos.get("upl", 0)
+
+        enriched.append({
+            "id": deal_id,                     # used by dashboard + close_position
+            "ticker": ticker,
             "epic": market.get("epic"),
-            "direction": pos.get("direction"),
-            "size": pos.get("size"),
-            "entry_price": pos.get("level"),
-            "current_price": (
-                market.get("bid") if pos.get("direction") == "SELL"
-                else market.get("offer")
-            ),
-            "pnl": pos.get("upl", 0),
+
+            "size": size,
+            "price": entry_price,
+            "current_price": current_price,
+
+            "direction": direction,
+            "profit": round(profit, 2),
+
+            "stopLevel": pos.get("stopLevel"),
+            "limitLevel": pos.get("profitLevel"),
+
             "currency": pos.get("currency"),
+
+            # Used for dedupe / debugging
+            "signature": f"{ticker}|{direction}|{size}|{entry_price}"
         })
 
-    return parsed
-
-
-# ---------------------------------------------------------
-# ENRICH POSITIONS (REVERTED)
-# ---------------------------------------------------------
-
-def enrich_positions(raw_positions):
-    """
-    Reverted: simply call parse_positions.
-    No signature, no merging, no analytics fields.
-    """
-    return parse_positions(raw_positions)
+    return enriched
 
 
 # ---------------------------------------------------------
@@ -190,7 +184,7 @@ def get_account():
 
 
 # ---------------------------------------------------------
-# ENRICH ACCOUNT (unchanged)
+# ENRICH ACCOUNT
 # ---------------------------------------------------------
 
 def enrich_account(raw):
@@ -214,6 +208,52 @@ def enrich_account(raw):
         "available_color": "red" if available < 0 else "lime",
         "margin_warning": margin_warning
     }
+
+
+# ---------------------------------------------------------
+# EPIC LOOKUP
+# ---------------------------------------------------------
+
+def verify_epic(symbol):
+    symbol = symbol.upper()
+
+    if symbol in EPIC_MAP:
+        return {"epic": EPIC_MAP[symbol], "source": "map"}
+
+    try:
+        url = f"{API_MARKET}/{symbol}"
+        r = request("GET", url)
+
+        if not r or r.status_code != 200:
+            print(f"[EPIC] API lookup failed for {symbol}", flush=True)
+            return {"epic": None, "source": "api_error"}
+
+        data = r.json()
+        epic = data.get("instrument", {}).get("epic")
+
+        if epic:
+            return {"epic": epic, "source": "api"}
+
+        print(f"[EPIC] No EPIC found for {symbol}", flush=True)
+        return {"epic": None, "source": "not_found"}
+
+    except Exception as e:
+        print(f"[EPIC] Exception during lookup: {e}", flush=True)
+        return {"epic": None, "source": "exception"}
+
+
+# ---------------------------------------------------------
+# DAILY REPORT
+# ---------------------------------------------------------
+
+def get_daily_report():
+    try:
+        report_data = report.get_daily_report()
+        shared_state["daily_report"] = report_data
+        return report_data
+    except Exception as e:
+        print(f"[REPORT] Failed to load daily report: {e}", flush=True)
+        return {}
 
 
 # ---------------------------------------------------------
