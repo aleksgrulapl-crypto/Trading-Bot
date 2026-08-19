@@ -1,5 +1,5 @@
 # ============================
-# SCHEDULER MODULE (RESTORED — TrailSL ONLY)
+# SCHEDULER MODULE (TrailSL + ClosedSync)
 # ============================
 
 import threading
@@ -12,8 +12,7 @@ import session
 from utils import timestamp
 
 from trail_sl import run_trailing_sl
-from trade_log import load_raw_log, log_closed_trade
-from history_sync import sync_closed_trades
+from history_sync import sync_closed_trades  # <-- only import the function
 
 UK_TZ = pytz.timezone("Europe/London")
 
@@ -153,9 +152,5 @@ def start_scheduler():
     # Closed trade sync job (SL/TP/manual closes)
     scheduler.add_interval_job(5, sync_closed_trades)
 
-    # If you still want import_closed_trades:
-    # scheduler.add_interval_job(60, import_closed_trades)
-
     scheduler.start()
     print("[Scheduler] Started background scheduler (TrailSL + ClosedSync).")
-
