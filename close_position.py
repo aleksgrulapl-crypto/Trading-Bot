@@ -1,5 +1,5 @@
 # ============================
-# CLOSE POSITION MODULE (CORRECT ENDPOINT)
+# CLOSE POSITION MODULE (EXECUTION-BASED LOGGING)
 # ============================
 
 import session
@@ -12,21 +12,31 @@ import time
 
 def close_position(deal_id):
     """
-    Correct Capital.com CFD close:
-    POST /positions/close-position
-    Payload: { "dealId": "<dealId>" }
+    Close a position using Capital.com API and log a CLOSED trade
+    using execution data from the close response (exit price + realised PnL).
     """
 
     auth.ensure_token()
 
     try:
-        # ⭐ Correct endpoint
-        url = f"{API_POSITIONS}/close-position"
+        # Snapshot current positions to get context (ticker, epic, size, SL/TP)
+        raw_positions = session.get_positions() or []
+        enriched_positions = session.enrich_positions(raw_positions)
 
-        # ⭐ Correct payload
-        payload = {"dealId": deal_id}
+        context = None
+        for p in enriched_positions:
+            if str(p.get("id")) == str(deal_id):
+                context = p
+                break
 
-        response = session.request("POST", url, json=payload)
+        if not context:
+            print(f"[WARN] No context found for dealId {deal_id} before close.", flush=True)
+
+        # Correct endpoint: close by dealId
+        url = f"{API_POSITIONS}/{deal_id}/close"
+
+        # Capital.com typically accepts an empty JSON body for this
+        response = session.request("POST", url, json={})
 
         if not response or response.status_code != 200:
             print(f"[ERROR] Failed to close position {deal_id}", flush=True)
@@ -35,31 +45,22 @@ def close_position(deal_id):
                 "message": f"Failed to close position: {response.text if response else 'No response'}",
             }
 
-        # ⭐ Allow Capital.com to update the position list
-        time.sleep(0.5)
+        # Parse execution details from response
+        try:
+            data = response.json()
+        except Exception as e:
+            print(f"[ERROR] Failed to parse close response for {deal_id}: {e}", flush=True)
+            data = {}
 
-        raw_positions = session.get_positions()
-        enriched_positions = session.enrich_positions(raw_positions)
+        exit_price = data.get("closeLevel") or data.get("level") or None
+        pnl = data.get("profitLoss") or data.get("pnl") or None
 
-        closed = None
-        for p in enriched_positions:
-            if str(p.get("id")) == str(deal_id):
-                closed = p
-                break
-
-        if not closed:
-            print(f"[WARN] Closed position {deal_id} not found in updated list.", flush=True)
-            session.update_last_trade()
-            return {
-                "status": "success",
-                "message": f"Position {deal_id} closed (details unavailable).",
-            }
-
-        ticker = closed.get("ticker")
-        epic = closed.get("epic")
-        size = closed.get("size")
-        exit_price = closed.get("current_price")
-        pnl = closed.get("profit")
+        # Fallbacks from context if response is incomplete
+        ticker = context.get("ticker") if context else None
+        epic = context.get("epic") if context else None
+        size = context.get("size") if context else None
+        sl = context.get("stopLevel") if context else None
+        tp = context.get("limitLevel") if context else None
 
         ts = timestamp()
 
@@ -72,8 +73,8 @@ def close_position(deal_id):
             entry_price=None,
             exit_price=exit_price,
             pnl=pnl,
-            sl=closed.get("stopLevel"),
-            tp=closed.get("limitLevel"),
+            sl=sl,
+            tp=tp,
             timeframe=None,
             time_entered=None,
             timestamp=ts,
@@ -81,8 +82,10 @@ def close_position(deal_id):
 
         print(f"[TRADE CLOSED] {ticker} @ {exit_price} → PnL £{pnl}", flush=True)
 
-        session.shared_state["positions"] = enriched_positions
-        session.shared_state["account"] = session.enrich_account(session.get_account())
+        # Refresh shared state (positions will no longer include this dealId)
+        time.sleep(0.2)
+        session.shared_state["positions"] = session.enrich_positions(session.get_positions() or [])
+        session.shared_state["account"] = session.enrich_account(session.get_account() or {})
         session.shared_state["trade_log"] = session.shared_state["trade_log"]
         session.shared_state["daily_report"] = session.get_daily_report()
 

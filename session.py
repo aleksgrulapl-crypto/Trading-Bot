@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (WORKINGORDERID CLOSE FIX + FULL RAW DEBUG)
+# SESSION MODULE (FULL RAW DEBUG + DEALID AS ID)
 # ============================
 
 import requests
@@ -93,7 +93,7 @@ def get_positions():
 
 
 # ---------------------------------------------------------
-# ENRICH POSITIONS (CORRECT CLOSE ID = workingOrderId)
+# ENRICH POSITIONS (ID = dealId)
 # ---------------------------------------------------------
 
 def enrich_positions(raw_positions):
@@ -103,7 +103,6 @@ def enrich_positions(raw_positions):
         pos = item.get("position", {})
         market = item.get("market", {})
 
-        # ⭐ Correct CFD close ID
         position_id = pos.get("dealId")
 
         ticker = market.get("symbol")
@@ -114,7 +113,7 @@ def enrich_positions(raw_positions):
         profit = pos.get("upl", 0)
 
         enriched.append({
-            "id": position_id,  # ⭐ now correct
+            "id": position_id,
             "ticker": ticker,
             "epic": market.get("epic"),
 
