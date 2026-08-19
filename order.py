@@ -1,11 +1,11 @@
 # ============================
-# ORDER MODULE (CONFIRMS-BASED DEALID MAPPING + UNIFIED OPEN LOGGING)
+# ORDER MODULE (FINAL — CORRECT CONFIRMS ENDPOINT + STABLE DEALID MAPPING)
 # ============================
 
 import time
 import session
 from auth import auth
-from config import API_POSITIONS, API_MARKET
+from config import API_POSITIONS, API_MARKET, API_BASE
 from utils import timestamp
 from trade_log import log_open_trade
 
@@ -13,7 +13,7 @@ from trade_log import log_open_trade
 def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
     """
     Place a BUY/SELL market order and log an OPEN trade
-    in unified format, with robust dealId mapping via confirms endpoint.
+    with correct dealId mapping via Capital.com's /confirms/{dealReference}.
     """
 
     auth.ensure_token()
@@ -71,15 +71,18 @@ def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
     print(f"[TRADE] dealReference: {deal_ref}", flush=True)
 
     # ---------------------------------------------------------
-    # 4. DEALID MAPPING VIA CONFIRMS ENDPOINT (CORRECT)
+    # 4. DEALID MAPPING VIA CORRECT CONFIRMS ENDPOINT
     # ---------------------------------------------------------
     real_deal_id = None
 
-    # Small retry window in case confirm is not immediately ready
+    # Correct Capital.com endpoint:
+    #     /api/v1/confirms/{dealReference}
+    confirms_url = f"{API_BASE}/api/v1/confirms/{deal_ref}"
+
     for attempt in range(10):  # 10 × 0.2s = 2 seconds
         time.sleep(0.2)
 
-        confirm = session.request("GET", f"{API_POSITIONS}/confirms/{deal_ref}")
+        confirm = session.request("GET", confirms_url)
         if not confirm:
             continue
 
@@ -89,7 +92,11 @@ def place_order(epic, direction, size, sl=None, tp=None, timeframe=None):
             if real_deal_id:
                 break
         else:
-            print(f"[ORDER] Confirm attempt {attempt+1} failed: {confirm.status_code} {confirm.text}", flush=True)
+            print(
+                f"[ORDER] Confirm attempt {attempt+1} failed: "
+                f"{confirm.status_code} {confirm.text}",
+                flush=True
+            )
 
     if real_deal_id:
         print(f"[ORDER] Mapped dealReference → dealId via confirms: {real_deal_id}", flush=True)
