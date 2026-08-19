@@ -63,7 +63,7 @@ def close_position(position_id):
         print(f"[CLOSE] URL → {url}", flush=True)
         print(f"[CLOSE] PAYLOAD → {payload}", flush=True)
 
-        response = session.request("POST", url, json=payload)
+        response = session.request("PUT", url, json=payload)
 
         if not response:
             print("[CLOSE] No response from close-position", flush=True)
