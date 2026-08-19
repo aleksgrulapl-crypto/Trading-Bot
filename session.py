@@ -52,6 +52,9 @@ def get_headers():
 def request(method, url, json=None):
     headers = get_headers()
 
+    print("[SESSION] session object =", auth.session, flush=True)
+    print("[SESSION] session type =", type(auth.session), flush=True)
+
     # Log specifically for close-position calls
     if "/positions/" in url and "/close" in url:
         print("[SESSION] CLOSE REQUEST", flush=True)

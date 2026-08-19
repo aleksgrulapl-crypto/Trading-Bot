@@ -200,6 +200,9 @@ def debug_order(epic, action, size):
 
 @app.route("/debug/close-test/<deal_id>", methods=["GET"])
 def debug_close_test(deal_id):
+    print("[TEST] auth.session =", auth.session, flush=True)
+    print("[TEST] type =", type(auth.session), flush=True)
+
     from config import API_POSITIONS
 
     # 1) Try POST /positions/{dealId}/close
