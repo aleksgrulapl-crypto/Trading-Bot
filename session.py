@@ -63,6 +63,27 @@ def request(method, url, json=None):
         print(f"[ERROR] Request failed: {e}", flush=True)
         return None
 
+# ---------------------------------------------------------
+# EPIC LOOKUP (REVERTED — SIMPLE & STABLE)
+# ---------------------------------------------------------
+
+from config import EPIC_MAP
+
+def verify_epic(symbol):
+    """
+    Reverted EPIC lookup:
+    - First check EPIC_MAP
+    - Otherwise use the symbol directly
+    - No API lookup
+    - No instrument metadata
+    """
+    symbol = str(symbol).upper()
+
+    if symbol in EPIC_MAP:
+        return {"epic": EPIC_MAP[symbol], "source": "map"}
+
+    # Fallback: use symbol as epic (old pipeline behavior)
+    return {"epic": symbol, "source": "fallback"}
 
 # ---------------------------------------------------------
 # GET POSITIONS (RAW)
