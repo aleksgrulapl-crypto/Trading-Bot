@@ -243,8 +243,8 @@
 </div>
 
 <script>
-function closePosition(id) {
-    fetch(`/dashboard/close/${id}`, { method: "GET" })
+function closePosition(dealId) {
+    fetch(`/dashboard/close/${dealId}`, { method: "GET" })
         .then(() => refreshDashboard())
         .catch(err => console.error("Close error:", err));
 }

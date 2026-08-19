@@ -105,7 +105,8 @@
                         </td>
 
                         <td>
-                            <a href="/dashboard/close/{{ p.id }}" class="pill pill-status">
+                            <!-- ⭐ FIXED: use dealId instead of p.id -->
+                            <a href="/dashboard/close/{{ p.dealId }}" class="pill pill-status">
                                 Close
                             </a>
                         </td>

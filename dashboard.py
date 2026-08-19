@@ -331,30 +331,17 @@ def dashboard_data():
 
 
 # ---------------------------------------------------------
-# CLOSE POSITION (FIXED — MAP position.id → dealId)
+# CLOSE POSITION (FINAL — USE dealId DIRECTLY)
 # ---------------------------------------------------------
 
-@dashboard.route("/dashboard/close/<position_id>")
+@dashboard.route("/dashboard/close/<deal_id>")
 @login_required
-def dashboard_close(position_id):
+def dashboard_close(deal_id):
     """
     Dashboard close:
-    - position_id is NOT dealId
-    - we must map position.id → dealId
+    - deal_id is already the correct Capital.com dealId
+    - no mapping required
     """
-
-    raw_positions = session.get_positions() or []
-    enriched = session.enrich_positions(raw_positions)
-
-    deal_id = None
-    for p in enriched:
-        if str(p.get("id")) == str(position_id):
-            deal_id = p.get("dealId")
-            break
-
-    if not deal_id:
-        print("[DASHBOARD] ERROR: Could not map position.id → dealId", flush=True)
-        return redirect("/dashboard")
 
     from close_position import close_position
     close_position(deal_id)
@@ -364,6 +351,7 @@ def dashboard_close(position_id):
     session.shared_state["trade_log"] = load_raw_log()
 
     return redirect("/dashboard")
+
 
 
 # ---------------------------------------------------------
