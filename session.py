@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (RESET + FULL RAW DEBUG)
+# SESSION MODULE (WORKINGORDERID CLOSE FIX + FULL RAW DEBUG)
 # ============================
 
 import requests
@@ -66,7 +66,7 @@ def request(method, url, json=None):
 
 
 # ---------------------------------------------------------
-# GET POSITIONS (FULL RAW DEBUG ADDED)
+# GET POSITIONS (FULL RAW DEBUG)
 # ---------------------------------------------------------
 
 def get_positions():
@@ -80,7 +80,6 @@ def get_positions():
         data = response.json()
         positions = data.get("positions", [])
 
-        # ⭐ FULL RAW DEBUG — prints entire object, not just "position"
         if positions:
             print("\n[DEBUG] FULL RAW POSITION OBJECT:")
             pprint.pprint(positions[0], width=200)
@@ -94,7 +93,7 @@ def get_positions():
 
 
 # ---------------------------------------------------------
-# ENRICH POSITIONS (TEMPORARY — WILL UPDATE AFTER DEBUG)
+# ENRICH POSITIONS (CORRECT CLOSE ID = workingOrderId)
 # ---------------------------------------------------------
 
 def enrich_positions(raw_positions):
@@ -104,8 +103,8 @@ def enrich_positions(raw_positions):
         pos = item.get("position", {})
         market = item.get("market", {})
 
-        # TEMPORARY — we will replace this once we see the real close ID
-        position_id = pos.get("dealId")
+        # ⭐ Correct close ID
+        position_id = pos.get("workingOrderId")
 
         ticker = market.get("symbol")
         direction = pos.get("direction")
@@ -115,7 +114,7 @@ def enrich_positions(raw_positions):
         profit = pos.get("upl", 0)
 
         enriched.append({
-            "id": position_id,
+            "id": position_id,  # ⭐ correct close ID
             "ticker": ticker,
             "epic": market.get("epic"),
 
