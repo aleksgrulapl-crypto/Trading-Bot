@@ -331,7 +331,7 @@ def dashboard_data():
 
 
 # ---------------------------------------------------------
-# CLOSE POSITION (FIXED)
+# CLOSE POSITION (FIXED — MAP position.id → dealId)
 # ---------------------------------------------------------
 
 @dashboard.route("/dashboard/close/<position_id>")
@@ -339,18 +339,28 @@ def dashboard_data():
 def dashboard_close(position_id):
     """
     Dashboard close:
-    - position_id is the real dealId (from enrich_positions → id)
-    - pass it directly to close_position_module
+    - position_id is NOT dealId
+    - we must map position.id → dealId
     """
-    from close_position import close_position
-
-    close_position(position_id)
 
     raw_positions = session.get_positions() or []
-    raw_account = session.get_account() or {}
+    enriched = session.enrich_positions(raw_positions)
 
-    session.shared_state["positions"] = session.enrich_positions(raw_positions)
-    session.shared_state["account"] = session.enrich_account(raw_account)
+    deal_id = None
+    for p in enriched:
+        if str(p.get("id")) == str(position_id):
+            deal_id = p.get("dealId")
+            break
+
+    if not deal_id:
+        print("[DASHBOARD] ERROR: Could not map position.id → dealId", flush=True)
+        return redirect("/dashboard")
+
+    from close_position import close_position
+    close_position(deal_id)
+
+    session.shared_state["positions"] = session.enrich_positions(session.get_positions())
+    session.shared_state["account"] = session.enrich_account(session.get_account())
     session.shared_state["trade_log"] = load_raw_log()
 
     return redirect("/dashboard")
