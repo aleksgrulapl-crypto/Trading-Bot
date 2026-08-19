@@ -73,7 +73,9 @@ def request(method, url, json=None):
         return response
 
     except Exception as e:
-        print(f"[ERROR] Request failed: {e}", flush=True)
+        import traceback
+        print("[ERROR] Request failed:", flush=True)
+        traceback.print_exc()
         return None
 
 
