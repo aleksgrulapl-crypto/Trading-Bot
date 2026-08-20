@@ -1,7 +1,6 @@
 # order.py
 # ============================
 # ORDER MODULE (FINAL — CORRECT CONFIRMS ENDPOINT + STABLE DEALID MAPPING)
-# ============================
 
 import time
 import logging
@@ -38,14 +37,12 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
     """
     Place a BUY/SELL market order and log an OPEN trade.
     Uses Capital.com's confirms endpoint to map dealReference -> dealId when available.
-    Returns a dict with status and details.
     """
-    # Ensure authentication
     if not auth.ensure_token():
         logger.error("Authentication failed; cannot place order")
         return {"status": "error", "message": "auth_failed"}
 
-    # 1) MARKET SNAPSHOT
+    # Market snapshot
     try:
         snap_resp = session.request("GET", f"{API_MARKET}/{epic}")
         if not snap_resp or snap_resp.status_code != 200:
@@ -73,7 +70,7 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
         logger.exception("Exception while fetching market snapshot: %s", e)
         return {"status": "error", "message": "snapshot_error"}
 
-    # 2) BUILD ORDER PAYLOAD
+    # Build payload
     try:
         payload = {
             "epic": epic,
@@ -83,18 +80,16 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
             "level": None,
             "guaranteedStop": False,
         }
-
         if sl is not None:
             payload["stopLevel"] = float(sl)
         if tp is not None:
             payload["profitLevel"] = float(tp)
-
         logger.debug("Order payload: %s", payload)
     except Exception as e:
         logger.exception("Invalid order parameters: %s", e)
         return {"status": "error", "message": "invalid_parameters"}
 
-    # 3) SEND ORDER
+    # Send order
     try:
         response = session.request("POST", API_POSITIONS, json=payload)
         if not response or response.status_code >= 400:
@@ -115,11 +110,11 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
         logger.exception("Exception while sending order: %s", e)
         return {"status": "error", "message": "order_request_failed"}
 
-    # 4) LOG OPEN TRADE (include dealReference so reconciliation won't duplicate)
+    # Log open trade (include dealReference)
     try:
         ts = timestamp()
         trade_payload = {
-            "dealId": None,  # will be filled later if mapping available
+            "dealId": None,
             "dealReference": deal_ref,
             "ticker": epic,
             "epic": epic,
@@ -134,7 +129,7 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
     except Exception as e:
         logger.exception("Failed to log open trade: %s", e)
 
-    # 5) DEALID MAPPING VIA CONFIRMS ENDPOINT
+    # Map dealReference -> dealId via confirms endpoint
     real_deal_id = None
     if deal_ref:
         confirms_url = f"{API_BASE}/api/v1/confirms/{deal_ref}"
@@ -151,8 +146,7 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
                         body = confirm.json() or {}
                     except Exception:
                         body = {}
-                    # try common keys
-                    real_deal_id = body.get("dealId") or body.get("deal_id") or body.get("dealId")
+                    real_deal_id = body.get("dealId") or body.get("deal_id")
                     if real_deal_id:
                         break
                 else:
@@ -163,7 +157,6 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
 
         if real_deal_id:
             logger.info("Mapped dealReference -> dealId: %s", real_deal_id)
-            # Update existing log entry that was created with dealReference
             try:
                 updated = set_dealId_for_dealReference(deal_ref, real_deal_id)
                 if updated:
@@ -175,7 +168,6 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
     else:
         logger.warning("No dealReference returned by order response; logged open trade without dealReference")
 
-    # 6) Update last trade timestamp
     try:
         session.update_last_trade()
     except Exception:

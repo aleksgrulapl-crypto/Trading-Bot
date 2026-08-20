@@ -20,7 +20,6 @@ if not logger.handlers:
     handler.setFormatter(fmt)
     logger.addHandler(handler)
 
-# Prefer config-provided path, fall back to env or default
 LOG_PATH = getattr(config, "TRADE_LOG_PATH", None) or os.environ.get("TRADE_LOG_PATH") or os.environ.get("TRADE_LOG_FILE") or "trade_log.json"
 BACKUP_PATH = os.environ.get("TRADE_LOG_BACKUP", "trade_log.bak.json")
 FLOAT_TOLERANCE = 1e-8
@@ -28,16 +27,12 @@ UK_TZ = pytz.timezone("Europe/London")
 
 
 def _now_iso() -> str:
-    """
-    Return current time in UK timezone as ISO string with timezone info.
-    Example: 2026-08-20T18:54:08+01:00
-    """
+    """Return current time in UK timezone as ISO string with timezone info."""
     now = datetime.now(UK_TZ)
     return now.isoformat()
 
 
 def _atomic_write(path: str, data: Any) -> bool:
-    """Write JSON to path atomically using a temp file + replace."""
     dirn = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(dir=dirn)
     try:
@@ -55,7 +50,6 @@ def _atomic_write(path: str, data: Any) -> bool:
 
 
 def load_raw_log() -> List[Dict[str, Any]]:
-    """Return list of trades (may be empty)."""
     if not os.path.exists(LOG_PATH):
         return []
     try:
@@ -71,9 +65,7 @@ def load_raw_log() -> List[Dict[str, Any]]:
 
 
 def save_raw_log(trades: List[Dict[str, Any]]) -> bool:
-    """Atomically save trades list to disk (with backup)."""
     try:
-        # backup current
         if os.path.exists(LOG_PATH):
             try:
                 with open(LOG_PATH, "r", encoding="utf-8") as f:
@@ -94,18 +86,15 @@ def save_raw_log(trades: List[Dict[str, Any]]) -> bool:
 
 
 def reset_log() -> bool:
-    """Clear the trade log safely."""
     return save_raw_log([])
 
 
 def append_open_trade(trade: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Append a new open trade.
-    Expected trade keys: dealId, dealReference, ticker, side, size, entry_price, time_entered
-    Returns the appended trade dict or None on failure.
+    Expected keys: dealId (optional), dealReference (recommended), ticker, side, size, entry_price, time_entered
     """
     trades = load_raw_log()
-    # normalize
     try:
         t = {
             "dealId": trade.get("dealId"),
@@ -132,11 +121,6 @@ def append_open_trade(trade: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def _compute_pnl_for_trade(trade: Dict[str, Any]) -> Optional[float]:
-    """
-    Compute PnL for a closed trade.
-    For Long: (exit - entry) * size
-    For Short: (entry - exit) * size
-    """
     try:
         entry = float(trade.get("entry_price", 0))
         exitp = float(trade.get("exit_price", 0))
@@ -153,10 +137,6 @@ def _compute_pnl_for_trade(trade: Dict[str, Any]) -> Optional[float]:
 
 
 def close_trade_by_dealId(dealId: Any, exit_price: Any = None, time_exited: Optional[str] = None, note: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """
-    Mark trade closed by dealId. If exit_price is None, we still mark closed but pnl will be None.
-    Returns the updated trade or None if not found.
-    """
     trades = load_raw_log()
     updated = None
     for t in trades:
@@ -190,10 +170,6 @@ def _float_equal(a: Any, b: Any, tol: float = FLOAT_TOLERANCE) -> bool:
 
 
 def close_trade_fallback(ticker: Any, entry_price: Any, exit_price: Any = None, time_exited: Optional[str] = None, note: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """
-    If dealId is missing, try to find a matching open trade by ticker+entry_price and close it.
-    Uses tolerant numeric comparison for entry_price.
-    """
     trades = load_raw_log()
     updated = None
     for t in trades:
@@ -231,7 +207,6 @@ def _make_signature(dealId: Any, dealReference: Any, ticker: Any, entry_price: A
 def set_dealId_for_dealReference(dealReference: Any, dealId: Any) -> bool:
     """
     Update an existing log entry that was recorded with a dealReference but missing dealId.
-    Returns True if updated.
     """
     if not dealReference or not dealId:
         return False
@@ -241,7 +216,6 @@ def set_dealId_for_dealReference(dealReference: Any, dealId: Any) -> bool:
     for t in trades:
         if (t.get("dealReference") == dealReference) and (not t.get("dealId")):
             t["dealId"] = dealId
-            # keep time_entered as-is; add note
             t["notes"] = (t.get("notes") or "") + f" | dealId_mapped={dealId}"
             updated = True
             break
@@ -254,10 +228,8 @@ def set_dealId_for_dealReference(dealReference: Any, dealId: Any) -> bool:
 def reconcile_with_positions(live_positions: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """
     Reconcile local trade log with live positions.
-    - Match by dealId first, then dealReference, then fallback to ticker+entry_price.
-    - If a trade in the log is OPEN but its dealId is present in the log and NOT present in live_positions -> mark CLOSED (time_exited now).
-    - If a live position exists but not in the log -> append as OPEN.
-    Returns dict: {"closed": [..], "added": [..]}
+    Matching order: dealId -> dealReference -> ticker+entry_price
+    When marking closed, attempt to capture exit_price if present in live_positions/history payload.
     """
     trades = load_raw_log()
     closed: List[Dict[str, Any]] = []
@@ -272,12 +244,11 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]]) -> Dict[str, 
         if t.get("dealReference"):
             log_by_dealRef[t.get("dealReference")] = t
 
-    # Build set of live dealIds (as strings)
+    # Build set of live dealIds
     live_ids = set()
     for p in live_positions or []:
         did = None
         if isinstance(p, dict):
-            # support enriched and raw shapes
             did = p.get("dealId") or (p.get("position") or {}).get("dealId")
         if did is not None:
             live_ids.add(str(did))
@@ -287,10 +258,25 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]]) -> Dict[str, 
         if t.get("status") != "CLOSED":
             did = t.get("dealId")
             if did is not None and str(did) not in live_ids:
-                # mark closed (no exit price known)
+                # try to find exit info in provided live_positions/history
+                exit_price = None
+                time_exited = None
+                # search live_positions for a matching history/transaction with this dealId
+                for p in live_positions or []:
+                    pdid = p.get("dealId") or (p.get("position") or {}).get("dealId")
+                    if pdid and str(pdid) == str(did):
+                        # look for common exit fields
+                        exit_price = p.get("exit_price") or p.get("closePrice") or p.get("closedPrice") or p.get("price")
+                        time_exited = p.get("time_exited") or p.get("timeExited") or p.get("closedDate")
+                        break
+
+                if exit_price is not None:
+                    try:
+                        t["exit_price"] = float(exit_price)
+                    except Exception:
+                        t["exit_price"] = exit_price
+                t["time_exited"] = time_exited or _now_iso()
                 t["status"] = "CLOSED"
-                t["time_exited"] = _now_iso()
-                # pnl remains None unless exit_price is known
                 t["pnl"] = _compute_pnl_for_trade(t) if t.get("exit_price") is not None else None
                 closed.append(t)
 
@@ -302,7 +288,6 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]]) -> Dict[str, 
 
     # add live positions not in log
     for p in live_positions or []:
-        # normalize fields from live position
         dealId = None
         dealReference = None
         ticker = None
@@ -310,11 +295,8 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]]) -> Dict[str, 
         side = None
         size = None
         time_entered = None
-        exit_price = None
-        time_exited = None
 
         if isinstance(p, dict):
-            # enriched shape
             if p.get("dealId") is not None:
                 dealId = p.get("dealId")
                 dealReference = p.get("dealReference")
@@ -324,7 +306,6 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]]) -> Dict[str, 
                 size = p.get("size")
                 time_entered = p.get("time_entered")
             else:
-                # raw API shape
                 pos = p.get("position") or {}
                 market = p.get("market") or {}
                 dealId = pos.get("dealId") or pos.get("dealReference")
@@ -353,7 +334,6 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]]) -> Dict[str, 
                     "notes": "Imported from live positions"
                 }
             except Exception:
-                # fallback to safer defaults
                 new = {
                     "dealId": dealId,
                     "dealReference": dealReference,
@@ -388,20 +368,11 @@ def get_open_trades() -> List[Dict[str, Any]]:
     return [t for t in trades if t.get("status") != "CLOSED"]
 
 
-# -------------------------
 # Backwards compatibility wrappers
-# -------------------------
-# Many older modules import legacy names like log_open_trade / log_closed_trade / get_trades.
-# Provide thin aliases that map to the canonical functions above.
 
 def log_open_trade(*args, **kwargs) -> Optional[Dict[str, Any]]:
-    """
-    Backwards-compatible alias for append_open_trade.
-    Accepts either a single dict positional arg or keyword args.
-    """
     if args and isinstance(args[0], dict):
         return append_open_trade(args[0])
-    # build dict from kwargs
     payload = {
         "dealId": kwargs.get("dealId") or kwargs.get("deal_id") or kwargs.get("dealid"),
         "dealReference": kwargs.get("dealReference") or kwargs.get("deal_reference"),
@@ -416,13 +387,6 @@ def log_open_trade(*args, **kwargs) -> Optional[Dict[str, Any]]:
 
 
 def log_closed_trade(*args, **kwargs) -> Optional[Dict[str, Any]]:
-    """
-    Backwards-compatible alias for close_trade_by_dealId or close_trade_fallback.
-    Usage patterns supported:
-      - log_closed_trade(dealId, exit_price=..., time_exited=..., note=...)
-      - log_closed_trade(ticker=..., entry_price=..., exit_price=..., ...)
-    """
-    # If first positional arg is a dict, try to extract fields
     if args and isinstance(args[0], dict):
         d = args[0]
         dealId = d.get("dealId") or d.get("deal_id")
@@ -431,14 +395,12 @@ def log_closed_trade(*args, **kwargs) -> Optional[Dict[str, Any]]:
         note = d.get("note") or d.get("notes")
         if dealId:
             return close_trade_by_dealId(dealId, exit_price=exit_price, time_exited=time_exited, note=note)
-        # fallback to ticker+entry_price
         ticker = d.get("ticker")
         entry_price = d.get("entry_price") or d.get("entryPrice") or d.get("price")
         if ticker and entry_price is not None:
             return close_trade_fallback(ticker, entry_price, exit_price=exit_price, time_exited=time_exited, note=note)
         return None
 
-    # positional style: (dealId, exit_price?)
     if args and len(args) >= 1:
         dealId = args[0]
         exit_price = args[1] if len(args) >= 2 else kwargs.get("exit_price") or kwargs.get("exitPrice")
@@ -446,7 +408,6 @@ def log_closed_trade(*args, **kwargs) -> Optional[Dict[str, Any]]:
         note = kwargs.get("note")
         return close_trade_by_dealId(dealId, exit_price=exit_price, time_exited=time_exited, note=note)
 
-    # keyword style for fallback
     if "dealId" in kwargs or "deal_id" in kwargs:
         dealId = kwargs.get("dealId") or kwargs.get("deal_id")
         return close_trade_by_dealId(dealId, exit_price=kwargs.get("exit_price"), time_exited=kwargs.get("time_exited"), note=kwargs.get("note"))
@@ -458,5 +419,4 @@ def log_closed_trade(*args, **kwargs) -> Optional[Dict[str, Any]]:
 
 
 def get_trades() -> List[Dict[str, Any]]:
-    """Backwards-compatible alias for load_raw_log."""
     return load_raw_log()

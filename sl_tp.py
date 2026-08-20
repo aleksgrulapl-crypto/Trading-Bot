@@ -1,7 +1,5 @@
 # fixed_sltp.py
-# ============================
-# FIXED SL/TP MODULE (Module 5 — Corrected + Stable)
-# ============================
+# Fixed SL/TP logic with minimum SL distance enforcement
 
 import logging
 from typing import Optional, Tuple
@@ -21,60 +19,59 @@ logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_LOGS", False) else loggi
 class FixedSLTP:
     """
     Fixed SL/TP logic.
-    - Uses configured FIXED_SL_PERC and FIXED_TP_PERC from config.
-    - Returns (sl, tp) as rounded floats or (None, None) if entry price unavailable.
+    Uses FIXED_SL_PERC and FIXED_TP_PERC from config.
+    Enforces a minimum SL distance (MIN_SL_PERC) to avoid overly tight stops.
     """
 
     @staticmethod
+    def _get_percents() -> Tuple[float, float, float]:
+        sl_perc = float(getattr(config, "FIXED_SL_PERC", 0.01))  # default 1%
+        tp_perc = float(getattr(config, "FIXED_TP_PERC", 0.02))  # default 2%
+        min_sl_perc = float(getattr(config, "MIN_SL_PERC", 0.005))  # minimum 0.5% distance
+        # If user complained SLs were too small, allow a safety multiplier
+        safety_mult = float(getattr(config, "FIXED_SL_SAFETY_MULT", 1.0))
+        sl_perc = max(sl_perc * safety_mult, min_sl_perc)
+        return sl_perc, tp_perc, min_sl_perc
+
+    @staticmethod
     def long_levels(entry_price: float) -> Tuple[Optional[float], Optional[float]]:
-        """
-        Long trade:
-          SL = entry * (1 - FIXED_SL_PERC)
-          TP = entry * (1 + FIXED_TP_PERC)
-        """
         try:
             if entry_price is None:
                 return None, None
-            sl = float(entry_price) * (1.0 - float(getattr(config, "FIXED_SL_PERC", 0.10)))
-            tp = float(entry_price) * (1.0 + float(getattr(config, "FIXED_TP_PERC", 0.20)))
-            return round(sl, 2), round(tp, 2)
+            sl_perc, tp_perc, min_sl = FixedSLTP._get_percents()
+            # SL distance (absolute)
+            sl = float(entry_price) * (1.0 - sl_perc)
+            tp = float(entry_price) * (1.0 + tp_perc)
+            # enforce minimum absolute distance if configured (min_sl is a percentage)
+            min_distance = float(entry_price) * min_sl
+            if (entry_price - sl) < min_distance:
+                sl = entry_price - min_distance
+            return round(sl, 4), round(tp, 4)
         except Exception as e:
             logger.exception("long_levels error: %s", e)
             return None, None
 
     @staticmethod
     def short_levels(entry_price: float) -> Tuple[Optional[float], Optional[float]]:
-        """
-        Short trade:
-          SL = entry * (1 + FIXED_SL_PERC)
-          TP = entry * (1 - FIXED_TP_PERC)
-        """
         try:
             if entry_price is None:
                 return None, None
-            sl = float(entry_price) * (1.0 + float(getattr(config, "FIXED_SL_PERC", 0.10)))
-            tp = float(entry_price) * (1.0 - float(getattr(config, "FIXED_TP_PERC", 0.20)))
-            return round(sl, 2), round(tp, 2)
+            sl_perc, tp_perc, min_sl = FixedSLTP._get_percents()
+            sl = float(entry_price) * (1.0 + sl_perc)
+            tp = float(entry_price) * (1.0 - tp_perc)
+            min_distance = float(entry_price) * min_sl
+            if (sl - entry_price) < min_distance:
+                sl = entry_price + min_distance
+            return round(sl, 4), round(tp, 4)
         except Exception as e:
             logger.exception("short_levels error: %s", e)
             return None, None
 
     @staticmethod
     def get_levels(ticker: str, side: str) -> Tuple[Optional[float], Optional[float]]:
-        """
-        Main wrapper:
-          - Resolves an entry price via MarketData.get_entry_price(ticker, side)
-          - Normalizes side and returns (sl, tp)
-          - Returns (None, None) if entry price or side invalid
-        """
-        if not ticker:
-            logger.debug("get_levels: missing ticker")
+        if not ticker or not side:
+            logger.debug("get_levels: missing ticker or side")
             return None, None
-
-        if not side:
-            logger.debug("get_levels: missing side")
-            return None, None
-
         side_norm = str(side).strip().lower()
         try:
             entry_price = MarketData.get_entry_price(ticker, side_norm)
@@ -83,7 +80,6 @@ class FixedSLTP:
             entry_price = None
 
         if entry_price is None:
-            logger.debug("get_levels: no entry price for %s", ticker)
             return None, None
 
         if side_norm in ("buy", "long"):

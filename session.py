@@ -1,7 +1,6 @@
 # session.py
 # ============================
 # SESSION MODULE (CLEAN ACCOUNT VALUES — BALANCE STATIC, EQUITY = BALANCE + PNL)
-# ============================
 
 import time
 import pprint
@@ -14,7 +13,6 @@ from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
 from utils import timestamp
 import report
 
-# logger for this module (do not call basicConfig here)
 logger = logging.getLogger("session")
 logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_LOGS", False) else logging.INFO)
 if not logger.handlers:
@@ -23,7 +21,6 @@ if not logger.handlers:
     handler.setFormatter(fmt)
     logger.addHandler(handler)
 
-# Shared application state
 shared_state: Dict[str, Any] = {
     "account": {},
     "positions": [],
@@ -36,21 +33,13 @@ shared_state: Dict[str, Any] = {
     "daily_report": {}
 }
 
-# Simple in-memory cache for account (TTL configurable)
 _cache: Dict[str, Any] = {
     "account": {"ts": 0.0, "data": {}}
 }
 _ACCOUNT_CACHE_TTL = float(getattr(config, "CACHE_TTL_SECONDS", 2))
 
 
-# -------------------------
-# Helpers
-# -------------------------
-
 def get_headers() -> Optional[Dict[str, str]]:
-    """
-    Return headers for authenticated requests or None if auth not available.
-    """
     if not auth.ensure_token():
         logger.debug("get_headers: auth.ensure_token failed")
         return None
@@ -65,11 +54,6 @@ def get_headers() -> Optional[Dict[str, str]]:
 
 
 def request(method: str, url: str, json: Optional[dict] = None, **kwargs):
-    """
-    Unified request wrapper that uses auth.request if available.
-    Returns requests.Response or None.
-    """
-    # Prefer auth.request wrapper which handles tokens and retries
     try:
         resp = auth.request(method, url, json=json, **kwargs)
         if resp is None:
@@ -84,14 +68,7 @@ def request(method: str, url: str, json: Optional[dict] = None, **kwargs):
         return None
 
 
-# -------------------------
-# Positions and account
-# -------------------------
-
 def get_positions() -> List[dict]:
-    """
-    Fetch live positions from API. Returns list (possibly empty).
-    """
     url = f"{API_POSITIONS}?includeProfitLoss=true"
     response = request("GET", url)
 
@@ -124,9 +101,6 @@ def _normalize_direction(direction: Optional[str]) -> Optional[str]:
 
 
 def enrich_positions(raw_positions: List[dict]) -> List[dict]:
-    """
-    Convert raw API positions into normalized, UI-friendly dicts.
-    """
     enriched: List[dict] = []
 
     for item in raw_positions or []:
@@ -140,7 +114,6 @@ def enrich_positions(raw_positions: List[dict]) -> List[dict]:
         size = pos.get("size")
         entry_price = pos.get("level")
 
-        # choose current price depending on direction
         current_price = None
         try:
             if direction_raw and str(direction_raw).upper() == "BUY":
@@ -178,10 +151,6 @@ def enrich_positions(raw_positions: List[dict]) -> List[dict]:
 
 
 def get_account() -> dict:
-    """
-    Fetch account payload with short caching to reduce API calls.
-    Returns raw account dict (as returned by API) or cached value.
-    """
     now = time.time()
     cache_entry = _cache.get("account", {})
     if now - cache_entry.get("ts", 0.0) < _ACCOUNT_CACHE_TTL:
@@ -214,43 +183,32 @@ def enrich_account(raw: dict) -> dict:
       - pnl: floating profit/loss
       - available: available to trade
       - equity: computed as balance + pnl
-    This function ensures we do not double-count PnL if the API's 'balance' already includes floating PnL.
+    Avoid double-counting PnL if API 'balance' is actually equity.
     """
     if not raw:
         return {}
 
     bal = (raw.get("balance") or {}) or {}
 
-    # Prefer 'funds' as the static Balance. If missing, attempt to derive static funds.
-    balance_val = None
-    pnl_val = None
-    available_val = None
-
-    # Extract reported fields
     reported_funds = bal.get("funds", None)
     reported_balance = bal.get("balance", None)
     reported_pnl = bal.get("profitLoss", None)
     reported_available = bal.get("available", None)
 
-    # If 'funds' present, use it as static balance
     if reported_funds is not None:
         balance_val = reported_funds
     else:
-        # If API provides both reported_balance and profitLoss, assume reported_balance may be equity.
-        # Derive static balance = reported_balance - profitLoss to avoid double-counting.
         if reported_balance is not None and reported_pnl is not None:
             try:
                 balance_val = float(reported_balance) - float(reported_pnl)
             except Exception:
                 balance_val = reported_balance
         else:
-            # Last resort: use reported_balance as-is (best-effort)
             balance_val = reported_balance if reported_balance is not None else 0
 
     pnl_val = reported_pnl if reported_pnl is not None else 0
     available_val = reported_available if reported_available is not None else 0
 
-    # Convert to floats safely
     try:
         balance = float(balance_val or 0)
     except Exception:
@@ -279,15 +237,7 @@ def enrich_account(raw: dict) -> dict:
     return account_obj
 
 
-# -------------------------
-# EPIC lookup
-# -------------------------
-
 def verify_epic(symbol: str) -> dict:
-    """
-    Resolve a ticker symbol to an EPIC. First consult EPIC_MAP, then API lookup.
-    Returns dict: {'epic': str or None, 'source': 'map'|'api'|'not_found'|'api_error'|'exception'}
-    """
     if not symbol:
         return {"epic": None, "source": "invalid"}
 
@@ -312,10 +262,6 @@ def verify_epic(symbol: str) -> dict:
         logger.exception("verify_epic: exception during lookup for %s", symbol_up)
         return {"epic": None, "source": "exception"}
 
-
-# -------------------------
-# Reports and state updates
-# -------------------------
 
 def get_daily_report() -> dict:
     try:
