@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (STABLE POSITION PIPELINE, OPTION A)
+# SESSION MODULE (OPTION A — CLEAN ACCOUNT VALUES)
 # ============================
 
 import time
@@ -8,10 +8,6 @@ from auth import auth
 from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
 from utils import timestamp
 import report
-
-# ---------------------------------------------------------
-# SHARED STATE
-# ---------------------------------------------------------
 
 shared_state = {
     "account": {},
@@ -29,11 +25,6 @@ _cache = {
     "account": {"ts": 0, "data": {}}
 }
 
-
-# ---------------------------------------------------------
-# HEADERS
-# ---------------------------------------------------------
-
 def get_headers():
     auth.ensure_token()
     return {
@@ -44,19 +35,8 @@ def get_headers():
         "Accept": "application/json",
     }
 
-
-# ---------------------------------------------------------
-# REQUEST WRAPPER
-# ---------------------------------------------------------
-
 def request(method, url, json=None):
     headers = get_headers()
-
-    if "/positions/" in url and "/close" in url:
-        print("[SESSION] CLOSE REQUEST", flush=True)
-        print("[SESSION] METHOD  →", method, flush=True)
-        print("[SESSION] URL     →", url, flush=True)
-        print("[SESSION] BODY    →", json, flush=True)
 
     try:
         response = auth.session.request(method, url, headers=headers, json=json)
@@ -73,28 +53,12 @@ def request(method, url, json=None):
         traceback.print_exc()
         return None
 
-
-# ---------------------------------------------------------
-# POSITIONS
-# ---------------------------------------------------------
-
 def get_positions():
-    """
-    Fetch raw positions from Capital.com.
-    Returns the raw API structure:
-    [
-        {
-            "position": {...},
-            "market": {...}
-        },
-        ...
-    ]
-    """
     url = f"{API_POSITIONS}?includeProfitLoss=true"
     response = request("GET", url)
 
     if not response or response.status_code != 200:
-        print("[SESSION] get_positions → non-200 or no response, returning []", flush=True)
+        print("[SESSION] get_positions → non-200 or no response", flush=True)
         return []
 
     try:
@@ -112,7 +76,6 @@ def get_positions():
         print(f"[SESSION] Failed to parse positions: {e}", flush=True)
         return []
 
-
 def _normalize_direction(direction):
     if not direction:
         return None
@@ -123,13 +86,7 @@ def _normalize_direction(direction):
         return "Short"
     return direction.capitalize()
 
-
 def enrich_positions(raw_positions):
-    """
-    Convert raw Capital.com positions into dashboard-friendly objects.
-    id  = dealId (for legacy use)
-    dealId = explicit field for close button and logging.
-    """
     enriched = []
 
     for item in raw_positions:
@@ -143,8 +100,6 @@ def enrich_positions(raw_positions):
         size = pos.get("size")
         entry_price = pos.get("level")
 
-        # LONG (BUY) → current_price = bid (you would sell)
-        # SHORT (SELL) → current_price = offer (you would buy back)
         if direction_raw == "BUY":
             current_price = market.get("bid")
         else:
@@ -161,7 +116,7 @@ def enrich_positions(raw_positions):
             "size": size,
             "price": entry_price,
             "current_price": current_price,
-            "direction": direction,  # normalized Long / Short
+            "direction": direction,
             "profit": round(profit, 2),
             "stopLevel": pos.get("stopLevel"),
             "limitLevel": pos.get("profitLevel"),
@@ -171,11 +126,6 @@ def enrich_positions(raw_positions):
 
     return enriched
 
-
-# ---------------------------------------------------------
-# ACCOUNT
-# ---------------------------------------------------------
-
 def get_account():
     now = time.time()
     if now - _cache["account"]["ts"] < 1.0:
@@ -184,7 +134,7 @@ def get_account():
     response = request("GET", API_ACCOUNT)
 
     if not response or response.status_code != 200:
-        print("[SESSION] get_account → non-200 or no response, returning cached", flush=True)
+        print("[SESSION] get_account → non-200 or no response", flush=True)
         return _cache["account"]["data"]
 
     try:
@@ -200,20 +150,7 @@ def get_account():
         print(f"[SESSION] Failed to parse account: {e}", flush=True)
         return _cache["account"]["data"]
 
-
 def enrich_account(raw):
-    """
-    Option A: use Capital.com account values directly.
-
-    balance   → Capital balance (cash)
-    profitLoss → floating PnL
-    equity    → balance + profitLoss
-    available → available to trade
-    margin    → used margin
-
-    Dashboard will show: Equity, Balance, Available, PnL, Margin.
-    'Funds' on the UI should equal Equity (as you requested).
-    """
     if not raw:
         return {}
 
@@ -222,30 +159,15 @@ def enrich_account(raw):
     balance = bal.get("balance", 0)
     pnl = bal.get("profitLoss", 0)
     available = bal.get("available", 0)
-    margin = bal.get("margin", 0)
 
     equity = balance + pnl
 
-    margin_warning = None
-    if available < 0:
-        margin_warning = "⚠ Margin Warning: Available balance is negative."
-
     return {
-        # Funds = Equity (per your requirement)
-        "funds": round(equity, 2),
         "equity": round(equity, 2),
         "balance": round(balance, 2),
         "pnl": round(pnl, 2),
-        "available": round(available, 2),
-        "margin": round(margin, 2),
-        "available_color": "red" if available < 0 else "lime",
-        "margin_warning": margin_warning
+        "available": round(available, 2)
     }
-
-
-# ---------------------------------------------------------
-# EPIC LOOKUP
-# ---------------------------------------------------------
 
 def verify_epic(symbol):
     symbol = symbol.upper()
@@ -274,11 +196,6 @@ def verify_epic(symbol):
         print(f"[EPIC] Exception during lookup: {e}", flush=True)
         return {"epic": None, "source": "exception"}
 
-
-# ---------------------------------------------------------
-# DAILY REPORT
-# ---------------------------------------------------------
-
 def get_daily_report():
     try:
         report_data = report.get_daily_report()
@@ -287,11 +204,6 @@ def get_daily_report():
     except Exception as e:
         print(f"[REPORT] Failed to load daily report: {e}", flush=True)
         return {}
-
-
-# ---------------------------------------------------------
-# UPDATE LAST TRADE / WEBHOOK
-# ---------------------------------------------------------
 
 def update_last_trade():
     shared_state["system_status"]["last_trade"] = timestamp()

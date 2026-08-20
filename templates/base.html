@@ -224,11 +224,21 @@
 
     <div class="nav">
         <span id="header-account" style="color: var(--accent-soft); font-weight: 600;">
-            Funds: {{ account.funds|default('—') }} ·
+            Equity: {{ account.equity|default('—') }} ·
             Balance: {{ account.balance|default('—') }} ·
-            PnL: {{ account.pnl|default('—') }} ·
-            Available: {{ account.available|default('—') }} ·
-            Margin: {{ account.margin|default('—') }}
+            PnL:
+            <span style="
+                font-weight:700;
+                color:{% if account.pnl is not none and account.pnl >= 0 %}
+                    var(--success)
+                {% else %}
+                    var(--danger)
+                {% endif %};
+            ">
+                {{ account.pnl|default('—') }}
+            </span>
+            ·
+            Available: {{ account.available|default('—') }}
         </span>
 
         <a href="/dashboard">Dashboard</a>
@@ -236,54 +246,25 @@
     </div>
 </header>
 
-<div id="error-banner"></div>
-
-<div id="dashboard-content">
-    {% block content %}{% endblock %}
-</div>
-
 <script>
-function closePosition(dealId) {
-    fetch(`/dashboard/close/${dealId}`, { method: "GET" })
-        .then(() => refreshDashboard())
-        .catch(err => console.error("Close error:", err));
-}
-
 function refreshDashboard() {
-    const errorBanner = document.getElementById('error-banner');
-
     fetch('/dashboard/data')
         .then(r => r.json())
         .then(data => {
-            if (data && data.html) {
-                const container = document.getElementById('dashboard-inner');
-                if (container) {
-                    container.innerHTML = data.html;
-                }
-
-                const header = document.getElementById('header-account');
-                if (header && data.account) {
-                    header.innerHTML =
-                        `Funds: ${data.account.funds ?? '—'} · ` +
-                        `Balance: ${data.account.balance ?? '—'} · ` +
-                        `PnL: ${data.account.pnl ?? '—'} · ` +
-                        `Available: ${data.account.available ?? '—'} · ` +
-                        `Margin: ${data.account.margin ?? '—'}`;
-                }
-
-            } else {
-                errorBanner.innerText = "Dashboard refresh failed: Invalid response.";
-                errorBanner.style.display = "block";
+            const header = document.getElementById('header-account');
+            if (header && data.account) {
+                header.innerHTML =
+                    `Equity: ${data.account.equity ?? '—'} · ` +
+                    `Balance: ${data.account.balance ?? '—'} · ` +
+                    `PnL: <span style="font-weight:700; color:${
+                        data.account.pnl >= 0 ? 'var(--success)' : 'var(--danger)'
+                    }">${data.account.pnl ?? '—'}</span> · ` +
+                    `Available: ${data.account.available ?? '—'}`;
             }
-        })
-        .catch(err => {
-            errorBanner.innerText = "Dashboard refresh error: " + err;
-            errorBanner.style.display = "block";
         });
 }
-
-setInterval(refreshDashboard, 5000);
 </script>
+
 
 </body>
 </html>

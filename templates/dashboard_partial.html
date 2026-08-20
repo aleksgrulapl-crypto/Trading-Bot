@@ -59,7 +59,7 @@
             </div>
         </div>
 
-        <!-- Account / Positions -->
+        <!-- Account & Open Positions -->
         <div class="card">
             <div class="card-header">
                 <div class="card-title">Account & Open Positions</div>
@@ -88,7 +88,7 @@
                         <td>{{ p.ticker }}</td>
 
                         <td>
-                            {% if p.direction == 'BUY' %}
+                            {% if p.direction == 'Long' %}
                                 <span class="pill pill-long">Long</span>
                             {% else %}
                                 <span class="pill pill-short">Short</span>
@@ -105,7 +105,6 @@
                         </td>
 
                         <td>
-                            <!-- ⭐ FIXED: use dealId instead of p.id -->
                             <a href="/dashboard/close/{{ p.dealId }}" class="pill pill-status">
                                 Close
                             </a>
@@ -150,9 +149,9 @@
                         <td>{{ t.ticker }}</td>
 
                         <td>
-                            {% if t.side == 'BUY' %}
+                            {% if t.side == 'Long' %}
                                 <span class="pill pill-long">Long</span>
-                            {% elif t.side == 'SELL' %}
+                            {% elif t.side == 'Short' %}
                                 <span class="pill pill-short">Short</span>
                             {% else %}
                                 <span class="pill pill-status">{{ t.side|default('—') }}</span>
