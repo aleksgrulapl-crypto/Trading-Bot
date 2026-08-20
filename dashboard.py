@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # dashboard.py
 # ============================
 # DASHBOARD MODULE (CLEAN — EQUITY + BALANCE + PNL + AVAILABLE)
@@ -7,6 +8,7 @@ import functools
 import time
 import math
 import logging
+import os
 from flask import Blueprint, request, render_template, redirect, jsonify
 
 import session
@@ -29,6 +31,35 @@ if not logger.handlers:
     logger.addHandler(handler)
 
 
+# -----------------------------
+# Login routes (added)
+# -----------------------------
+@dashboard.route("/dashboard/login", methods=["GET"])
+def dashboard_login():
+    return render_template("login.html", title="Dashboard Login")
+
+
+@dashboard.route("/dashboard/login", methods=["POST"])
+def dashboard_login_submit():
+    password = request.form.get("password", "")
+    # Simple password check — replace with your real secret in env
+    if password == os.getenv("DASHBOARD_PASSWORD", "changeme"):
+        resp = redirect("/dashboard")
+        resp.set_cookie("dashboard_auth", "1", max_age=60*60*24*7)  # 7 days
+        return resp
+    return render_template("login.html", title="Dashboard Login", error="Invalid password")
+
+
+@dashboard.route("/dashboard/logout")
+def dashboard_logout():
+    resp = redirect("/dashboard/login")
+    resp.delete_cookie("dashboard_auth")
+    return resp
+
+
+# -----------------------------
+# Auth decorator
+# -----------------------------
 def login_required(view):
     @functools.wraps(view)
     def wrapper(*args, **kwargs):

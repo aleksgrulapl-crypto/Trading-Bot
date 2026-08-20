@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # webhook.py
 # ============================
 # WEBHOOK MODULE (PATCHED: idempotent webhook processing + original TradingView flow)
@@ -46,7 +47,11 @@ app.jinja_env.cache = {}
 
 # Register blueprint if available
 if dashboard_blueprint:
-    app.register_blueprint(dashboard_blueprint)
+    try:
+        app.register_blueprint(dashboard_blueprint)
+        logging.getLogger("webhook").info("Dashboard blueprint registered.")
+    except Exception as e:
+        logging.getLogger("webhook").error("Failed to register dashboard blueprint: %s", e)
 
 # Logging
 logger = logging.getLogger("webhook")
@@ -234,7 +239,7 @@ def webhook():
     parsed_input = _safe_get_json(raw)
     try:
         alert = parse_tradingview_alert(parsed_input)
-    except Exception as e:
+    except Exception:
         logger.exception("parse_tradingview_alert raised")
         return _ok_response({"status": "error", "message": "Invalid alert payload"})
 
@@ -435,34 +440,18 @@ def root():
 
 
 @app.route("/dashboard")
-def dashboard_home():
-    raw_positions = session.get_positions() or []
-    positions = session.enrich_positions(raw_positions)
-
-    raw_account = session.get_account() or {}
-    account = session.enrich_account(raw_account)
-
-    trade_log = load_raw_log()
-    daily_report = session.get_daily_report() or {}
-
-    return render_template(
-        "dashboard.html",
-        title=os.getenv("DASHBOARD_TITLE", "AG Capital Trader"),
-        cache_bust=time.time(),
-        account=account,
-        positions=positions,
-        trades=trade_log,
-        analytics=session.shared_state.get("analytics", {}),
-        system_status=session.shared_state.get("system_status", {}),
-        daily_report=daily_report,
-    )
+def dashboard_redirect():
+    return redirect("/dashboard/home")
 
 
-@app.route("/close/<position_id>", methods=["POST"])
-def close_position_route(position_id):
-    logger.info("Dashboard close requested for position_id=%s", position_id)
-    result = close_position_module(position_id)
-    return jsonify(result), 200
+@app.route("/dashboard")
+def dashboard_root():
+    return redirect("/dashboard/home")
+
+
+@app.route("/dashboard/home")
+def dashboard_home_redirect():
+    return redirect("/dashboard")
 
 
 # ============================
