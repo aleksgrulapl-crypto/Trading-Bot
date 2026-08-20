@@ -1,5 +1,5 @@
 # ============================
-# SYNC CLOSED TRADES (FINAL — DISAPPEARANCE + UPL FALLBACK)
+# SYNC CLOSED TRADES (FINAL — SIZE + DISAPPEARANCE, NO AUTO CLOSES)
 # ============================
 
 import time
@@ -8,9 +8,9 @@ from trade_log import load_raw_log, log_closed_trade
 from utils import timestamp
 from config import API_MARKET
 
-# Memory of last 2 snapshots to avoid rate-limit false closes
-_last_positions_1 = set()
-_last_positions_2 = set()
+# Memory of last 2 raw position snapshots (dealIds)
+_last_raw_1 = set()
+_last_raw_2 = set()
 
 _last_close_cache = {}
 _snapshot_cache = {}
@@ -40,7 +40,7 @@ def get_snapshot(epic):
 
 
 def sync_closed_trades():
-    global _last_positions_1, _last_positions_2
+    global _last_raw_1, _last_raw_2
 
     log = load_raw_log()
     open_trades = [t for t in log if t.get("status") == "OPEN"]
@@ -50,16 +50,22 @@ def sync_closed_trades():
 
     raw_positions = session.get_positions()
 
-    # If API fails → skip
     if raw_positions is None:
         print("[SYNC] Positions unavailable → skipping")
         return
 
-    enriched_positions = session.enrich_positions(raw_positions) or []
-    current_positions = set(str(p.get("id")) for p in enriched_positions)
+    # Build raw dealId + size map from raw positions
+    raw_ids = set()
+    raw_size_map = {}
 
-    # Build UPL lookup
-    upl_map = {str(p.get("id")): p.get("profit") for p in enriched_positions}
+    for item in raw_positions:
+        pos = item.get("position", {})
+        deal_id = pos.get("dealId")
+        if deal_id is None:
+            continue
+        deal_id_str = str(deal_id)
+        raw_ids.add(deal_id_str)
+        raw_size_map[deal_id_str] = pos.get("size")
 
     for trade in open_trades:
         deal_id = str(trade.get("dealId"))
@@ -68,28 +74,32 @@ def sync_closed_trades():
         if deal_id in _last_close_cache:
             continue
 
-        # Still open
-        if deal_id in current_positions:
+        # If we still see the position with non-zero size → still open
+        size = raw_size_map.get(deal_id, None)
+        try:
+            size_val = float(size) if size is not None else None
+        except Exception:
+            size_val = None
+
+        if size_val is not None and size_val > 0:
             continue
 
-        # ❗ CLOSE CONDITION #1 — Disappearance (with 2-snapshot confirmation)
+        # CLOSE CONDITION #1 — size becomes 0
+        size_zero = size_val == 0
+
+        # CLOSE CONDITION #2 — disappearance confirmed over last snapshots
         disappeared = (
-            deal_id not in current_positions
-            and (deal_id in _last_positions_1 or deal_id in _last_positions_2)
+            deal_id not in raw_ids
+            and (deal_id in _last_raw_1 or deal_id in _last_raw_2)
         )
 
-        # ❗ CLOSE CONDITION #2 — UPL fallback (Capital.com stale position bug)
-        upl_value = upl_map.get(deal_id, None)
-        upl_closed = upl_value is None
-
         # If neither condition is true → skip
-        if not disappeared and not upl_closed:
+        if not (size_zero or disappeared):
             continue
 
-        # Fetch snapshot
         epic = trade.get("epic")
         direction = trade.get("side")
-        size = float(trade.get("size"))
+        trade_size = float(trade.get("size"))
         entry_price = float(trade.get("entry_price"))
 
         bid, offer = get_snapshot(epic)
@@ -105,9 +115,9 @@ def sync_closed_trades():
 
         # Compute PnL
         if direction.lower() == "buy":
-            pnl = (exit_price - entry_price) * size
+            pnl = (exit_price - entry_price) * trade_size
         else:
-            pnl = (entry_price - exit_price) * size
+            pnl = (entry_price - exit_price) * trade_size
 
         print(f"[SYNC] CLOSED detected → epic={epic}, exit={exit_price}, pnl={pnl}")
 
@@ -116,7 +126,7 @@ def sync_closed_trades():
             epic=epic,
             deal_id=deal_id,
             side=direction,
-            size=size,
+            size=trade_size,
             entry_price=entry_price,
             exit_price=exit_price,
             pnl=pnl,
@@ -130,5 +140,5 @@ def sync_closed_trades():
         _last_close_cache[deal_id] = True
 
     # Shift snapshots
-    _last_positions_2 = _last_positions_1
-    _last_positions_1 = current_positions.copy()
+    _last_raw_2 = _last_raw_1
+    _last_raw_1 = raw_ids.copy()
