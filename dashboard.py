@@ -43,7 +43,7 @@ def dashboard_login():
 def dashboard_login_submit():
     password = request.form.get("password", "")
     # Simple password check — replace with your real secret in env
-    if password == os.getenv("DASHBOARD_PASSWORD", "changeme"):
+    if password == os.getenv("DASHBOARD_PASSWORD", "Angelika140282"):
         resp = redirect("/dashboard")
         resp.set_cookie("dashboard_auth", "1", max_age=60*60*24*7)  # 7 days
         return resp
