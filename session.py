@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (OPTION A — CLEAN ACCOUNT VALUES)
+# SESSION MODULE (CLEAN ACCOUNT VALUES — BALANCE STATIC, EQUITY = BALANCE + PNL)
 # ============================
 
 import time
@@ -163,17 +163,24 @@ def enrich_account(raw):
 
     bal = raw.get("balance", {})
 
-    balance = bal.get("balance", 0)
-    pnl = bal.get("profitLoss", 0)
-    available = bal.get("available", 0)
+    # Capital.com semantics:
+    # funds       = cash balance (static)
+    # profitLoss  = floating PnL
+    # equity      = funds + profitLoss
+    # available   = available to trade
+    # margin      = used margin (ignored on dashboard)
 
-    equity = balance + pnl
+    balance = bal.get("funds", 0)          # static cash balance
+    pnl = bal.get("profitLoss", 0)         # floating PnL
+    available = bal.get("available", 0)    # available to trade
+
+    equity = balance + pnl                 # Equity = Balance + ProfitLoss
 
     return {
         "equity": round(equity, 2),
         "balance": round(balance, 2),
         "pnl": round(pnl, 2),
-        "available": round(available, 2)
+        "available": round(available, 2),
     }
 
 

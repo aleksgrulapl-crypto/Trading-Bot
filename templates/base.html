@@ -89,6 +89,138 @@
         #dashboard-content {
             padding: 20px 24px 32px;
         }
+
+        .grid {
+            display: grid;
+            grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+            gap: 16px;
+        }
+
+        .grid-full {
+            margin-top: 16px;
+        }
+
+        .card {
+            background: rgba(15, 23, 42, 0.9);
+            border-radius: 12px;
+            border: 1px solid rgba(31, 41, 55, 0.9);
+            padding: 14px 16px;
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.7);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 10px;
+        }
+
+        .card-title {
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .card-subtitle {
+            font-size: 12px;
+            color: var(--accent-soft);
+        }
+
+        .metrics-row {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .metric {
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(31, 41, 55, 0.8);
+        }
+
+        .metric-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .metric-value {
+            margin-top: 4px;
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .metric-good { color: var(--success); }
+        .metric-bad { color: var(--danger); }
+        .metric-neutral { color: var(--accent); }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .table th,
+        .table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid rgba(31, 41, 55, 0.7);
+        }
+
+        .table th {
+            text-align: left;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            background: rgba(15, 23, 42, 0.9);
+        }
+
+        .table tr:hover td {
+            background: rgba(15, 23, 42, 0.7);
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+        }
+
+        .pill-long {
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(34, 197, 94, 0.4);
+        }
+
+        .pill-short {
+            background: rgba(248, 113, 113, 0.1);
+            color: var(--danger);
+            border: 1px solid rgba(248, 113, 113, 0.4);
+        }
+
+        .pill-status {
+            background: rgba(148, 163, 184, 0.1);
+            color: var(--text-muted);
+            border: 1px solid rgba(148, 163, 184, 0.4);
+        }
+
+        .pnl-pos { color: var(--success); }
+        .pnl-neg { color: var(--danger); }
+
+        .small {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        @media (max-width: 1024px) {
+            .grid { grid-template-columns: minmax(0, 1fr); }
+        }
     </style>
 </head>
 <body>
@@ -127,20 +259,47 @@
 </div>
 
 <script>
+function closePosition(dealId) {
+    fetch(`/dashboard/close/${dealId}`, { method: "GET" })
+        .then(() => refreshDashboard())
+        .catch(err => console.error("Close error:", err));
+}
+
 function refreshDashboard() {
+    const errorBanner = document.getElementById('error-banner');
+
     fetch('/dashboard/data')
         .then(r => r.json())
         .then(data => {
-            const header = document.getElementById('header-account');
-            if (header && data.account) {
-                header.innerHTML =
-                    `Equity: ${data.account.equity ?? '—'} · ` +
-                    `Balance: ${data.account.balance ?? '—'} · ` +
-                    `PnL: <span style="font-weight:700; color:${
-                        data.account.pnl >= 0 ? 'var(--success)' : 'var(--danger)'
-                    }">${data.account.pnl ?? '—'}</span> · ` +
-                    `Available: ${data.account.available ?? '—'}`;
+            if (data && data.html) {
+                const container = document.getElementById('dashboard-inner');
+                if (container) {
+                    container.innerHTML = data.html;
+                }
+
+                const header = document.getElementById('header-account');
+                if (header && data.account) {
+                    const pnl = data.account.pnl;
+                    const pnlColor = (pnl !== null && pnl !== undefined && pnl >= 0)
+                        ? 'var(--success)'
+                        : 'var(--danger)';
+
+                    header.innerHTML =
+                        `Equity: ${data.account.equity ?? '—'} · ` +
+                        `Balance: ${data.account.balance ?? '—'} · ` +
+                        `PnL: <span style="font-weight:700; color:${pnlColor}">` +
+                        `${pnl ?? '—'}</span> · ` +
+                        `Available: ${data.account.available ?? '—'}`;
+                }
+
+            } else {
+                errorBanner.innerText = "Dashboard refresh failed: Invalid response.";
+                errorBanner.style.display = "block";
             }
+        })
+        .catch(err => {
+            errorBanner.innerText = "Dashboard refresh error: " + err;
+            errorBanner.style.display = "block";
         });
 }
 
