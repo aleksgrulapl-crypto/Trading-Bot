@@ -193,6 +193,7 @@ def dashboard_logout():
 @dashboard.route("/dashboard")
 @login_required
 def dashboard_home():
+    # force fresh account snapshot
     session._cache["account"]["ts"] = 0
 
     raw_positions = session.get_positions() or []
@@ -201,24 +202,31 @@ def dashboard_home():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
-    # ❌ No extra equity / funds / margin math here.
-    # Just pass through what Capital gave us.
+    # LIVE EQUITY: balance + open PnL from positions
+    try:
+        open_pnl = sum(p.get("profit", 0) or 0 for p in positions)
+        if account.get("balance") is not None:
+            account["balance"] = round(account["balance"] + open_pnl, 2)
+    except Exception as e:
+        print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
 
-    trades = []      # ignore trade log for now
-    analytics = {    # blank stats
-        "win_rate": None,
-        "avg_win": None,
-        "avg_loss": None,
-        "expectancy": None,
-        "total_pl": None,
-        "max_drawdown": None,
-        "trade_count": 0,
-        "story": None
-    }
+    combined_raw = load_raw_log()
+    combined_trades = normalize_trades(dedupe_trades(combined_raw))
+
+    combined_trades.sort(
+        key=lambda t: (
+            t.get("time_exited")
+            or t.get("time_entered")
+            or ""
+        ),
+        reverse=True
+    )
+
+    analytics = compute_analytics(filter_completed(combined_trades))
 
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
-    session.shared_state["trade_log"] = trades
+    session.shared_state["trade_log"] = combined_trades
     session.shared_state["analytics"] = analytics
 
     return render_template(
@@ -227,7 +235,7 @@ def dashboard_home():
         cache_bust=time.time(),
         account=account,
         positions=positions,
-        trades=trades,
+        trades=combined_trades,
         analytics=analytics
     )
 

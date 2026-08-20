@@ -87,6 +87,11 @@ def get_positions():
 
 
 def enrich_positions(raw_positions):
+    """
+    Convert raw Capital.com positions into dashboard-friendly objects.
+    id  = dealId (for legacy use)
+    dealId = explicit field for close button and logging.
+    """
     enriched = []
 
     for item in raw_positions:
@@ -99,6 +104,9 @@ def enrich_positions(raw_positions):
         size = pos.get("size")
         entry_price = pos.get("level")
 
+        # CORRECT:
+        # LONG (BUY) → current_price = bid (you would sell)
+        # SHORT (SELL) → current_price = offer (you would buy back)
         if direction == "BUY":
             current_price = market.get("bid")
         else:
@@ -109,22 +117,27 @@ def enrich_positions(raw_positions):
         enriched.append({
             "id": deal_id,
             "dealId": deal_id,
+
             "dealReference": pos.get("dealReference"),
             "ticker": ticker,
             "epic": market.get("epic"),
+
             "size": size,
             "price": entry_price,
             "current_price": current_price,
+
             "direction": direction,
             "profit": round(profit, 2),
+
             "stopLevel": pos.get("stopLevel"),
             "limitLevel": pos.get("profitLevel"),
+
             "currency": pos.get("currency"),
+
             "signature": f"{ticker}|{direction}|{size}|{entry_price}",
         })
 
     return enriched
-
 
 def get_account():
     now = time.time()
@@ -157,31 +170,32 @@ def enrich_account(raw):
 
     bal = raw.get("balance", {})
 
-    # Use Capital.com fields directly
-    funds = bal.get("funds", 0)          # cash
-    balance = bal.get("balance", funds)  # some accounts expose this, some don't
-    pnl = bal.get("profitLoss", 0)       # floating PnL
-    available = bal.get("available", 0)  # available to trade
-    margin = bal.get("margin", 0)        # used margin
+    # Capital.com fields:
+    # funds       → cash
+    # balance     → sometimes same as funds, sometimes separate
+    # profitLoss  → floating PnL
+    # available   → available to trade
+    # margin      → used margin
 
-    # Equity as Capital shows it: funds + pnl
-    equity = funds + pnl
+    funds = bal.get("funds", 0)
+    balance = bal.get("balance", funds)
+    pnl = bal.get("profitLoss", 0)
+    available = bal.get("available", 0)
+    margin = bal.get("margin", 0)
 
     margin_warning = None
     if available < 0:
         margin_warning = "⚠ Margin Warning: Available balance is negative."
 
     return {
-        "funds": round(funds, 2),          # Funds (cash)
-        "equity": round(equity, 2),        # Equity
-        "balance": round(balance, 2),      # Balance (if present)
+        "funds": round(funds, 2),          # cash
+        "balance": round(balance, 2),      # will be turned into live equity in dashboard
         "pnl": round(pnl, 2),
         "available": round(available, 2),
         "margin": round(margin, 2),
         "available_color": "red" if available < 0 else "lime",
         "margin_warning": margin_warning
     }
-
 
 def compute_used_margin(raw_positions):
     total = 0.0
