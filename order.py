@@ -9,9 +9,10 @@ from typing import Optional
 
 import session
 from auth import auth
-from config import API_POSITIONS, API_MARKET, API_BASE, DEBUG_LOGS
+import config
+from config import API_POSITIONS, API_MARKET, API_BASE
 from utils import timestamp
-from trade_log import append_open_trade
+from trade_log import append_open_trade, set_dealId_for_dealReference
 
 logger = logging.getLogger("order")
 if not logger.handlers:
@@ -19,7 +20,7 @@ if not logger.handlers:
     fmt = logging.Formatter("%(asctime)s %(levelname)s [order] %(message)s")
     handler.setFormatter(fmt)
     logger.addHandler(handler)
-logger.setLevel(logging.DEBUG if DEBUG_LOGS else logging.INFO)
+logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_LOGS", False) else logging.INFO)
 
 
 def _normalize_direction(direction: Optional[str]) -> str:
@@ -114,7 +115,26 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
         logger.exception("Exception while sending order: %s", e)
         return {"status": "error", "message": "order_request_failed"}
 
-    # 4) DEALID MAPPING VIA CONFIRMS ENDPOINT
+    # 4) LOG OPEN TRADE (include dealReference so reconciliation won't duplicate)
+    try:
+        ts = timestamp()
+        trade_payload = {
+            "dealId": None,  # will be filled later if mapping available
+            "dealReference": deal_ref,
+            "ticker": epic,
+            "epic": epic,
+            "side": "Long" if dir_norm == "BUY" else "Short",
+            "size": float(size),
+            "entry_price": float(entry_price),
+            "time_entered": ts,
+            "notes": f"sl={sl}; tp={tp}; timeframe={timeframe}; dealReference={deal_ref}"
+        }
+        appended = append_open_trade(trade_payload)
+        logger.debug("Logged open trade (pending dealId): %s", appended)
+    except Exception as e:
+        logger.exception("Failed to log open trade: %s", e)
+
+    # 5) DEALID MAPPING VIA CONFIRMS ENDPOINT
     real_deal_id = None
     if deal_ref:
         confirms_url = f"{API_BASE}/api/v1/confirms/{deal_ref}"
@@ -143,32 +163,17 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
 
         if real_deal_id:
             logger.info("Mapped dealReference -> dealId: %s", real_deal_id)
+            # Update existing log entry that was created with dealReference
+            try:
+                updated = set_dealId_for_dealReference(deal_ref, real_deal_id)
+                if updated:
+                    logger.debug("Updated trade log entry with dealId for dealReference=%s", deal_ref)
+            except Exception:
+                logger.exception("Failed to update trade log with mapped dealId")
         else:
             logger.warning("Could not map dealReference -> dealId via confirms for dealReference=%s", deal_ref)
     else:
-        logger.warning("No dealReference returned by order response; logging open trade without dealId")
-
-    # 5) LOG OPEN TRADE (canonical append_open_trade)
-    try:
-        ts = timestamp()
-        trade_payload = {
-            "dealId": real_deal_id,
-            "ticker": epic,
-            "epic": epic,
-            "side": "Long" if dir_norm == "BUY" else "Short",
-            "size": float(size),
-            "entry_price": float(entry_price),
-            "time_entered": ts,
-            "exit_price": None,
-            "time_exited": None,
-            "pnl": None,
-            "status": "OPEN",
-            "notes": f"sl={sl}; tp={tp}; timeframe={timeframe}; dealReference={deal_ref}"
-        }
-        appended = append_open_trade(trade_payload)
-        logger.debug("Logged open trade: %s", appended)
-    except Exception as e:
-        logger.exception("Failed to log open trade: %s", e)
+        logger.warning("No dealReference returned by order response; logged open trade without dealReference")
 
     # 6) Update last trade timestamp
     try:

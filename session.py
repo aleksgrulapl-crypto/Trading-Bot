@@ -214,22 +214,43 @@ def enrich_account(raw: dict) -> dict:
       - pnl: floating profit/loss
       - available: available to trade
       - equity: computed as balance + pnl
+    This function ensures we do not double-count PnL if the API's 'balance' already includes floating PnL.
     """
     if not raw:
         return {}
 
     bal = (raw.get("balance") or {}) or {}
 
-    # Prefer 'funds' as the static Balance. If missing, fall back to 'balance' key.
-    if "funds" in bal:
-        balance_val = bal.get("funds", 0)
+    # Prefer 'funds' as the static Balance. If missing, attempt to derive static funds.
+    balance_val = None
+    pnl_val = None
+    available_val = None
+
+    # Extract reported fields
+    reported_funds = bal.get("funds", None)
+    reported_balance = bal.get("balance", None)
+    reported_pnl = bal.get("profitLoss", None)
+    reported_available = bal.get("available", None)
+
+    # If 'funds' present, use it as static balance
+    if reported_funds is not None:
+        balance_val = reported_funds
     else:
-        balance_val = bal.get("balance", 0)
-        logger.debug("enrich_account: 'funds' not present; falling back to 'balance'")
+        # If API provides both reported_balance and profitLoss, assume reported_balance may be equity.
+        # Derive static balance = reported_balance - profitLoss to avoid double-counting.
+        if reported_balance is not None and reported_pnl is not None:
+            try:
+                balance_val = float(reported_balance) - float(reported_pnl)
+            except Exception:
+                balance_val = reported_balance
+        else:
+            # Last resort: use reported_balance as-is (best-effort)
+            balance_val = reported_balance if reported_balance is not None else 0
 
-    pnl_val = bal.get("profitLoss", 0)
-    available_val = bal.get("available", 0)
+    pnl_val = reported_pnl if reported_pnl is not None else 0
+    available_val = reported_available if reported_available is not None else 0
 
+    # Convert to floats safely
     try:
         balance = float(balance_val or 0)
     except Exception:

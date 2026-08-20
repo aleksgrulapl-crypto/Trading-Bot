@@ -7,7 +7,8 @@ import os
 import tempfile
 from datetime import datetime
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
+import pytz
 
 import config
 
@@ -23,10 +24,16 @@ if not logger.handlers:
 LOG_PATH = getattr(config, "TRADE_LOG_PATH", None) or os.environ.get("TRADE_LOG_PATH") or os.environ.get("TRADE_LOG_FILE") or "trade_log.json"
 BACKUP_PATH = os.environ.get("TRADE_LOG_BACKUP", "trade_log.bak.json")
 FLOAT_TOLERANCE = 1e-8
+UK_TZ = pytz.timezone("Europe/London")
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    """
+    Return current time in UK timezone as ISO string with timezone info.
+    Example: 2026-08-20T18:54:08+01:00
+    """
+    now = datetime.now(UK_TZ)
+    return now.isoformat()
 
 
 def _atomic_write(path: str, data: Any) -> bool:
@@ -94,7 +101,7 @@ def reset_log() -> bool:
 def append_open_trade(trade: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Append a new open trade.
-    Expected trade keys: dealId, ticker, side, size, entry_price, time_entered
+    Expected trade keys: dealId, dealReference, ticker, side, size, entry_price, time_entered
     Returns the appended trade dict or None on failure.
     """
     trades = load_raw_log()
@@ -102,6 +109,7 @@ def append_open_trade(trade: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     try:
         t = {
             "dealId": trade.get("dealId"),
+            "dealReference": trade.get("dealReference"),
             "ticker": trade.get("ticker"),
             "side": trade.get("side"),
             "size": float(trade.get("size", 0)),
@@ -212,18 +220,42 @@ def close_trade_fallback(ticker: Any, entry_price: Any, exit_price: Any = None, 
     return updated
 
 
-def _make_signature(dealId: Any, ticker: Any, entry_price: Any) -> str:
+def _make_signature(dealId: Any, dealReference: Any, ticker: Any, entry_price: Any) -> str:
     try:
         entry_norm = round(float(entry_price or 0), 8)
     except Exception:
         entry_norm = str(entry_price)
-    return f"{dealId or ''}|{ticker or ''}|{entry_norm}"
+    return f"{dealId or ''}|{dealReference or ''}|{ticker or ''}|{entry_norm}"
+
+
+def set_dealId_for_dealReference(dealReference: Any, dealId: Any) -> bool:
+    """
+    Update an existing log entry that was recorded with a dealReference but missing dealId.
+    Returns True if updated.
+    """
+    if not dealReference or not dealId:
+        return False
+
+    trades = load_raw_log()
+    updated = False
+    for t in trades:
+        if (t.get("dealReference") == dealReference) and (not t.get("dealId")):
+            t["dealId"] = dealId
+            # keep time_entered as-is; add note
+            t["notes"] = (t.get("notes") or "") + f" | dealId_mapped={dealId}"
+            updated = True
+            break
+
+    if updated:
+        save_raw_log(trades)
+    return updated
 
 
 def reconcile_with_positions(live_positions: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """
     Reconcile local trade log with live positions.
-    - If a trade in the log is OPEN but its dealId was present in the log and NOT present in live_positions -> mark CLOSED (time_exited now).
+    - Match by dealId first, then dealReference, then fallback to ticker+entry_price.
+    - If a trade in the log is OPEN but its dealId is present in the log and NOT present in live_positions -> mark CLOSED (time_exited now).
     - If a live position exists but not in the log -> append as OPEN.
     Returns dict: {"closed": [..], "added": [..]}
     """
@@ -231,13 +263,22 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]]) -> Dict[str, 
     closed: List[Dict[str, Any]] = []
     added: List[Dict[str, Any]] = []
 
-    # Build set of live dealIds (as strings) from various possible live_position shapes
+    # Build maps for quick lookup
+    log_by_dealId = {}
+    log_by_dealRef = {}
+    for t in trades:
+        if t.get("dealId") is not None:
+            log_by_dealId[str(t.get("dealId"))] = t
+        if t.get("dealReference"):
+            log_by_dealRef[t.get("dealReference")] = t
+
+    # Build set of live dealIds (as strings)
     live_ids = set()
     for p in live_positions or []:
-        # support both enriched positions (flat dict with 'dealId') and raw API shapes
         did = None
         if isinstance(p, dict):
-            did = p.get("dealId") or (p.get("position") or {}).get("dealId") or (p.get("position") or {}).get("dealId")
+            # support enriched and raw shapes
+            did = p.get("dealId") or (p.get("position") or {}).get("dealId")
         if did is not None:
             live_ids.add(str(did))
 
@@ -253,27 +294,30 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]]) -> Dict[str, 
                 t["pnl"] = _compute_pnl_for_trade(t) if t.get("exit_price") is not None else None
                 closed.append(t)
 
-    # build existing signatures for quick lookup
+    # build existing signatures for quick lookup (includes dealReference)
     existing_signatures = set()
     for t in trades:
-        sig = _make_signature(t.get("dealId"), t.get("ticker"), t.get("entry_price"))
+        sig = _make_signature(t.get("dealId"), t.get("dealReference"), t.get("ticker"), t.get("entry_price"))
         existing_signatures.add(sig)
 
     # add live positions not in log
     for p in live_positions or []:
         # normalize fields from live position
-        # support multiple shapes: enriched (flat) or raw (with 'position' and 'market')
         dealId = None
+        dealReference = None
         ticker = None
         entry_price = None
         side = None
         size = None
         time_entered = None
+        exit_price = None
+        time_exited = None
 
         if isinstance(p, dict):
             # enriched shape
             if p.get("dealId") is not None:
                 dealId = p.get("dealId")
+                dealReference = p.get("dealReference")
                 ticker = p.get("ticker") or p.get("epic")
                 entry_price = p.get("price") or p.get("entry_price") or p.get("level")
                 side = p.get("side") or p.get("direction")
@@ -284,17 +328,19 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]]) -> Dict[str, 
                 pos = p.get("position") or {}
                 market = p.get("market") or {}
                 dealId = pos.get("dealId") or pos.get("dealReference")
+                dealReference = pos.get("dealReference") or p.get("dealReference")
                 ticker = market.get("symbol") or pos.get("instrumentName") or pos.get("instrument")
                 entry_price = pos.get("level") or pos.get("price") or pos.get("entry_price")
                 side = pos.get("direction")
                 size = pos.get("size")
                 time_entered = pos.get("time_entered") or pos.get("createdDate")
 
-        sig = _make_signature(dealId, ticker, entry_price)
+        sig = _make_signature(dealId, dealReference, ticker, entry_price)
         if sig not in existing_signatures:
             try:
                 new = {
                     "dealId": dealId,
+                    "dealReference": dealReference,
                     "ticker": ticker,
                     "side": side,
                     "size": float(size or 0),
@@ -310,6 +356,7 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]]) -> Dict[str, 
                 # fallback to safer defaults
                 new = {
                     "dealId": dealId,
+                    "dealReference": dealReference,
                     "ticker": ticker,
                     "side": side,
                     "size": size or 0,
@@ -357,6 +404,7 @@ def log_open_trade(*args, **kwargs) -> Optional[Dict[str, Any]]:
     # build dict from kwargs
     payload = {
         "dealId": kwargs.get("dealId") or kwargs.get("deal_id") or kwargs.get("dealid"),
+        "dealReference": kwargs.get("dealReference") or kwargs.get("deal_reference"),
         "ticker": kwargs.get("ticker") or kwargs.get("epic") or kwargs.get("symbol"),
         "side": kwargs.get("side") or kwargs.get("direction"),
         "size": kwargs.get("size") or kwargs.get("qty") or kwargs.get("quantity"),
