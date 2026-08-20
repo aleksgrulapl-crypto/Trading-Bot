@@ -139,15 +139,17 @@ def enrich_positions(raw_positions):
         size = pos.get("size")
         entry_price = pos.get("level")
 
-        current_price = (
-            market.get("bid") if direction == "SELL"
-            else market.get("offer")
-        )
+        # CORRECT:
+        # LONG (BUY) → current_price = bid (you would sell)
+        # SHORT (SELL) → current_price = offer (you would buy back)
+        if direction == "BUY":
+            current_price = market.get("bid")
+        else:
+            current_price = market.get("offer")
 
         profit = pos.get("upl", 0)
 
         enriched.append({
-            # ✅ both id and dealId populated
             "id": deal_id,
             "dealId": deal_id,
 
@@ -171,6 +173,7 @@ def enrich_positions(raw_positions):
         })
 
     return enriched
+
 
 # ---------------------------------------------------------
 # GET ACCOUNT

@@ -1,5 +1,5 @@
 # ============================
-# SYNC CLOSED TRADES (MINIMAL, WORKING)
+# SYNC CLOSED TRADES (MINIMAL, WORKING, CORRECT SIDES)
 # ============================
 
 import time
@@ -45,7 +45,8 @@ def sync_closed_trades():
     """
     Detect CLOSED trades by disappearance:
     - If dealId no longer in /positions → CLOSED
-    - Skip only when get_positions() truly fails (None)
+    - Use correct side of quote for exit:
+      LONG → bid, SHORT → offer
     """
 
     log = load_raw_log()
@@ -83,11 +84,14 @@ def sync_closed_trades():
 
         bid, offer = get_snapshot(epic)
         if bid is None or offer is None:
-            # If snapshot fails, we still know it's closed but can't price it → skip this cycle
             print("[SYNC] Snapshot unavailable → skipping close pricing")
             continue
 
-        exit_price = offer if direction.lower() == "buy" else bid
+        # CORRECT: LONG exits on bid, SHORT exits on offer
+        if direction.lower() == "buy":
+            exit_price = bid
+        else:
+            exit_price = offer
 
         if direction.lower() == "buy":
             pnl = (exit_price - entry_price) * size
