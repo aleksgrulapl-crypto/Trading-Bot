@@ -1,3 +1,4 @@
+# dashboard.py
 # ============================
 # DASHBOARD MODULE (CLEAN — EQUITY + BALANCE + PNL + AVAILABLE)
 # ============================
@@ -13,18 +14,19 @@ import config
 from trade_log import (
     load_raw_log,
     reconcile_with_positions,
-    append_open_trade,
-    get_completed_trades
+    # append_open_trade and get_completed_trades intentionally not imported here
 )
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
-# logging
+# logging: configure only this logger, do not call basicConfig here
 logger = logging.getLogger("dashboard")
-if getattr(config, "DEBUG_LOGS", False):
-    logging.basicConfig(level=logging.DEBUG)
-else:
-    logging.basicConfig(level=logging.INFO)
+logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_LOGS", False) else logging.INFO)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    fmt = logging.Formatter("%(asctime)s %(levelname)s [dashboard] %(message)s")
+    handler.setFormatter(fmt)
+    logger.addHandler(handler)
 
 
 def login_required(view):

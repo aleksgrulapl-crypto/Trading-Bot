@@ -1,164 +1,199 @@
+# webhook.py
 # ============================
 # WEBHOOK MODULE (REVERTED + DEBUG SAFE, CLEANED)
 # ============================
 
-from flask import Flask, request, jsonify, render_template, redirect
-import json
-import time
 import os
+import time
+import json
+import logging
+from typing import Any, Dict
+
+from flask import Flask, request, jsonify, render_template, redirect
 
 import session
-from parser import parse_tradingview_alert
 from sizing import calculate_size
 from order import place_order
 from auth import auth
-from config import API_ACCOUNTS, API_MARKET, API_BASE
-from dashboard import dashboard as dashboard_blueprint
+from config import API_ACCOUNTS, API_MARKET, API_BASE, DEBUG_LOGS
 from scheduler import start_scheduler
 from trade_log import load_raw_log
 from close_position import close_position as close_position_module
 
+# parser import: try both common names for compatibility
+try:
+    from tradingview_parser import parse_tradingview_alert
+except Exception:
+    try:
+        from parser import parse_tradingview_alert
+    except Exception:
+        # fallback stub that blocks everything
+        def parse_tradingview_alert(_):
+            return {"blocked": True, "reason": "parser_unavailable"}
+
+# dashboard blueprint import (may raise if not present)
+try:
+    from dashboard import dashboard as dashboard_blueprint
+except Exception:
+    dashboard_blueprint = None
+
+# App setup
 app = Flask(__name__)
-app.config["DEBUG"] = True
+app.config["DEBUG"] = bool(DEBUG_LOGS)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.jinja_env.auto_reload = True
 app.jinja_env.cache = {}
-app.url_map.strict_slashes = False
 
-app.register_blueprint(dashboard_blueprint)
+# Register blueprint if available
+if dashboard_blueprint:
+    app.register_blueprint(dashboard_blueprint)
+
+# Logging
+logger = logging.getLogger("webhook")
+logger.setLevel(logging.DEBUG if DEBUG_LOGS else logging.INFO)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    fmt = logging.Formatter("%(asctime)s %(levelname)s [webhook] %(message)s")
+    handler.setFormatter(fmt)
+    logger.addHandler(handler)
+
+
+# -----------------------------
+# Helpers
+# -----------------------------
+def _safe_get_json(raw_text: str) -> Any:
+    """
+    Try multiple strategies to parse incoming payload:
+      1) request.get_json(force=True)
+      2) json.loads(raw_text)
+      3) fallback to raw string
+    """
+    try:
+        return request.get_json(force=True)
+    except Exception:
+        pass
+
+    try:
+        return json.loads(raw_text)
+    except Exception:
+        return raw_text
+
+
+def _ok_response(payload: Dict[str, Any], code: int = 200):
+    return jsonify(payload), code
 
 
 # ============================
 # MAIN WEBHOOK
 # ============================
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
     session.update_last_webhook()
 
-    raw = request.get_data(as_text=True)
-    raw = raw.strip() if raw else ""
+    raw = request.get_data(as_text=True) or ""
+    raw = raw.strip()
 
-    print("[WEBHOOK] RAW:", raw, flush=True)
+    logger.debug("RAW webhook body length=%d", len(raw))
 
     if not raw:
-        return jsonify({"status": "error", "message": "Empty body received"}), 200
+        logger.warning("Empty webhook body")
+        return _ok_response({"status": "error", "message": "Empty body received"})
 
-    alert = None
-
-    # -----------------------------
-    # Parse TradingView alert
-    # -----------------------------
+    # Parse TradingView alert (robust)
+    parsed_input = _safe_get_json(raw)
     try:
-        data = request.get_json(force=True)
-        alert = parse_tradingview_alert(data)
+        alert = parse_tradingview_alert(parsed_input)
     except Exception as e:
-        print("[WEBHOOK] JSON parse failed, falling back to raw:", e, flush=True)
-        try:
-            data = json.loads(raw)
-            alert = parse_tradingview_alert(data)
-        except Exception as e2:
-            print("[WEBHOOK] json.loads fallback failed, using raw string:", e2, flush=True)
-            try:
-                alert = parse_tradingview_alert(raw)
-            except Exception as e3:
-                print("[WEBHOOK] PARSE ERROR:", e3, flush=True)
-                return jsonify({"status": "error", "message": "Invalid alert"}), 200
+        logger.exception("parse_tradingview_alert raised")
+        return _ok_response({"status": "error", "message": "Invalid alert payload"})
 
-    symbol = alert["symbol"]
-    action = alert["action"]
+    if not isinstance(alert, dict):
+        logger.warning("Parser returned non-dict result")
+        return _ok_response({"status": "error", "message": "Parser returned invalid result"})
+
+    if alert.get("blocked"):
+        logger.info("Alert blocked: %s", alert.get("reason"))
+        return _ok_response({"status": "blocked", "reason": alert.get("reason")})
+
+    symbol = alert.get("symbol")
+    action = alert.get("action")
     sl_price = alert.get("sl")
     tp_price = alert.get("tp")
     timeframe = alert.get("timeframe")
 
-    print(
-        f"[WEBHOOK] Parsed alert → symbol={symbol}, action={action}, SL={sl_price}, "
-        f"TP={tp_price}, TF={timeframe}",
-        flush=True,
-    )
+    logger.info("Parsed alert → symbol=%s action=%s sl=%s tp=%s tf=%s", symbol, action, sl_price, tp_price, timeframe)
 
-    # -----------------------------
-    # EPIC lookup (reverted)
-    # -----------------------------
+    if not symbol or not action:
+        return _ok_response({"status": "error", "message": "missing_symbol_or_action"})
+
+    # EPIC lookup
     epic_data = session.verify_epic(symbol)
     epic = epic_data.get("epic")
-
-    print(
-        f"[WEBHOOK] EPIC lookup → symbol={symbol}, epic={epic}, "
-        f"source={epic_data.get('source')}",
-        flush=True,
-    )
+    logger.debug("EPIC lookup → symbol=%s epic=%s source=%s", symbol, epic, epic_data.get("source"))
 
     if not epic:
-        print("[WEBHOOK] EPIC lookup failed:", symbol, flush=True)
-        return jsonify({"status": "error", "message": "epic_lookup_failed"}), 200
+        return _ok_response({"status": "error", "message": "epic_lookup_failed"})
 
-    # -----------------------------
     # Market snapshot
-    # -----------------------------
-    market = session.request("GET", f"{API_MARKET}/{epic}")
-    if not market or market.status_code != 200:
-        print("[WEBHOOK] Market snapshot unavailable for:", epic, flush=True)
-        return jsonify({"status": "error", "message": "market_snapshot_unavailable"}), 200
+    market_resp = session.request("GET", f"{API_MARKET}/{epic}")
+    if not market_resp or getattr(market_resp, "status_code", 0) != 200:
+        logger.warning("Market snapshot unavailable for %s", epic)
+        return _ok_response({"status": "error", "message": "market_snapshot_unavailable"})
 
-    snapshot = market.json().get("snapshot", {})
+    try:
+        snapshot = market_resp.json().get("snapshot", {}) or {}
+    except Exception:
+        logger.exception("Failed to parse market snapshot JSON")
+        return _ok_response({"status": "error", "message": "market_snapshot_parse_error"})
+
     bid = snapshot.get("bid")
     offer = snapshot.get("offer")
-
     if bid is None or offer is None:
-        print("[WEBHOOK] Market prices unavailable for:", epic, flush=True)
-        return jsonify({"status": "error", "message": "price_unavailable"}), 200
+        logger.warning("Market prices unavailable for %s", epic)
+        return _ok_response({"status": "error", "message": "price_unavailable"})
 
-    entry_price = offer if action.lower() == "buy" else bid
+    entry_price = float(offer) if str(action).strip().lower() == "buy" else float(bid)
+    logger.debug("Entry price (actual): %s", entry_price)
 
-    print(f"[WEBHOOK] Entry price (actual): {entry_price}", flush=True)
-
-    # -----------------------------
     # Sizing
-    # -----------------------------
-    size_info = calculate_size(
-        entry_price=entry_price,
-        sl_price=sl_price,
-        tp_price=tp_price,
-        direction=action,
-    )
+    size_info = calculate_size(entry_price=entry_price, sl_price=sl_price, tp_price=tp_price, direction=action, symbol=symbol)
+    if size_info.get("blocked"):
+        logger.info("Sizing blocked: %s", size_info.get("reason"))
+        return _ok_response({"status": "blocked", "reason": size_info.get("reason")})
 
-    if size_info["blocked"]:
-        print(f"[WEBHOOK] SIZING BLOCKED: {size_info['reason']}", flush=True)
-        return jsonify({"status": "blocked", "reason": size_info["reason"]}), 200
+    size = size_info.get("size")
+    logger.info("Final SL=%s TP=%s SIZE=%s", sl_price, tp_price, size)
 
-    size = size_info["size"]
-
-    print("[WEBHOOK] Final SL:", sl_price, flush=True)
-    print("[WEBHOOK] Final TP:", tp_price, flush=True)
-    print("[WEBHOOK] Final SIZE:", size, flush=True)
-
-    # -----------------------------
-    # Place order (reverted pipeline)
-    # -----------------------------
-    result = place_order(epic, action, size, sl_price, tp_price, timeframe=timeframe)
+    # Place order
+    try:
+        result = place_order(epic, action, size, sl_price, tp_price, timeframe=timeframe)
+    except Exception:
+        logger.exception("place_order raised an exception")
+        return _ok_response({"status": "error", "message": "order_failed"})
 
     session.update_last_trade()
-
-    return jsonify({"status": "ok", "result": result}), 200
+    return _ok_response({"status": "ok", "result": result})
 
 
 # ============================
-# DEBUG ROUTES
+# DEBUG ROUTES (SAFE)
 # ============================
-
 @app.route("/debug/tokens")
 def debug_tokens():
+    """
+    Safe debug: indicate whether tokens are present, do not return secrets.
+    """
     try:
-        auth.ensure_token()
+        ok = auth.ensure_token()
         return jsonify({
-            "api_key": auth.api_key,
-            "cst": auth.cst,
-            "xst": auth.xst
+            "auth_ok": bool(ok),
+            "has_api_key": bool(getattr(auth, "api_key", None)),
+            "has_cst": bool(getattr(auth, "cst", None)),
+            "has_xst": bool(getattr(auth, "xst", None))
         }), 200
-    except Exception as e:
-        print(f"[DEBUG] ensure_token failed: {e}", flush=True)
-        return jsonify({"error": "ensure_token_failed", "details": str(e)}), 500
+    except Exception:
+        logger.exception("debug_tokens failed")
+        return jsonify({"error": "ensure_token_failed"}), 500
 
 
 @app.route("/debug/epic/<symbol>")
@@ -172,7 +207,10 @@ def debug_market(epic):
     r = session.request("GET", f"{API_MARKET}/{epic}")
     if not r:
         return jsonify({"error": "no response"}), 500
-    return jsonify(r.json()), 200
+    try:
+        return jsonify(r.json()), 200
+    except Exception:
+        return jsonify({"error": "invalid_json"}), 500
 
 
 @app.route("/debug/positions")
@@ -184,50 +222,47 @@ def debug_positions():
 
 @app.route("/debug/sizing/<symbol>/<action>/<price>/<sl>/<tp>")
 def debug_sizing(symbol, action, price, sl, tp):
-    info = calculate_size(
-        entry_price=float(price),
-        sl_price=float(sl),
-        tp_price=float(tp),
-        direction=action
-    )
-    return jsonify(info), 200
+    try:
+        info = calculate_size(entry_price=float(price), sl_price=float(sl), tp_price=float(tp), direction=action, symbol=symbol)
+        return jsonify(info), 200
+    except Exception:
+        logger.exception("debug_sizing failed")
+        return jsonify({"error": "invalid_parameters"}), 400
 
 
 @app.route("/debug/order/<epic>/<action>/<size>")
 def debug_order(epic, action, size):
-    result = place_order(epic, action, float(size))
-    return jsonify(result), 200
+    try:
+        result = place_order(epic, action, float(size))
+        return jsonify(result), 200
+    except Exception:
+        logger.exception("debug_order failed")
+        return jsonify({"error": "order_failed"}), 500
 
 
 @app.route("/debug/close-test/<deal_id>", methods=["GET"])
 def debug_close_test(deal_id):
-    print("[TEST] auth.session =", auth.session, flush=True)
-    print("[TEST] type =", type(auth.session), flush=True)
-
+    """
+    Test close endpoints: returns raw responses for inspection.
+    """
     from config import API_POSITIONS
 
-    # 1) Try POST /positions/{dealId}/close
     url1 = f"{API_POSITIONS}/{deal_id}/close"
-    print(f"[TEST] POST {url1}", flush=True)
     r1 = session.request("POST", url1, json={})
-    s1 = r1.status_code if r1 else None
-    t1 = r1.text if r1 else None
+    s1 = getattr(r1, "status_code", None)
+    t1 = getattr(r1, "text", None)
 
-    # 2) Try PUT /positions/close-position with both fields
     url2 = f"{API_POSITIONS}/close-position"
-    payload = {
-        "dealId": deal_id,
-        "dealReference": f"p_{deal_id}",
-    }
-    print(f"[TEST] PUT {url2} payload={payload}", flush=True)
+    payload = {"dealId": deal_id, "dealReference": f"p_{deal_id}"}
     r2 = session.request("PUT", url2, json=payload)
-    s2 = r2.status_code if r2 else None
-    t2 = r2.text if r2 else None
+    s2 = getattr(r2, "status_code", None)
+    t2 = getattr(r2, "text", None)
 
     return jsonify({
         "post_close": {"status": s1, "body": t1},
         "put_close_position": {"status": s2, "body": t2},
     }), 200
+
 
 @app.route("/debug/history")
 def debug_history():
@@ -235,41 +270,10 @@ def debug_history():
     r = session.request("GET", f"{API_HISTORY_TRANSACTIONS}?max=200")
     return jsonify(r.json() if r else {"error": "no response"}), 200
 
-@app.route("/debug/history2")
-def debug_history2():
-    url = f"{API_BASE}/api/v1/history/positions"
-    r = session.request("GET", url)
-    return jsonify(r.json() if r else {"error": "no response"}), 200
-
-@app.route("/debug/history3")
-def debug_history3():
-    url = f"{API_BASE}/api/v1/history/activity"
-    r = session.request("GET", url)
-    return jsonify(r.json() if r else {"error": "no response"}), 200
-
-@app.route("/debug/history4")
-def debug_history4():
-    url = f"{API_BASE}/api/v1/history/transactions?type=POSITION&max=200"
-    r = session.request("GET", url)
-    return jsonify(r.json() if r else {"error": "no response"}), 200
-
-@app.route("/debug/history5")
-def debug_history5():
-    url = f"{API_BASE}/api/v1/history/transactions?types=POSITION"
-    r = session.request("GET", url)
-    return jsonify(r.json() if r else {"error": "no response"}), 200
-
-@app.route("/debug/history6")
-def debug_history6():
-    url = f"{API_BASE}/api/v1/history/activity?max=200"
-    r = session.request("GET", url)
-    return jsonify(r.json() if r else {"error": "no response"}), 200
-
 
 # ============================
-# RAW + DASHBOARD
+# RAW + DASHBOARD ROUTES
 # ============================
-
 @app.route("/raw")
 def raw_positions():
     raw = session.get_positions()
@@ -300,7 +304,7 @@ def dashboard_home():
 
     return render_template(
         "dashboard.html",
-        title="AG Capital Trader",
+        title=os.getenv("DASHBOARD_TITLE", "AG Capital Trader"),
         cache_bust=time.time(),
         account=account,
         positions=positions,
@@ -313,12 +317,7 @@ def dashboard_home():
 
 @app.route("/close/<position_id>", methods=["POST"])
 def close_position_route(position_id):
-    """
-    Dashboard close:
-    - position_id is the dealId (from enrich_positions → id)
-    - pass it directly to close_position_module
-    """
-    print(f"[DASHBOARD] Close requested for position_id={position_id}", flush=True)
+    logger.info("Dashboard close requested for position_id=%s", position_id)
     result = close_position_module(position_id)
     return jsonify(result), 200
 
@@ -326,20 +325,29 @@ def close_position_route(position_id):
 # ============================
 # BOOTSTRAP
 # ============================
+def _start_app():
+    # Ensure auth token before starting scheduler
+    backoff = 5
+    for _ in range(6):
+        try:
+            if auth.ensure_token():
+                logger.info("Auth token ensured.")
+                break
+        except Exception:
+            logger.exception("Auth ensure_token failed; retrying in %s seconds", backoff)
+        time.sleep(backoff)
+    else:
+        logger.warning("Auth token could not be ensured before startup; continuing anyway.")
+
+    # Start scheduler (idempotent)
+    try:
+        start_scheduler()
+        logger.info("Scheduler started.")
+    except Exception:
+        logger.exception("Failed to start scheduler")
+
 
 if __name__ == "__main__":
-    while True:
-        try:
-            auth.ensure_token()
-            print("[Webhook] Auth token ensured.", flush=True)
-            break
-        except Exception as e:
-            print(f"[Webhook] Auth ensure_token failed: {e}", flush=True)
-            time.sleep(10)
-
-    print("[Webhook] Starting scheduler...", flush=True)
-    start_scheduler()
-    print("[Webhook] Scheduler started.", flush=True)
-
+    _start_app()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

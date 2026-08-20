@@ -6,24 +6,25 @@
 import time
 import pprint
 import logging
+from typing import Any, Dict, List, Optional
+
 from auth import auth
+import config
 from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
 from utils import timestamp
 import report
 
-# Optional debug flag in config.py: DEBUG_LOGS = True/False
-try:
-    from config import DEBUG_LOGS
-except Exception:
-    DEBUG_LOGS = False
-
+# logger for this module (do not call basicConfig here)
 logger = logging.getLogger("session")
-if DEBUG_LOGS:
-    logging.basicConfig(level=logging.DEBUG)
-else:
-    logging.basicConfig(level=logging.INFO)
+logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_LOGS", False) else logging.INFO)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    fmt = logging.Formatter("%(asctime)s %(levelname)s [session] %(message)s")
+    handler.setFormatter(fmt)
+    logger.addHandler(handler)
 
-shared_state = {
+# Shared application state
+shared_state: Dict[str, Any] = {
     "account": {},
     "positions": [],
     "trade_log": [],
@@ -35,13 +36,25 @@ shared_state = {
     "daily_report": {}
 }
 
-_cache = {
-    "account": {"ts": 0, "data": {}}
+# Simple in-memory cache for account (TTL configurable)
+_cache: Dict[str, Any] = {
+    "account": {"ts": 0.0, "data": {}}
 }
+_ACCOUNT_CACHE_TTL = float(getattr(config, "CACHE_TTL_SECONDS", 2))
 
 
-def get_headers():
-    auth.ensure_token()
+# -------------------------
+# Helpers
+# -------------------------
+
+def get_headers() -> Optional[Dict[str, str]]:
+    """
+    Return headers for authenticated requests or None if auth not available.
+    """
+    if not auth.ensure_token():
+        logger.debug("get_headers: auth.ensure_token failed")
+        return None
+
     return {
         "X-CAP-API-KEY": auth.api_key,
         "CST": auth.cst,
@@ -51,69 +64,74 @@ def get_headers():
     }
 
 
-def request(method, url, json=None):
-    headers = get_headers()
-
+def request(method: str, url: str, json: Optional[dict] = None, **kwargs):
+    """
+    Unified request wrapper that uses auth.request if available.
+    Returns requests.Response or None.
+    """
+    # Prefer auth.request wrapper which handles tokens and retries
     try:
-        response = auth.session.request(method, url, headers=headers, json=json)
-
-        if response is None:
-            logger.debug("[REQUEST] No response object returned")
+        resp = auth.request(method, url, json=json, **kwargs)
+        if resp is None:
+            logger.debug("request: auth.request returned None for %s %s", method, url)
             return None
-
-        if response.status_code >= 400:
-            logger.warning("[ERROR] %s %s → %s", method, url, response.status_code)
-            logger.debug("[ERROR] Response: %s", response.text)
-
-        return response
-
+        if getattr(resp, "status_code", 0) >= 400:
+            logger.warning("HTTP %s %s -> %s", method, url, resp.status_code)
+            logger.debug("Response body: %s", getattr(resp, "text", "")[:1000])
+        return resp
     except Exception:
-        logger.exception("[ERROR] Request failed:")
+        logger.exception("request: unexpected exception for %s %s", method, url)
         return None
 
 
-def get_positions():
+# -------------------------
+# Positions and account
+# -------------------------
+
+def get_positions() -> List[dict]:
+    """
+    Fetch live positions from API. Returns list (possibly empty).
+    """
     url = f"{API_POSITIONS}?includeProfitLoss=true"
     response = request("GET", url)
 
     if not response or response.status_code != 200:
-        if DEBUG_LOGS:
-            logger.debug("[SESSION] get_positions → non-200 or no response")
+        logger.debug("get_positions: non-200 or no response")
         return []
 
     try:
-        data = response.json()
-        positions = data.get("positions", [])
-
-        if DEBUG_LOGS and positions:
+        data = response.json() or {}
+        positions = data.get("positions", []) or []
+        if getattr(config, "DEBUG_LOGS", False) and positions:
             logger.debug("\n[DEBUG] RAW POSITION SAMPLE:")
             pprint.pprint(positions[0], width=200)
             logger.debug("\n")
-
         return positions
-
     except Exception:
-        logger.exception("[SESSION] Failed to parse positions:")
+        logger.exception("get_positions: failed to parse JSON")
         return []
 
 
-def _normalize_direction(direction):
+def _normalize_direction(direction: Optional[str]) -> Optional[str]:
     if not direction:
         return None
-    d = direction.upper()
+    d = str(direction).upper()
     if d == "BUY":
         return "Long"
     if d == "SELL":
         return "Short"
-    return direction.capitalize()
+    return d.capitalize()
 
 
-def enrich_positions(raw_positions):
-    enriched = []
+def enrich_positions(raw_positions: List[dict]) -> List[dict]:
+    """
+    Convert raw API positions into normalized, UI-friendly dicts.
+    """
+    enriched: List[dict] = []
 
-    for item in raw_positions:
-        pos = item.get("position", {}) or {}
-        market = item.get("market", {}) or {}
+    for item in raw_positions or []:
+        pos = (item.get("position") or {}) or {}
+        market = (item.get("market") or {}) or {}
 
         deal_id = pos.get("dealId")
         ticker = market.get("symbol") or pos.get("instrumentName") or None
@@ -123,13 +141,21 @@ def enrich_positions(raw_positions):
         entry_price = pos.get("level")
 
         # choose current price depending on direction
-        # keep existing behavior: BUY -> bid, SELL -> offer
-        if direction_raw == "BUY":
-            current_price = market.get("bid")
-        else:
-            current_price = market.get("offer")
+        current_price = None
+        try:
+            if direction_raw and str(direction_raw).upper() == "BUY":
+                current_price = market.get("bid")
+            else:
+                current_price = market.get("offer")
+        except Exception:
+            current_price = None
 
         profit = pos.get("upl", 0)
+
+        try:
+            profit_val = round(float(profit or 0), 2)
+        except Exception:
+            profit_val = 0.0
 
         enriched.append({
             "id": deal_id,
@@ -141,7 +167,7 @@ def enrich_positions(raw_positions):
             "price": entry_price,
             "current_price": current_price,
             "direction": direction,
-            "profit": round(float(profit or 0), 2),
+            "profit": profit_val,
             "stopLevel": pos.get("stopLevel"),
             "limitLevel": pos.get("profitLevel"),
             "currency": pos.get("currency"),
@@ -151,67 +177,69 @@ def enrich_positions(raw_positions):
     return enriched
 
 
-def get_account():
+def get_account() -> dict:
+    """
+    Fetch account payload with short caching to reduce API calls.
+    Returns raw account dict (as returned by API) or cached value.
+    """
     now = time.time()
-    if now - _cache["account"]["ts"] < 1.0:
-        return _cache["account"]["data"]
+    cache_entry = _cache.get("account", {})
+    if now - cache_entry.get("ts", 0.0) < _ACCOUNT_CACHE_TTL:
+        return cache_entry.get("data", {})
 
     response = request("GET", API_ACCOUNT)
-
     if not response or response.status_code != 200:
-        logger.warning("[SESSION] get_account → non-200 or no response")
-        return _cache["account"]["data"]
+        logger.warning("get_account: non-200 or no response; returning cached data")
+        return cache_entry.get("data", {})
 
     try:
-        data = response.json()
-        accounts = data.get("accounts", [])
+        data = response.json() or {}
+        accounts = data.get("accounts", []) or []
         acc = accounts[0] if accounts else {}
 
         _cache["account"]["ts"] = now
         _cache["account"]["data"] = acc
-        if DEBUG_LOGS:
-            logger.debug("[SESSION] Raw account payload: %s", acc)
+        if getattr(config, "DEBUG_LOGS", False):
+            logger.debug("get_account: raw account payload: %s", acc)
         return acc
-
     except Exception:
-        logger.exception("[SESSION] Failed to parse account:")
-        return _cache["account"]["data"]
+        logger.exception("get_account: failed to parse JSON")
+        return cache_entry.get("data", {})
 
 
-def enrich_account(raw):
+def enrich_account(raw: dict) -> dict:
     """
-    Correct mapping for Capital.com account payload:
-      - funds      : static cash balance (use as Balance)
-      - profitLoss : floating PnL (use as PnL)
-      - available  : available to trade
-      - balance    : reported equity (we compute equity ourselves)
+    Normalize account values:
+      - balance: static cash/funds
+      - pnl: floating profit/loss
+      - available: available to trade
+      - equity: computed as balance + pnl
     """
     if not raw:
         return {}
 
-    bal = raw.get("balance", {}) or {}
+    bal = (raw.get("balance") or {}) or {}
 
-    # Prefer 'funds' as the static Balance. If missing, fall back to 'balance' but log it.
+    # Prefer 'funds' as the static Balance. If missing, fall back to 'balance' key.
     if "funds" in bal:
-        balance = bal.get("funds", 0)
+        balance_val = bal.get("funds", 0)
     else:
-        # fallback: some accounts may return 'balance' as funds; log for visibility
-        balance = bal.get("balance", 0)
-        logger.debug("[SESSION] 'funds' not present in account.balance; falling back to 'balance' field")
+        balance_val = bal.get("balance", 0)
+        logger.debug("enrich_account: 'funds' not present; falling back to 'balance'")
 
-    pnl = bal.get("profitLoss", 0)
-    available = bal.get("available", 0)
+    pnl_val = bal.get("profitLoss", 0)
+    available_val = bal.get("available", 0)
 
     try:
-        balance = float(balance or 0)
+        balance = float(balance_val or 0)
     except Exception:
         balance = 0.0
     try:
-        pnl = float(pnl or 0)
+        pnl = float(pnl_val or 0)
     except Exception:
         pnl = 0.0
     try:
-        available = float(available or 0)
+        available = float(available_val or 0)
     except Exception:
         available = 0.0
 
@@ -224,53 +252,63 @@ def enrich_account(raw):
         "available": round(available, 2)
     }
 
-    if DEBUG_LOGS:
-        logger.debug("[SESSION] Enriched account: %s", account_obj)
+    if getattr(config, "DEBUG_LOGS", False):
+        logger.debug("enrich_account: %s", account_obj)
 
     return account_obj
 
 
-def verify_epic(symbol):
-    symbol = symbol.upper()
+# -------------------------
+# EPIC lookup
+# -------------------------
 
-    if symbol in EPIC_MAP:
-        return {"epic": EPIC_MAP[symbol], "source": "map"}
+def verify_epic(symbol: str) -> dict:
+    """
+    Resolve a ticker symbol to an EPIC. First consult EPIC_MAP, then API lookup.
+    Returns dict: {'epic': str or None, 'source': 'map'|'api'|'not_found'|'api_error'|'exception'}
+    """
+    if not symbol:
+        return {"epic": None, "source": "invalid"}
+
+    symbol_up = str(symbol).upper()
+    if symbol_up in EPIC_MAP:
+        return {"epic": EPIC_MAP[symbol_up], "source": "map"}
 
     try:
-        url = f"{API_MARKET}/{symbol}"
+        url = f"{API_MARKET}/{symbol_up}"
         r = request("GET", url)
-
         if not r or r.status_code != 200:
-            logger.debug("[EPIC] API lookup failed for %s", symbol)
+            logger.debug("verify_epic: API lookup failed for %s", symbol_up)
             return {"epic": None, "source": "api_error"}
 
-        data = r.json()
-        epic = data.get("instrument", {}).get("epic")
-
+        data = r.json() or {}
+        epic = (data.get("instrument") or {}).get("epic")
         if epic:
             return {"epic": epic, "source": "api"}
-
-        logger.debug("[EPIC] No EPIC found for %s", symbol)
+        logger.debug("verify_epic: no EPIC found for %s", symbol_up)
         return {"epic": None, "source": "not_found"}
-
     except Exception:
-        logger.exception("[EPIC] Exception during lookup:")
+        logger.exception("verify_epic: exception during lookup for %s", symbol_up)
         return {"epic": None, "source": "exception"}
 
 
-def get_daily_report():
+# -------------------------
+# Reports and state updates
+# -------------------------
+
+def get_daily_report() -> dict:
     try:
         report_data = report.get_daily_report()
         shared_state["daily_report"] = report_data
         return report_data
     except Exception:
-        logger.exception("[REPORT] Failed to load daily report:")
+        logger.exception("get_daily_report: failed to load daily report")
         return {}
 
 
-def update_last_trade():
-    shared_state["system_status"]["last_trade"] = timestamp()
+def update_last_trade() -> None:
+    shared_state.setdefault("system_status", {})["last_trade"] = timestamp()
 
 
-def update_last_webhook():
-    shared_state["system_status"]["last_webhook"] = timestamp()
+def update_last_webhook() -> None:
+    shared_state.setdefault("system_status", {})["last_webhook"] = timestamp()

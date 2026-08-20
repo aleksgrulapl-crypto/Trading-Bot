@@ -1,25 +1,25 @@
+# tradingview_parser.py
 # ============================
 # TradingView Alert Parser (STRICT + EXIT-SIGNAL BLOCKING + NORMALIZED TF)
 # ============================
 
+from typing import Any, Dict, Optional
+
 PLACEHOLDER_VALUES = {"{{alert_message}}", "", None}
 
 
-def parse_tradingview_alert(data):
+def parse_tradingview_alert(data: Any) -> Dict[str, Any]:
     """
     Accepts:
-    - Raw TradingView alert string: "BUY|NVDA|SL:123|TP:130|TF:5M"
-    - JSON TradingView alert dict: {"symbol": "NVDA", "action": "buy", "payload": "..."}
+      - Raw TradingView alert string: "BUY|NVDA|SL:123|TP:130|TF:5M"
+      - JSON TradingView alert dict: {"symbol": "NVDA", "action": "buy", "payload": "..."}
     Returns either:
-    - Valid parsed alert dict
-    - Blocked alert dict (blocked=True)
+      - Valid parsed alert dict (blocked: False)
+      - Blocked alert dict (blocked: True)
     """
-
-    # RAW STRING ALERT
     if isinstance(data, str):
         return parse_raw_alert_strict(data)
 
-    # JSON ALERT
     if isinstance(data, dict):
         return parse_json_alert_strict(data)
 
@@ -30,12 +30,14 @@ def parse_tradingview_alert(data):
 # STRICT RAW ALERT PARSER
 # ============================
 
-def parse_raw_alert_strict(raw: str):
+def parse_raw_alert_strict(raw: str) -> Dict[str, Any]:
     if raw in PLACEHOLDER_VALUES:
         return block_alert("placeholder_payload", raw=raw)
 
-    parts = raw.split("|")
-    if len(parts) < 4:
+    parts = [p.strip() for p in raw.split("|") if p is not None]
+
+    # Minimal structure expected: direction|symbol|... (SL and TP required later)
+    if len(parts) < 2:
         return block_alert("malformed_raw_alert", raw=raw)
 
     # Direction
@@ -56,17 +58,30 @@ def parse_raw_alert_strict(raw: str):
     tp = None
     timeframe = None
 
-    for part in parts:
-        part = part.strip()
-
-        if part.upper().startswith("SL:"):
-            sl = safe_float_or_none(part.replace("SL:", "").strip())
-
-        elif part.upper().startswith("TP:"):
-            tp = safe_float_or_none(part.replace("TP:", "").strip())
-
-        elif part.upper().startswith("TF:"):
-            timeframe = normalize_timeframe(part.replace("TF:", "").strip())
+    # parse remaining parts for SL/TP/TF (support SL: / SL= / SL= )
+    for part in parts[2:]:
+        if not part:
+            continue
+        up = part.upper()
+        if up.startswith("SL:") or up.startswith("SL="):
+            sl = safe_float_or_none(part.split(":", 1)[-1].split("=", 1)[-1].strip())
+        elif up.startswith("TP:") or up.startswith("TP="):
+            tp = safe_float_or_none(part.split(":", 1)[-1].split("=", 1)[-1].strip())
+        elif up.startswith("TF:") or up.startswith("TF="):
+            timeframe = normalize_timeframe(part.split(":", 1)[-1].split("=", 1)[-1].strip())
+        # allow payloads that include key=value pairs separated by spaces
+        else:
+            # try to detect inline tokens like "SL 123" or "TP 130"
+            tokens = part.split()
+            if len(tokens) >= 2:
+                key = tokens[0].upper().rstrip(":=")
+                val = " ".join(tokens[1:])
+                if key == "SL":
+                    sl = safe_float_or_none(val)
+                elif key == "TP":
+                    tp = safe_float_or_none(val)
+                elif key == "TF":
+                    timeframe = normalize_timeframe(val)
 
     if sl is None or tp is None:
         return block_alert("missing_sl_tp", raw=raw)
@@ -87,16 +102,16 @@ def parse_raw_alert_strict(raw: str):
 # STRICT JSON ALERT PARSER
 # ============================
 
-def parse_json_alert_strict(data):
-    symbol = normalise_symbol(data.get("symbol"))
-    direction_raw = (data.get("action") or "").lower()
+def parse_json_alert_strict(data: Dict[str, Any]) -> Dict[str, Any]:
+    symbol = normalise_symbol(data.get("symbol") or data.get("ticker") or data.get("s"))
+    direction_raw = (data.get("action") or data.get("side") or "").strip().lower()
     quantity = safe_float_or_none(data.get("quantity", 1))
-    payload_raw = data.get("payload")
+    payload_raw = data.get("payload") or data.get("message") or data.get("text")
 
     if direction_raw.startswith("exit"):
         return block_alert("ignored_exit_signal", raw=data)
 
-    direction = direction_raw.split(" ")[0]
+    direction = direction_raw.split(" ")[0] if direction_raw else None
 
     if not symbol:
         return block_alert("missing_symbol", raw=data)
@@ -110,13 +125,19 @@ def parse_json_alert_strict(data):
     if payload_raw in PLACEHOLDER_VALUES:
         return block_alert("placeholder_payload", raw=data)
 
-    try:
-        payload = parse_payload_strict(payload_raw)
-    except Exception:
-        return block_alert("malformed_payload", raw=data)
+    # payload may be a dict already (some alert integrations send structured payload)
+    if isinstance(payload_raw, dict):
+        payload = payload_raw
+    else:
+        try:
+            payload = parse_payload_strict(payload_raw)
+        except Exception:
+            return block_alert("malformed_payload", raw=data)
 
-    sl = safe_float_or_none(payload.get("sl"))
-    tp = safe_float_or_none(payload.get("tp"))
+    # payload may be dict from parse_payload_strict or original dict
+    sl = safe_float_or_none(payload.get("sl") if isinstance(payload, dict) else None)
+    tp = safe_float_or_none(payload.get("tp") if isinstance(payload, dict) else None)
+    tf_raw = payload.get("timeframe") if isinstance(payload, dict) else None
 
     if sl is None or tp is None:
         return block_alert("missing_sl_tp", raw=data)
@@ -128,7 +149,7 @@ def parse_json_alert_strict(data):
         "quantity": quantity,
         "sl": sl,
         "tp": tp,
-        "timeframe": normalize_timeframe(payload.get("timeframe")),
+        "timeframe": normalize_timeframe(tf_raw),
         "raw": payload_raw
     }
 
@@ -137,12 +158,21 @@ def parse_json_alert_strict(data):
 # STRICT PAYLOAD PARSER
 # ============================
 
-def parse_payload_strict(payload: str):
+def parse_payload_strict(payload: Optional[str]) -> Dict[str, Any]:
+    """
+    Parse a payload string in the same strict format as raw alerts.
+    Returns a dict with keys: direction, symbol, sl, tp, timeframe
+    Raises ValueError on malformed payload.
+    """
     if payload in PLACEHOLDER_VALUES:
         raise ValueError("placeholder payload")
 
-    parts = payload.split("|")
-    if len(parts) < 4:
+    if not isinstance(payload, str):
+        raise ValueError("payload must be a string")
+
+    parts = [p.strip() for p in payload.split("|") if p is not None]
+
+    if len(parts) < 2:
         raise ValueError("malformed payload")
 
     direction_raw = parts[0].strip().lower()
@@ -161,17 +191,27 @@ def parse_payload_strict(payload: str):
     tp = None
     timeframe = None
 
-    for part in parts:
-        part = part.strip()
-
-        if part.upper().startswith("SL:"):
-            sl = safe_float_or_none(part.replace("SL:", "").strip())
-
-        elif part.upper().startswith("TP:"):
-            tp = safe_float_or_none(part.replace("TP:", "").strip())
-
-        elif part.upper().startswith("TF:"):
-            timeframe = normalize_timeframe(part.replace("TF:", "").strip())
+    for part in parts[2:]:
+        if not part:
+            continue
+        up = part.upper()
+        if up.startswith("SL:") or up.startswith("SL="):
+            sl = safe_float_or_none(part.split(":", 1)[-1].split("=", 1)[-1].strip())
+        elif up.startswith("TP:") or up.startswith("TP="):
+            tp = safe_float_or_none(part.split(":", 1)[-1].split("=", 1)[-1].strip())
+        elif up.startswith("TF:") or up.startswith("TF="):
+            timeframe = normalize_timeframe(part.split(":", 1)[-1].split("=", 1)[-1].strip())
+        else:
+            tokens = part.split()
+            if len(tokens) >= 2:
+                key = tokens[0].upper().rstrip(":=")
+                val = " ".join(tokens[1:])
+                if key == "SL":
+                    sl = safe_float_or_none(val)
+                elif key == "TP":
+                    tp = safe_float_or_none(val)
+                elif key == "TF":
+                    timeframe = normalize_timeframe(val)
 
     if sl is None or tp is None:
         raise ValueError("missing SL/TP")
@@ -189,7 +229,7 @@ def parse_payload_strict(payload: str):
 # BLOCKED ALERT STRUCTURE
 # ============================
 
-def block_alert(reason, raw):
+def block_alert(reason: str, raw: Any) -> Dict[str, Any]:
     return {
         "blocked": True,
         "reason": reason,
@@ -201,45 +241,55 @@ def block_alert(reason, raw):
 # HELPERS
 # ============================
 
-def normalise_symbol(symbol: str):
+def normalise_symbol(symbol: Optional[str]) -> Optional[str]:
     if not symbol:
         return None
-    return symbol.strip().upper()
+    return str(symbol).strip().upper()
 
 
-def safe_float_or_none(value):
+def safe_float_or_none(value: Any) -> Optional[float]:
+    """
+    Convert value to float safely. Accepts strings with commas.
+    Returns None on failure.
+    """
+    if value is None:
+        return None
     try:
+        if isinstance(value, str):
+            v = value.replace(",", "").strip()
+            return float(v)
         return float(value)
     except Exception:
         return None
 
 
-def normalize_timeframe(tf):
+def normalize_timeframe(tf: Optional[str]) -> Optional[str]:
     """
     Normalize timeframe strings:
-    - "5" → "5M"
-    - "5m" → "5M"
-    - "15" → "15M"
-    - "1h" → "1H"
-    - "1H" → "1H"
+      - "5"   -> "5M"
+      - "5m"  -> "5M"
+      - "15"  -> "15M"
+      - "1h"  -> "1H"
+      - "1H"  -> "1H"
+    Returns None if input is falsy.
     """
     if not tf:
         return None
 
-    tf = tf.strip().upper()
+    tf_str = str(tf).strip()
+    if not tf_str:
+        return None
+
+    tf_upper = tf_str.upper()
 
     # If numeric only → assume minutes
-    if tf.isdigit():
-        return f"{tf}M"
+    if tf_upper.isdigit():
+        return f"{tf_upper}M"
 
-    # If ends with M or H → already valid
-    if tf.endswith("M") or tf.endswith("H"):
-        return tf
+    # If already ends with M or H (case-insensitive), normalize to uppercase
+    if tf_upper.endswith("M") or tf_upper.endswith("H"):
+        return tf_upper
 
-    # If ends with lowercase m/h → normalize
-    if tf.endswith("M".lower()):
-        return tf[:-1] + "M"
-    if tf.endswith("H".lower()):
-        return tf[:-1] + "H"
-
-    return tf
+    # If ends with lowercase m/h (already handled by upper), fallback to returning uppercase
+    # Otherwise return the original uppercased token as a best-effort normalization
+    return tf_upper

@@ -1,80 +1,153 @@
+# sizing.py
 # ============================
 # SIZING MODULE (FINAL — SYMBOL-AWARE + SAFE SL/TP)
 # ============================
 
+import logging
+from typing import Optional, Dict, Any
+
 import session
 import config
 
+logger = logging.getLogger("sizing")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    fmt = logging.Formatter("%(asctime)s %(levelname)s [sizing] %(message)s")
+    handler.setFormatter(fmt)
+    logger.addHandler(handler)
+logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_LOGS", False) else logging.INFO)
 
-def calculate_size(entry_price, sl_price, tp_price, direction, symbol=None):
+
+def _safe_float(v) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        if isinstance(v, str):
+            v = v.replace(",", "").strip()
+        return float(v)
+    except Exception:
+        return None
+
+
+def _normalize_direction(direction: Optional[str]) -> Optional[str]:
+    if not direction:
+        return None
+    d = str(direction).strip().lower()
+    if d in ("buy", "b", "long"):
+        return "buy"
+    if d in ("sell", "s", "short"):
+        return "sell"
+    return None
+
+
+def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[str] = None) -> Dict[str, Any]:
     """
     Calculate position size using:
-    - 50% of AVAILABLE equity
-    - Leverage multiplier
-    - Min size enforcement (per ticker)
-    - SL/TP safety validation
+      - a fraction of AVAILABLE equity (config.EQUITY_PERCENT)
+      - leverage multiplier (config.LEVERAGE)
+      - per-ticker minimum size enforcement (config.TICKER_SETTINGS)
+      - SL/TP safety validation
+
+    Returns:
+      {"blocked": True, "reason": "..."} on failure
+      {"blocked": False, "size": float} on success
     """
 
-    # ----------------------------------------
-    # 1) Fetch account (enriched)
-    # ----------------------------------------
-    account = session.enrich_account(session.get_account())
+    # 1) Normalize and validate numeric inputs
+    entry = _safe_float(entry_price)
+    sl = _safe_float(sl_price)
+    tp = _safe_float(tp_price)
+    dir_norm = _normalize_direction(direction)
 
-    available = account.get("available", 0)
+    if entry is None or entry <= 0:
+        return {"blocked": True, "reason": "invalid_entry_price"}
+
+    if dir_norm not in ("buy", "sell"):
+        return {"blocked": True, "reason": "invalid_direction"}
+
+    if sl is None or tp is None:
+        return {"blocked": True, "reason": "missing_sl_or_tp"}
+
+    # 2) Validate SL/TP relative to entry depending on direction
+    if dir_norm == "buy":
+        # For buys: SL < entry < TP
+        if not (sl < entry < tp):
+            return {"blocked": True, "reason": "invalid_sl_tp_buy"}
+        if sl == entry or tp == entry:
+            return {"blocked": True, "reason": "sl_tp_equal_entry"}
+    else:  # sell
+        # For sells: TP < entry < SL
+        if not (tp < entry < sl):
+            return {"blocked": True, "reason": "invalid_sl_tp_sell"}
+        if sl == entry or tp == entry:
+            return {"blocked": True, "reason": "sl_tp_equal_entry"}
+
+    # 3) Fetch account available margin
+    try:
+        account_raw = session.get_account()
+        account = session.enrich_account(account_raw) if account_raw is not None else {}
+    except Exception:
+        logger.exception("Failed to fetch account for sizing")
+        return {"blocked": True, "reason": "account_fetch_failed"}
+
+    available = account.get("available", 0) or 0
+    try:
+        available = float(available)
+    except Exception:
+        available = 0.0
+
     if available <= 0:
-        return {
-            "blocked": True,
-            "reason": "no_available_margin"
-        }
+        return {"blocked": True, "reason": "no_available_margin"}
 
-    # ----------------------------------------
-    # 2) Apply your rule: 50% of AVAILABLE
-    # ----------------------------------------
-    equity_to_use = available * config.EQUITY_PERCENT  # e.g., 0.50
+    # 4) Determine equity to use and exposure
+    equity_to_use = available * float(getattr(config, "EQUITY_PERCENT", 0.5))
+    leverage = float(getattr(config, "LEVERAGE", 1))
+    exposure = equity_to_use * leverage
 
-    # ----------------------------------------
-    # 3) Apply leverage
-    # ----------------------------------------
-    exposure = equity_to_use * config.LEVERAGE
+    # 5) Convert exposure to raw size (units)
+    try:
+        raw_size = exposure / entry
+    except Exception:
+        return {"blocked": True, "reason": "division_error"}
 
-    # ----------------------------------------
-    # 4) Convert exposure → size
-    # ----------------------------------------
-    raw_size = exposure / entry_price
+    # Round to 2 decimals (adjust as needed for instrument granularity)
     size = round(raw_size, 2)
 
-    # ----------------------------------------
-    # 5) Enforce min size per ticker (FIXED)
-    # ----------------------------------------
-    ticker_key = symbol.upper() if symbol else session.shared_state.get("last_symbol", "")
-    ticker_settings = config.TICKER_SETTINGS.get(ticker_key, {})
-    min_size = ticker_settings.get("min_size", 0.1)
+    # 6) Enforce per-ticker minimum size
+    ticker_key = None
+    if symbol:
+        try:
+            ticker_key = str(symbol).upper()
+        except Exception:
+            ticker_key = None
+    else:
+        # fallback to last symbol in shared_state if present
+        ticker_key = session.shared_state.get("last_symbol") if session.shared_state else None
+        if ticker_key:
+            ticker_key = str(ticker_key).upper()
+
+    min_size = 0.1  # default minimum
+    try:
+        if ticker_key:
+            ticker_settings = getattr(config, "TICKER_SETTINGS", {}).get(ticker_key, {})
+            min_size = float(ticker_settings.get("min_size", min_size))
+    except Exception:
+        min_size = 0.1
 
     if size < min_size:
-        size = min_size
+        size = float(min_size)
 
-    # ----------------------------------------
-    # 6) SL/TP validation (Capital.com rejects invalid SL)
-    # ----------------------------------------
-    if direction.lower() == "buy":
-        if not (sl_price < entry_price < tp_price):
-            return {"blocked": True, "reason": "invalid_sl_tp_buy"}
+    # 7) Final safety checks
+    if size <= 0:
+        return {"blocked": True, "reason": "computed_size_nonpositive"}
 
-        # Prevent SL == entry or TP == entry
-        if sl_price == entry_price or tp_price == entry_price:
-            return {"blocked": True, "reason": "sl_tp_equal_entry"}
+    # Optionally enforce a maximum size (not in original spec) — skip unless configured
 
-    if direction.lower() == "sell":
-        if not (tp_price < entry_price < sl_price):
-            return {"blocked": True, "reason": "invalid_sl_tp_sell"}
-
-        if sl_price == entry_price or tp_price == entry_price:
-            return {"blocked": True, "reason": "sl_tp_equal_entry"}
-
-    # ----------------------------------------
-    # 7) Return final sizing
-    # ----------------------------------------
+    # 8) Return final sizing
     return {
         "blocked": False,
-        "size": size
+        "size": float(round(size, 2)),
+        "exposure": float(round(exposure, 2)),
+        "equity_used": float(round(equity_to_use, 2)),
+        "min_size": float(min_size)
     }

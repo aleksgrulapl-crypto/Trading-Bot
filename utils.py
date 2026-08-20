@@ -1,9 +1,11 @@
+# utils.py
 # ============================
 # UTILS MODULE (FINAL + CLEAN + SAFE)
 # ============================
 
 import datetime
 from decimal import Decimal, getcontext
+from typing import Optional
 
 # High precision for safe_float operations
 getcontext().prec = 12
@@ -13,7 +15,7 @@ getcontext().prec = 12
 # TIMESTAMP (CUSTOM FORMAT)
 # ---------------------------------------------------------
 
-def timestamp():
+def timestamp() -> str:
     """
     Returns a UTC timestamp in format:
     YYYY-MM-DD HH.MM.SS
@@ -27,20 +29,29 @@ def timestamp():
 # SAFE FLOAT + ROUNDING
 # ---------------------------------------------------------
 
-def safe_float(x):
+def safe_float(x) -> float:
     """
     Safely converts input to float using Decimal.
     Returns 0.0 on failure.
     """
     try:
+        # Convert None to 0.0 explicitly
+        if x is None:
+            return 0.0
+        # Decimal from string preserves precision for inputs like "1,234.56"
+        if isinstance(x, str):
+            # remove common thousands separators
+            cleaned = x.replace(",", "").strip()
+            return float(Decimal(cleaned))
         return float(Decimal(str(x)))
     except Exception:
         return 0.0
 
 
-def round2(x):
+def round2(x) -> float:
     """
     Rounds a numeric value to 2 decimals safely.
+    Returns 0.0 on failure.
     """
     try:
         return round(float(Decimal(str(x))), 2)
@@ -52,21 +63,31 @@ def round2(x):
 # PROFIT/LOSS CALCULATION
 # ---------------------------------------------------------
 
-def calculate_profit_loss(direction, open_price, current_price, size):
+def calculate_profit_loss(direction, open_price, current_price, size) -> float:
     """
-    Universal PnL calculator for BUY/SELL.
+    Universal PnL calculator for BUY/SELL (or Long/Short).
+    Returns a float (not None). Uses safe_float for conversions.
     """
     if not direction or open_price is None or current_price is None:
         return 0.0
 
-    open_price = safe_float(open_price)
-    current_price = safe_float(current_price)
-    size = safe_float(size)
+    op = safe_float(open_price)
+    cp = safe_float(current_price)
+    sz = safe_float(size)
 
-    if direction.upper() == "BUY":
-        return (current_price - open_price) * size
+    # Normalize direction to handle "BUY", "buy", "Long", "long", etc.
+    try:
+        d = str(direction).strip().lower()
+    except Exception:
+        d = ""
 
-    if direction.upper() == "SELL":
-        return (open_price - current_price) * size
+    if d in ("buy", "long"):
+        pnl = (cp - op) * sz
+        return round2(pnl)
 
+    if d in ("sell", "short"):
+        pnl = (op - cp) * sz
+        return round2(pnl)
+
+    # Unknown direction
     return 0.0

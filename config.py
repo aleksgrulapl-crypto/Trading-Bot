@@ -1,33 +1,43 @@
+# config.py
 # ============================
 # CONFIG MODULE (FINAL VERSION — CLEAN + UNIFIED)
 # ============================
 
 import os
 
-API_BASE = "https://api-capital.backend-capital.com"
+# Base API
+API_BASE = os.getenv("API_BASE", "https://api-capital.backend-capital.com")
 
+# Auth / session endpoints
 API_LOGIN = f"{API_BASE}/api/v1/session"
 API_REFRESH = None
 
+# Account / positions / market endpoints
 API_ACCOUNTS = f"{API_BASE}/api/v1/accounts"
 API_ACCOUNT = f"{API_BASE}/api/v1/accounts"
-
 API_POSITIONS = f"{API_BASE}/api/v1/positions"
 API_MARKET = f"{API_BASE}/api/v1/markets"
 API_HISTORY_TRANSACTIONS = f"{API_BASE}/api/v1/history/transactions"
 
+# Credentials (must be provided via environment in production)
 CAPITAL_API_KEY = os.getenv("CAPITAL_API_KEY")
 CAPITAL_USERNAME = os.getenv("CAPITAL_USERNAME")
 CAPITAL_PASSWORD = os.getenv("CAPITAL_PASSWORD")
 
-MAX_POSITIONS_PER_TICKER = 3
-RISK_PER_TRADE = 0.50
-EQUITY_PERCENT = 0.50
-LEVERAGE = 5
+# Debugging / logging control
+# Set to True in development only; keep False in production
+DEBUG_LOGS = os.getenv("DEBUG_LOGS", "False").lower() in ("1", "true", "yes")
 
-FIXED_SL_PERC = 0.10
-FIXED_TP_PERC = 0.20
+# Trading parameters
+MAX_POSITIONS_PER_TICKER = int(os.getenv("MAX_POSITIONS_PER_TICKER", 3))
+RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", 0.50))
+EQUITY_PERCENT = float(os.getenv("EQUITY_PERCENT", 0.50))
+LEVERAGE = int(os.getenv("LEVERAGE", 5))
 
+FIXED_SL_PERC = float(os.getenv("FIXED_SL_PERC", 0.10))
+FIXED_TP_PERC = float(os.getenv("FIXED_TP_PERC", 0.20))
+
+# Ticker-specific settings (can be extended via env or external config)
 TICKER_SETTINGS = {
     "NVDA": {"min_size": 0.1},
     "TSLA": {"min_size": 0.1},
@@ -36,47 +46,41 @@ TICKER_SETTINGS = {
     "MSFT": {"min_size": 0.1},
     "PLTR": {"min_size": 0.1},
     "META": {"min_size": 0.1},
-    "SMCI": {"min_size": 0.1},
-    "QBTS": {"min_size": 0.1},
-    "IONQ": {"min_size": 0.1},
-    "RKLB": {"min_size": 0.1},
-    "ASTS": {"min_size": 0.1},
-    "SOUN": {"min_size": 0.1},
-    "OPEN": {"min_size": 0.1},
-    "PATH": {"min_size": 0.1},
-    "JOBY": {"min_size": 0.1},
-    "PLUG": {"min_size": 0.1},
     "UNH": {"min_size": 0.1},
+    "MU": {"min_size": 0.1},
+    "PLUG": {"min_size": 0.1},
     "NFLX": {"min_size": 0.1},
     "AMAT": {"min_size": 0.1},
     "WMT": {"min_size": 0.1},
     "GOOGL": {"min_size": 0.1},
     "AMZN": {"min_size": 0.1},
-    "MU": {"min_size": 0.1},
     "CRM": {"min_size": 0.1},
     "INTC": {"min_size": 0.1},
-    "NVAX": {"min_size": 0.1},
     "BABA": {"min_size": 0.1},
     "SHOP": {"min_size": 0.1},
     "COIN": {"min_size": 0.1}
 }
 
-DASHBOARD_TITLE = "AG Capital Trader"
-DASHBOARD_PASSWORD = "Killen123%"
-TIMEZONE = "Europe/London"
+# UI / dashboard
+DASHBOARD_TITLE = os.getenv("DASHBOARD_TITLE", "AG Capital Trader")
+# For security, set dashboard password via env in production
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "Killen123%")
 
-DAILY_REPORT_ENABLED = True
-DAILY_REPORT_HOUR = 22
-DAILY_REPORT_MINUTE = 0
+# Timezone and reporting
+TIMEZONE = os.getenv("TIMEZONE", "Europe/London")
+DAILY_REPORT_ENABLED = os.getenv("DAILY_REPORT_ENABLED", "True").lower() in ("1", "true", "yes")
+DAILY_REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", 22))
+DAILY_REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", 0))
 
-# Persistent trade log on mounted disk
-TRADE_LOG_FILE = "/data/trade_log.json"
+# File paths and persistence
+# TRADE_LOG_PATH is used by trade_log.py (env override supported)
+TRADE_LOG_PATH = os.getenv("TRADE_LOG_PATH", os.getenv("TRADE_LOG_FILE", "/data/trade_log.json"))
+DAILY_REPORT_FILE = os.getenv("DAILY_REPORT_FILE", "/tmp/daily_report.json")
 
-# Daily report can stay in /tmp (ephemeral)
-DAILY_REPORT_FILE = "/tmp/daily_report.json"
+# Cache and timing
+CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 2))
 
-CACHE_TTL_SECONDS = 2
-
+# EPIC mapping (can be extended)
 EPIC_MAP = {
     "NVDA": "NVDA",
     "MU": "MU",
@@ -108,8 +112,9 @@ EPIC_MAP = {
     "WMT": "WMT",
     "CSCO": "CSCO",
     "PLUG": "PLUG",
-    "Gold": "GOLD"
+    "GOLD": "GOLD"
 }
 
-TRAIL_ACTIVATION_PERC = 0.50
-TRAIL_SL_PERC = 0.30
+# Trailing stop defaults
+TRAIL_ACTIVATION_PERC = float(os.getenv("TRAIL_ACTIVATION_PERC", 0.50))
+TRAIL_SL_PERC = float(os.getenv("TRAIL_SL_PERC", 0.30))

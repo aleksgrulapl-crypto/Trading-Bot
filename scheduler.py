@@ -1,156 +1,218 @@
+# scheduler.py
 # ============================
 # SCHEDULER MODULE (TrailSL + ClosedSync)
 # ============================
 
 import threading
 import time
-from datetime import datetime
-import pytz
 import json
+import logging
+from datetime import datetime
+from typing import Callable, Any
+
+import pytz
 
 import session
+import config
 from utils import timestamp
 
 from trail_sl import run_trailing_sl
-from history_sync import sync_closed_trades  # <-- only import the function
+from history_sync import sync_closed_trades  # only import the function
 
 UK_TZ = pytz.timezone("Europe/London")
 
+logger = logging.getLogger("scheduler")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    fmt = logging.Formatter("%(asctime)s %(levelname)s [scheduler] %(message)s")
+    handler.setFormatter(fmt)
+    logger.addHandler(handler)
+logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_LOGS", False) else logging.INFO)
 
-def append_json_line(filename, entry):
+
+def append_json_line(filename: str, entry: Any) -> None:
+    """
+    Append a JSON line to filename. Fail silently but log errors.
+    """
     try:
-        with open(filename, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+        with open(filename, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception as e:
-        print(f"[Scheduler] File write error ({filename}): {e}")
+        logger.exception("File write error (%s): %s", filename, e)
 
 
-def log_available():
+def log_available(logfile: str = "available_log.json") -> None:
+    """
+    Log available balance to a JSON-lines file.
+    """
     try:
         raw = session.get_account()
-        account = session.enrich_account(raw)
+        account = session.enrich_account(raw) or {}
 
         entry = {
             "timestamp": timestamp(),
             "available": account.get("available", 0)
         }
 
-        append_json_line("available_log.json", entry)
-        print(f"[Scheduler] Logged available balance: £{entry['available']}")
+        append_json_line(logfile, entry)
+        logger.info("Logged available balance: %s", entry["available"])
     except Exception as e:
-        print(f"[Scheduler] Error logging available balance: {e}")
+        logger.exception("Error logging available balance: %s", e)
 
 
-def log_equity():
+def log_equity(logfile: str = "equity_log.json") -> None:
+    """
+    Log equity to a JSON-lines file.
+    """
     try:
         raw = session.get_account()
-        account = session.enrich_account(raw)
+        account = session.enrich_account(raw) or {}
 
         entry = {
             "timestamp": timestamp(),
             "equity": account.get("equity", 0)
         }
 
-        append_json_line("equity_log.json", entry)
-        print(f"[Scheduler] Logged daily equity: £{entry['equity']}")
+        append_json_line(logfile, entry)
+        logger.info("Logged equity: %s", entry["equity"])
     except Exception as e:
-        print(f"[Scheduler] Error logging equity: {e}")
+        logger.exception("Error logging equity: %s", e)
 
 
 class Scheduler:
+    """
+    Simple scheduler supporting:
+      - daily jobs at hour/minute (UK timezone)
+      - hourly jobs at minute
+      - interval jobs (seconds)
+    Thread-safe enough for this use-case (single background thread).
+    """
+
     def __init__(self):
         self.jobs = []
         self.running = False
+        self._lock = threading.Lock()
 
-    def add_daily_job(self, hour, minute, func):
-        self.jobs.append({
-            "hour": hour,
-            "minute": minute,
-            "func": func,
-            "hourly": False,
-            "interval": None,
-            "last_run": None
-        })
+    def add_daily_job(self, hour: int, minute: int, func: Callable[[], None]) -> None:
+        with self._lock:
+            self.jobs.append({
+                "type": "daily",
+                "hour": int(hour),
+                "minute": int(minute),
+                "func": func,
+                "last_run_date": None
+            })
 
-    def add_hourly_job(self, minute, func):
-        self.jobs.append({
-            "hour": None,
-            "minute": minute,
-            "func": func,
-            "hourly": True,
-            "interval": None,
-            "last_run": None
-        })
+    def add_hourly_job(self, minute: int, func: Callable[[], None]) -> None:
+        with self._lock:
+            self.jobs.append({
+                "type": "hourly",
+                "minute": int(minute),
+                "func": func,
+                "last_run_hour_key": None
+            })
 
-    def add_interval_job(self, interval_seconds, func):
-        self.jobs.append({
-            "hour": None,
-            "minute": None,
-            "func": func,
-            "hourly": False,
-            "interval": interval_seconds,
-            "last_run": 0
-        })
+    def add_interval_job(self, interval_seconds: int, func: Callable[[], None]) -> None:
+        with self._lock:
+            self.jobs.append({
+                "type": "interval",
+                "interval": int(interval_seconds),
+                "func": func,
+                "last_run": 0.0
+            })
 
-    def start(self):
+    def start(self) -> None:
         if self.running:
             return
-
         self.running = True
-        thread = threading.Thread(target=self.run, daemon=True)
+        thread = threading.Thread(target=self.run, daemon=True, name="SchedulerThread")
         thread.start()
+        logger.info("Scheduler started")
 
-    def run(self):
+    def stop(self) -> None:
+        self.running = False
+        logger.info("Scheduler stopping")
+
+    def run(self) -> None:
+        """
+        Main loop: checks jobs and runs them when due.
+        Sleeps a short interval between checks to be responsive.
+        """
+        sleep_interval = 10  # seconds between loop iterations
         while self.running:
-            now = time.time()
+            now_ts = time.time()
             now_uk = datetime.now(UK_TZ)
 
-            for job in self.jobs:
+            with self._lock:
+                for job in list(self.jobs):
+                    try:
+                        if job["type"] == "interval":
+                            last = job.get("last_run", 0.0)
+                            if now_ts - last >= job["interval"]:
+                                logger.debug("Running interval job: %s", job["func"].__name__)
+                                try:
+                                    job["func"]()
+                                except Exception:
+                                    logger.exception("Error running interval job %s", job["func"].__name__)
+                                job["last_run"] = now_ts
+                        elif job["type"] == "daily":
+                            # run once per day at specified hour/minute (UK timezone)
+                            if now_uk.hour == job["hour"] and now_uk.minute == job["minute"]:
+                                today = now_uk.date()
+                                if job.get("last_run_date") != today:
+                                    logger.debug("Running daily job: %s", job["func"].__name__)
+                                    try:
+                                        job["func"]()
+                                    except Exception:
+                                        logger.exception("Error running daily job %s", job["func"].__name__)
+                                    job["last_run_date"] = today
+                        elif job["type"] == "hourly":
+                            # run once per hour at specified minute
+                            if now_uk.minute == job["minute"]:
+                                hour_key = (now_uk.year, now_uk.month, now_uk.day, now_uk.hour)
+                                if job.get("last_run_hour_key") != hour_key:
+                                    logger.debug("Running hourly job: %s", job["func"].__name__)
+                                    try:
+                                        job["func"]()
+                                    except Exception:
+                                        logger.exception("Error running hourly job %s", job["func"].__name__)
+                                    job["last_run_hour_key"] = hour_key
+                    except Exception:
+                        logger.exception("Unexpected error evaluating job: %s", job.get("func").__name__)
 
-                if job["interval"]:
-                    if now - job["last_run"] >= job["interval"]:
-                        print(f"[Scheduler] Running interval job: {job['func'].__name__}")
-                        try:
-                            job["func"]()
-                            job["last_run"] = now
-                        except Exception as e:
-                            print(f"[Scheduler] Error running interval job {job['func'].__name__}: {e}")
-                    continue
+            # update shared state for monitoring
+            try:
+                session.shared_state.setdefault("system_status", {})["last_scheduler"] = timestamp()
+            except Exception:
+                logger.debug("Failed to update shared_state last_scheduler")
 
-                if not job["hourly"]:
-                    if now_uk.hour == job["hour"] and now_uk.minute == job["minute"]:
-                        if job["last_run"] != now_uk.date():
-                            print(f"[Scheduler] Running daily job: {job['func'].__name__}")
-                            try:
-                                job["func"]()
-                                job["last_run"] = now_uk.date()
-                            except Exception as e:
-                                print(f"[Scheduler] Error running daily job {job['func'].__name__}: {e}")
-
-                else:
-                    if now_uk.minute == job["minute"]:
-                        hour_key = (now_uk.year, now_uk.month, now_uk.day, now_uk.hour)
-                        if job["last_run"] != hour_key:
-                            print(f"[Scheduler] Running hourly job: {job['func'].__name__}")
-                            try:
-                                job["func"]()
-                                job["last_run"] = hour_key
-                            except Exception as e:
-                                print(f"[Scheduler] Error running hourly job {job['func'].__name__}: {e}")
-
-            session.shared_state["system_status"]["last_scheduler"] = timestamp()
-            time.sleep(30)
+            time.sleep(sleep_interval)
 
 
+# single scheduler instance
 scheduler = Scheduler()
 
 
-def start_scheduler():
+def start_scheduler() -> None:
+    """
+    Configure and start the scheduler with the desired jobs.
+    - Trailing SL job runs every 5 seconds (short interval for responsiveness).
+    - Closed trade sync job runs every 5 seconds.
+    """
+    # avoid adding duplicate jobs if start_scheduler called multiple times
+    if scheduler.running:
+        logger.info("Scheduler already running")
+        return
+
     # Trail SL job
     scheduler.add_interval_job(5, run_trailing_sl)
 
     # Closed trade sync job (SL/TP/manual closes)
     scheduler.add_interval_job(5, sync_closed_trades)
 
+    # Optional daily/hourly logging jobs (examples)
+    scheduler.add_daily_job(getattr(config, "DAILY_REPORT_HOUR", 22), getattr(config, "DAILY_REPORT_MINUTE", 0), lambda: log_equity("equity_log.json"))
+    scheduler.add_hourly_job(0, lambda: log_available("available_log.json"))
+
     scheduler.start()
-    print("[Scheduler] Started background scheduler (TrailSL + ClosedSync).")
+    logger.info("Started background scheduler (TrailSL + ClosedSync).")
