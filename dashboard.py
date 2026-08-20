@@ -4,13 +4,27 @@
 
 import functools
 import time
+import math
+import logging
 from flask import Blueprint, request, render_template, redirect, jsonify
 
 import session
 import config
-from trade_log import load_raw_log
+from trade_log import (
+    load_raw_log,
+    reconcile_with_positions,
+    append_open_trade,
+    get_completed_trades
+)
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
+
+# logging
+logger = logging.getLogger("dashboard")
+if getattr(config, "DEBUG_LOGS", False):
+    logging.basicConfig(level=logging.DEBUG)
+else:
+    logging.basicConfig(level=logging.INFO)
 
 
 def login_required(view):
@@ -26,8 +40,10 @@ def normalize_trades(trades):
     normalized = []
 
     for t in trades:
+        # ensure consistent dealId type
         t["dealId"] = str(t.get("dealId")) if t.get("dealId") else None
 
+        # normalize side
         side = t.get("side")
         if isinstance(side, str):
             s = side.lower()
@@ -38,11 +54,24 @@ def normalize_trades(trades):
         else:
             t["side"] = "Short"
 
+        # ensure numeric pnl
         pnl = t.get("pnl", 0)
         try:
-            t["pnl"] = float(pnl)
+            t["pnl"] = float(pnl) if pnl is not None else 0.0
         except Exception:
             t["pnl"] = 0.0
+
+        # ensure entry/exit price numeric where present
+        try:
+            if t.get("entry_price") is not None:
+                t["entry_price"] = float(t["entry_price"])
+        except Exception:
+            pass
+        try:
+            if t.get("exit_price") is not None:
+                t["exit_price"] = float(t["exit_price"])
+        except Exception:
+            pass
 
         normalized.append(t)
 
@@ -50,6 +79,10 @@ def normalize_trades(trades):
 
 
 def dedupe_trades(trades):
+    """
+    Deduplicate trades. Prefer closed record over open when duplicates found.
+    Fallback signature uses ticker + rounded entry_price + time_entered.
+    """
     seen = {}
     unique = []
 
@@ -58,18 +91,20 @@ def dedupe_trades(trades):
         if deal_id:
             key = ("ID", deal_id)
         else:
-            key = (
-                "FALLBACK",
-                str(t.get("ticker")),
-                str(t.get("time_entered")),
-                str(t.get("entry_price")),
-            )
+            # align with trade_log signature rounding
+            entry = t.get("entry_price")
+            try:
+                entry_norm = round(float(entry or 0), 8)
+            except Exception:
+                entry_norm = str(entry)
+            key = ("FALLBACK", str(t.get("ticker")), str(entry_norm), str(t.get("time_entered")))
 
         idx = seen.get(key)
         if idx is None:
             seen[key] = len(unique)
             unique.append(t)
         else:
+            # if existing is open and new one is closed, replace
             if unique[idx].get("status") != "CLOSED" and t.get("status") == "CLOSED":
                 unique[idx] = t
 
@@ -118,13 +153,17 @@ def compute_analytics(trades):
         p_loss = 1 - p_win
         expectancy = round(p_win * avg_win + p_loss * avg_loss, 2)
 
-    running = 0
-    max_peak = 0
-    max_drawdown = 0
+    running = 0.0
+    max_peak = -math.inf
+    max_drawdown = 0.0
 
+    # compute running equity curve and drawdown
     for t in trades:
         running += t["pnl"]
-        max_peak = max(max_peak, running)
+        if max_peak == -math.inf:
+            max_peak = running
+        else:
+            max_peak = max(max_peak, running)
         max_drawdown = min(max_drawdown, running - max_peak)
 
     total_pl = round(running, 2)
@@ -152,6 +191,14 @@ def dashboard_home():
 
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
+
+    # reconcile local trade log with live positions so closed trades are recorded
+    try:
+        recon = reconcile_with_positions(positions)
+        if getattr(config, "DEBUG_LOGS", False):
+            logger.debug("trade_log reconcile result: %s", recon)
+    except Exception:
+        logger.exception("dashboard: reconcile_with_positions failed")
 
     combined_raw = load_raw_log()
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
@@ -190,6 +237,14 @@ def dashboard_data():
 
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
+
+    # reconcile local trade log with live positions so closed trades are recorded
+    try:
+        recon = reconcile_with_positions(positions)
+        if getattr(config, "DEBUG_LOGS", False):
+            logger.debug("trade_log reconcile result: %s", recon)
+    except Exception:
+        logger.exception("dashboard: reconcile_with_positions failed")
 
     combined_raw = load_raw_log()
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
