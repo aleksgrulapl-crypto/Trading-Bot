@@ -12,6 +12,7 @@ from trade_log import load_raw_log
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
+
 def login_required(view):
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
@@ -19,6 +20,7 @@ def login_required(view):
             return redirect("/dashboard/login")
         return view(*args, **kwargs)
     return wrapper
+
 
 def normalize_trades(trades):
     normalized = []
@@ -39,12 +41,13 @@ def normalize_trades(trades):
         pnl = t.get("pnl", 0)
         try:
             t["pnl"] = float(pnl)
-        except:
+        except Exception:
             t["pnl"] = 0.0
 
         normalized.append(t)
 
     return normalized
+
 
 def dedupe_trades(trades):
     seen = {}
@@ -55,7 +58,12 @@ def dedupe_trades(trades):
         if deal_id:
             key = ("ID", deal_id)
         else:
-            key = ("FALLBACK", str(t.get("ticker")), str(t.get("time_entered")), str(t.get("entry_price")))
+            key = (
+                "FALLBACK",
+                str(t.get("ticker")),
+                str(t.get("time_entered")),
+                str(t.get("entry_price")),
+            )
 
         idx = seen.get(key)
         if idx is None:
@@ -67,8 +75,10 @@ def dedupe_trades(trades):
 
     return unique
 
+
 def filter_completed(trades):
     return [t for t in trades if t.get("status") == "CLOSED"]
+
 
 def compute_analytics(trades):
     if not trades:
@@ -85,9 +95,10 @@ def compute_analytics(trades):
 
     cleaned = []
     for t in trades:
+        pnl = t.get("pnl", 0)
         try:
-            t["pnl"] = float(t.get("pnl", 0))
-        except:
+            t["pnl"] = float(pnl)
+        except (TypeError, ValueError):
             t["pnl"] = 0.0
         cleaned.append(t)
 
@@ -129,9 +140,11 @@ def compute_analytics(trades):
         "story": "Discipline and controlled losses define the curve."
     }
 
+
 @dashboard.route("/dashboard")
 @login_required
 def dashboard_home():
+    # force fresh account fetch
     session._cache["account"]["ts"] = 0
 
     raw_positions = session.get_positions() or []
@@ -165,9 +178,11 @@ def dashboard_home():
         analytics=analytics
     )
 
+
 @dashboard.route("/dashboard/data")
 @login_required
 def dashboard_data():
+    # force fresh account fetch
     session._cache["account"]["ts"] = 0
 
     raw_positions = session.get_positions() or []

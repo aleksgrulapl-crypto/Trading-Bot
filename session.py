@@ -25,6 +25,7 @@ _cache = {
     "account": {"ts": 0, "data": {}}
 }
 
+
 def get_headers():
     auth.ensure_token()
     return {
@@ -34,6 +35,7 @@ def get_headers():
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
+
 
 def request(method, url, json=None):
     headers = get_headers()
@@ -52,6 +54,7 @@ def request(method, url, json=None):
         print("[ERROR] Request failed:", flush=True)
         traceback.print_exc()
         return None
+
 
 def get_positions():
     url = f"{API_POSITIONS}?includeProfitLoss=true"
@@ -76,6 +79,7 @@ def get_positions():
         print(f"[SESSION] Failed to parse positions: {e}", flush=True)
         return []
 
+
 def _normalize_direction(direction):
     if not direction:
         return None
@@ -85,6 +89,7 @@ def _normalize_direction(direction):
     if d == "SELL":
         return "Short"
     return direction.capitalize()
+
 
 def enrich_positions(raw_positions):
     enriched = []
@@ -126,6 +131,7 @@ def enrich_positions(raw_positions):
 
     return enriched
 
+
 def get_account():
     now = time.time()
     if now - _cache["account"]["ts"] < 1.0:
@@ -150,6 +156,7 @@ def get_account():
         print(f"[SESSION] Failed to parse account: {e}", flush=True)
         return _cache["account"]["data"]
 
+
 def enrich_account(raw):
     if not raw:
         return {}
@@ -168,6 +175,7 @@ def enrich_account(raw):
         "pnl": round(pnl, 2),
         "available": round(available, 2)
     }
+
 
 def verify_epic(symbol):
     symbol = symbol.upper()
@@ -196,6 +204,7 @@ def verify_epic(symbol):
         print(f"[EPIC] Exception during lookup: {e}", flush=True)
         return {"epic": None, "source": "exception"}
 
+
 def get_daily_report():
     try:
         report_data = report.get_daily_report()
@@ -205,8 +214,10 @@ def get_daily_report():
         print(f"[REPORT] Failed to load daily report: {e}", flush=True)
         return {}
 
+
 def update_last_trade():
     shared_state["system_status"]["last_trade"] = timestamp()
+
 
 def update_last_webhook():
     shared_state["system_status"]["last_webhook"] = timestamp()
