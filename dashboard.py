@@ -1,5 +1,5 @@
 # ============================
-# DASHBOARD MODULE (CLEAN + CAPITAL.COM VALUES)
+# DASHBOARD MODULE (DISK LOG + CLOSE BUTTON + SORT)
 # ============================
 
 import functools
@@ -28,20 +28,34 @@ def normalize_trades(trades):
     for t in trades:
         t["dealId"] = str(t.get("dealId")) if t.get("dealId") else None
 
+        t.setdefault("time_entered", t.get("time_entered"))
+        t.setdefault("time_exited", t.get("time_exited"))
+
+        if not t.get("ticker"):
+            t["ticker"] = t.get("epic") or t.get("symbol") or "—"
+
         side = t.get("side")
         if isinstance(side, str):
             s = side.lower()
             if s in ("long", "short"):
-                t["side"] = s.capitalize()
+                t["side"] = s.capitalize()  # Long / Short
             else:
                 t["side"] = side
         else:
             t["side"] = "Short"
 
+        t.setdefault("size", t.get("size") or "—")
+
+        if t.get("entry_price") is None:
+            t["entry_price"] = "—"
+
+        if t.get("exit_price") is None:
+            t["exit_price"] = "—"
+
         pnl = t.get("pnl", 0)
         try:
             t["pnl"] = float(pnl)
-        except:
+        except Exception:
             t["pnl"] = 0.0
 
         normalized.append(t)
@@ -55,20 +69,25 @@ def dedupe_trades(trades):
 
     for t in trades:
         deal_id = t.get("dealId")
-        key = ("ID", deal_id) if deal_id else (
-            "FALLBACK",
-            str(t.get("ticker")),
-            str(t.get("time_entered")),
-            str(t.get("entry_price")),
-        )
+        if deal_id:
+            key = ("ID", deal_id)
+        else:
+            key = (
+                "FALLBACK",
+                str(t.get("ticker")),
+                str(t.get("time_entered")),
+                str(t.get("entry_price")),
+            )
 
-        idx = seen.get(key)
-        if idx is None:
+        existing_index = seen.get(key)
+
+        if existing_index is None:
             seen[key] = len(unique)
             unique.append(t)
         else:
-            if unique[idx].get("status") != "CLOSED" and t.get("status") == "CLOSED":
-                unique[idx] = t
+            existing = unique[existing_index]
+            if existing.get("status") != "CLOSED" and t.get("status") == "CLOSED":
+                unique[existing_index] = t
 
     return unique
 
@@ -92,10 +111,12 @@ def compute_analytics(trades):
 
     cleaned = []
     for t in trades:
+        pnl = t.get("pnl")
         try:
-            t["pnl"] = float(t.get("pnl", 0))
-        except:
-            t["pnl"] = 0.0
+            pnl = float(pnl)
+        except (TypeError, ValueError):
+            pnl = 0.0
+        t["pnl"] = pnl
         cleaned.append(t)
 
     trades = cleaned
@@ -114,12 +135,14 @@ def compute_analytics(trades):
         p_loss = 1 - p_win
         expectancy = round(p_win * avg_win + p_loss * avg_loss, 2)
 
+    cumulative = []
     running = 0
     max_peak = 0
     max_drawdown = 0
 
     for t in trades:
         running += t["pnl"]
+        cumulative.append(running)
         max_peak = max(max_peak, running)
         max_drawdown = min(max_drawdown, running - max_peak)
 
@@ -135,6 +158,44 @@ def compute_analytics(trades):
         "trade_count": trade_count,
         "story": "Discipline and controlled losses define the curve."
     }
+
+
+def clean_value(v):
+    try:
+        if v is None:
+            return None
+        if isinstance(v, float) and (v != v):
+            return None
+        return v
+    except:
+        return None
+
+
+def clean_structure(obj):
+    if isinstance(obj, dict):
+        return {k: clean_structure(clean_value(v)) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [clean_structure(clean_value(x)) for x in obj]
+    return clean_value(obj)
+
+
+@dashboard.route("/dashboard/login", methods=["GET", "POST"])
+def dashboard_login():
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        if password == config.DASHBOARD_PASSWORD:
+            resp = redirect("/dashboard")
+            resp.set_cookie("dashboard_auth", "1", max_age=86400)
+            return resp
+        return render_template("login.html", error="Incorrect password", cache_bust=time.time())
+    return render_template("login.html", error=None, cache_bust=time.time())
+
+
+@dashboard.route("/dashboard/logout")
+def dashboard_logout():
+    resp = redirect("/dashboard/login")
+    resp.delete_cookie("dashboard_auth")
+    return resp
 
 
 @dashboard.route("/dashboard")
@@ -153,7 +214,10 @@ def dashboard_home():
 
     combined_trades.sort(
         key=lambda t: (
-            t.get("time_exited") or t.get("time_entered") or ""
+            t.get("time_exited") or t.get("time_entered") or "",
+            str(t.get("ticker")),
+            float(t.get("size")) if isinstance(t.get("size"), (int, float)) else 0.0,
+            float(t.get("entry_price")) if isinstance(t.get("entry_price"), (int, float)) else 0.0,
         ),
         reverse=True
     )
@@ -174,3 +238,80 @@ def dashboard_home():
         trades=combined_trades,
         analytics=analytics
     )
+
+
+@dashboard.route("/dashboard/data")
+@login_required
+def dashboard_data():
+    session._cache["account"]["ts"] = 0
+
+    raw_positions = session.get_positions() or []
+    raw_account = session.get_account() or {}
+
+    positions = session.enrich_positions(raw_positions)
+    account = session.enrich_account(raw_account)
+
+    # Option A: use Capital.com account values directly.
+    # No margin-from-positions, no live equity/funds adjustment.
+
+    combined_raw = load_raw_log()
+    combined_trades = normalize_trades(dedupe_trades(combined_raw))
+
+    combined_trades.sort(
+        key=lambda t: (
+            t.get("time_exited") or t.get("time_entered") or "",
+            str(t.get("ticker")),
+            float(t.get("size")) if isinstance(t.get("size"), (int, float)) else 0.0,
+            float(t.get("entry_price")) if isinstance(t.get("entry_price"), (int, float)) else 0.0,
+        ),
+        reverse=True
+    )
+
+    analytics = compute_analytics(filter_completed(combined_trades))
+
+    session.shared_state["account"] = account
+    session.shared_state["positions"] = positions
+    session.shared_state["trade_log"] = combined_trades
+    session.shared_state["analytics"] = analytics
+
+    html = render_template(
+        "dashboard_partial.html",
+        cache_bust=time.time(),
+        account=account,
+        positions=positions,
+        trades=combined_trades,
+        analytics=analytics
+    )
+
+    return jsonify(clean_structure({
+        "html": html,
+        "account": account,
+        "positions": positions,
+        "trades": combined_trades,
+        "analytics": analytics
+    }))
+
+
+@dashboard.route("/dashboard/close/<deal_id>")
+@login_required
+def dashboard_close(deal_id):
+    from close_position import close_position
+    close_position(deal_id)
+
+    session.shared_state["positions"] = session.enrich_positions(session.get_positions())
+    session.shared_state["account"] = session.enrich_account(session.get_account())
+    session.shared_state["trade_log"] = load_raw_log()
+
+    return redirect("/dashboard")
+
+
+@dashboard.route("/dashboard/debug")
+@login_required
+def dashboard_debug():
+    return jsonify(clean_structure({
+        "account": session.shared_state.get("account"),
+        "positions": session.shared_state.get("positions"),
+        "trade_log": session.shared_state.get("trade_log"),
+        "system_status": session.shared_state.get("system_status", {}),
+        "analytics": session.shared_state.get("analytics", {})
+    }))
