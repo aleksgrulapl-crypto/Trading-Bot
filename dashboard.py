@@ -201,12 +201,11 @@ def dashboard_home():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
-    # ❌ DO NOT adjust funds/equity with open PnL here
-    # Capital already includes PnL in equity/funds semantics
+    # ❌ No extra equity / funds / margin math here.
+    # Just pass through what Capital gave us.
 
-    combined_raw = []  # we’re skipping trade log for now
-
-    analytics = {
+    trades = []      # ignore trade log for now
+    analytics = {    # blank stats
         "win_rate": None,
         "avg_win": None,
         "avg_loss": None,
@@ -219,7 +218,7 @@ def dashboard_home():
 
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
-    session.shared_state["trade_log"] = combined_raw
+    session.shared_state["trade_log"] = trades
     session.shared_state["analytics"] = analytics
 
     return render_template(
@@ -228,7 +227,7 @@ def dashboard_home():
         cache_bust=time.time(),
         account=account,
         positions=positions,
-        trades=combined_raw,
+        trades=trades,
         analytics=analytics
     )
 

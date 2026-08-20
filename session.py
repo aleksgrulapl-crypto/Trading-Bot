@@ -157,28 +157,24 @@ def enrich_account(raw):
 
     bal = raw.get("balance", {})
 
-    # Capital.com semantics:
-    # funds   = cash balance
-    # profitLoss = floating PnL
-    # equity = funds + profitLoss
-    # available = available to trade
-    # margin = used margin
-
+    # Use Capital.com fields directly
     funds = bal.get("funds", 0)          # cash
+    balance = bal.get("balance", funds)  # some accounts expose this, some don't
     pnl = bal.get("profitLoss", 0)       # floating PnL
-    available = bal.get("available", 0)  # available
+    available = bal.get("available", 0)  # available to trade
     margin = bal.get("margin", 0)        # used margin
 
-    equity = funds + pnl                 # Capital equity
+    # Equity as Capital shows it: funds + pnl
+    equity = funds + pnl
 
     margin_warning = None
     if available < 0:
         margin_warning = "⚠ Margin Warning: Available balance is negative."
 
     return {
-        "funds": round(funds, 2),          # label: Funds (cash)
-        "equity": round(equity, 2),        # label: Equity
-        "balance": round(funds, 2),        # if you still show Balance, use funds
+        "funds": round(funds, 2),          # Funds (cash)
+        "equity": round(equity, 2),        # Equity
+        "balance": round(balance, 2),      # Balance (if present)
         "pnl": round(pnl, 2),
         "available": round(available, 2),
         "margin": round(margin, 2),
