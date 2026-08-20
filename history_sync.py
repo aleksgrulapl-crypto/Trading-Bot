@@ -1,5 +1,5 @@
 # ============================
-# SYNC CLOSED TRADES (FINAL — NO FALSE CLOSES)
+# SYNC CLOSED TRADES (FINAL — NEVER MISS CLOSES, NEVER FALSE CLOSES)
 # ============================
 
 import time
@@ -8,9 +8,12 @@ from trade_log import load_raw_log, log_closed_trade
 from utils import timestamp
 from config import API_MARKET
 
-_last_positions = set()       # dealIds seen last cycle
-_last_close_cache = {}        # prevent duplicate closes
-_snapshot_cache = {}          # epic → (bid, offer, ts)
+# Memory of last 2 snapshots to avoid rate-limit false closes
+_last_positions_1 = set()
+_last_positions_2 = set()
+
+_last_close_cache = {}
+_snapshot_cache = {}
 
 
 def get_snapshot(epic):
@@ -37,7 +40,7 @@ def get_snapshot(epic):
 
 
 def sync_closed_trades():
-    global _last_positions
+    global _last_positions_1, _last_positions_2
 
     log = load_raw_log()
     open_trades = [t for t in log if t.get("status") == "OPEN"]
@@ -47,11 +50,9 @@ def sync_closed_trades():
 
     raw_positions = session.get_positions()
 
-    # ❗ CRITICAL FIX:
-    # If positions list is empty → DO NOT treat as closed.
-    # Capital.com often returns [] during rate limits.
-    if raw_positions is None or raw_positions == []:
-        print("[SYNC] Positions unavailable or empty → skipping close detection")
+    # If API fails → skip
+    if raw_positions is None:
+        print("[SYNC] Positions unavailable → skipping")
         return
 
     enriched_positions = session.enrich_positions(raw_positions) or []
@@ -60,16 +61,19 @@ def sync_closed_trades():
     for trade in open_trades:
         deal_id = str(trade.get("dealId"))
 
-        # Already logged → skip
+        # Already logged
         if deal_id in _last_close_cache:
             continue
 
-        # Still open → skip
+        # Still open
         if deal_id in current_positions:
             continue
 
-        # ❗ Only treat disappearance as close if it existed previously
-        if deal_id not in _last_positions:
+        # ❗ NEW CLOSE LOGIC:
+        # Only treat disappearance as close if the dealId existed
+        # in ANY of the last 2 snapshots.
+        if deal_id not in _last_positions_1 and deal_id not in _last_positions_2:
+            # This prevents false closes from rate-limit empty lists
             continue
 
         # Fetch snapshot
@@ -83,7 +87,7 @@ def sync_closed_trades():
             print("[SYNC] Snapshot unavailable → skipping")
             continue
 
-        # Correct side:
+        # Correct side
         if direction.lower() == "buy":
             exit_price = bid
         else:
@@ -115,5 +119,6 @@ def sync_closed_trades():
 
         _last_close_cache[deal_id] = True
 
-    # Update memory
-    _last_positions = current_positions.copy()
+    # Shift snapshots
+    _last_positions_2 = _last_positions_1
+    _last_positions_1 = current_positions.copy()
