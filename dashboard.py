@@ -1,8 +1,7 @@
 # ============================
-# DASHBOARD MODULE (CORRECTED — DISK LOG + CLOSE BUTTON + NEW TIMESTAMP FORMAT)
+# DASHBOARD MODULE (DISK LOG + CLOSE BUTTON + SORT + MARGIN)
 # ============================
 
-import json
 import functools
 import time
 from flask import Blueprint, request, render_template, redirect, jsonify
@@ -14,10 +13,6 @@ from trade_log import load_raw_log
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
 
-# ---------------------------------------------------------
-# AUTH
-# ---------------------------------------------------------
-
 def login_required(view):
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
@@ -26,10 +21,6 @@ def login_required(view):
         return view(*args, **kwargs)
     return wrapper
 
-
-# ---------------------------------------------------------
-# NORMALIZE TRADES
-# ---------------------------------------------------------
 
 def normalize_trades(trades):
     normalized = []
@@ -65,10 +56,6 @@ def normalize_trades(trades):
     return normalized
 
 
-# ---------------------------------------------------------
-# DEDUPE (PREFER CLOSED OVER OPEN)
-# ---------------------------------------------------------
-
 def dedupe_trades(trades):
     seen = {}
     unique = []
@@ -98,17 +85,9 @@ def dedupe_trades(trades):
     return unique
 
 
-# ---------------------------------------------------------
-# FILTER COMPLETED
-# ---------------------------------------------------------
-
 def filter_completed(trades):
     return [t for t in trades if t.get("status") == "CLOSED"]
 
-
-# ---------------------------------------------------------
-# ANALYTICS
-# ---------------------------------------------------------
 
 def compute_analytics(trades):
     if not trades:
@@ -174,10 +153,6 @@ def compute_analytics(trades):
     }
 
 
-# ---------------------------------------------------------
-# CLEAN STRUCTURE
-# ---------------------------------------------------------
-
 def clean_value(v):
     try:
         if v is None:
@@ -195,10 +170,6 @@ def clean_structure(obj):
         return [clean_structure(clean_value(x)) for x in obj]
     return clean_value(obj)
 
-
-# ---------------------------------------------------------
-# LOGIN
-# ---------------------------------------------------------
 
 @dashboard.route("/dashboard/login", methods=["GET", "POST"])
 def dashboard_login():
@@ -219,10 +190,6 @@ def dashboard_logout():
     return resp
 
 
-# ---------------------------------------------------------
-# DASHBOARD HOME
-# ---------------------------------------------------------
-
 @dashboard.route("/dashboard")
 @login_required
 def dashboard_home():
@@ -234,7 +201,6 @@ def dashboard_home():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
-    # Override margin using positions
     used_margin = session.compute_used_margin(raw_positions)
     account["margin"] = used_margin
 
@@ -248,13 +214,12 @@ def dashboard_home():
     combined_raw = load_raw_log()
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
 
-    # Sort by timestamp, ticker, size, entry_price (your preferred signature)
     combined_trades.sort(
         key=lambda t: (
             t.get("time_exited") or t.get("time_entered") or "",
             str(t.get("ticker")),
-            float(t.get("size")) if isinstance(t.get("size"), (int, float, str)) and str(t.get("size")).replace('.', '', 1).isdigit() else 0.0,
-            float(t.get("entry_price")) if isinstance(t.get("entry_price"), (int, float, str)) and str(t.get("entry_price")).replace('.', '', 1).isdigit() else 0.0,
+            float(t.get("size")) if isinstance(t.get("size"), (int, float)) else 0.0,
+            float(t.get("entry_price")) if isinstance(t.get("entry_price"), (int, float)) else 0.0,
         ),
         reverse=True
     )
@@ -276,10 +241,6 @@ def dashboard_home():
         analytics=analytics
     )
 
-
-# ---------------------------------------------------------
-# DASHBOARD DATA (AJAX)
-# ---------------------------------------------------------
 
 @dashboard.route("/dashboard/data")
 @login_required
@@ -309,8 +270,8 @@ def dashboard_data():
         key=lambda t: (
             t.get("time_exited") or t.get("time_entered") or "",
             str(t.get("ticker")),
-            float(t.get("size")) if isinstance(t.get("size"), (int, float, str)) and str(t.get("size")).replace('.', '', 1).isdigit() else 0.0,
-            float(t.get("entry_price")) if isinstance(t.get("entry_price"), (int, float, str)) and str(t.get("entry_price")).replace('.', '', 1).isdigit() else 0.0,
+            float(t.get("size")) if isinstance(t.get("size"), (int, float)) else 0.0,
+            float(t.get("entry_price")) if isinstance(t.get("entry_price"), (int, float)) else 0.0,
         ),
         reverse=True
     )
@@ -340,19 +301,9 @@ def dashboard_data():
     }))
 
 
-# ---------------------------------------------------------
-# CLOSE POSITION (FINAL — USE dealId DIRECTLY)
-# ---------------------------------------------------------
-
 @dashboard.route("/dashboard/close/<deal_id>")
 @login_required
 def dashboard_close(deal_id):
-    """
-    Dashboard close:
-    - deal_id is already the correct Capital.com dealId
-    - no mapping required
-    """
-
     from close_position import close_position
     close_position(deal_id)
 
@@ -362,10 +313,6 @@ def dashboard_close(deal_id):
 
     return redirect("/dashboard")
 
-
-# ---------------------------------------------------------
-# DEBUG
-# ---------------------------------------------------------
 
 @dashboard.route("/dashboard/debug")
 @login_required

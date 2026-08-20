@@ -1,5 +1,5 @@
 # ============================
-# SYNC CLOSED TRADES (FINAL — SIZE + DISAPPEARANCE, NO AUTO CLOSES)
+# SYNC CLOSED TRADES (FINAL — SIZE + DISAPPEARANCE, NO DUPLICATES)
 # ============================
 
 import time
@@ -8,10 +8,8 @@ from trade_log import load_raw_log, log_closed_trade
 from utils import timestamp
 from config import API_MARKET
 
-# Memory of last 2 raw position snapshots (dealIds)
 _last_raw_1 = set()
 _last_raw_2 = set()
-
 _last_close_cache = {}
 _snapshot_cache = {}
 
@@ -19,7 +17,6 @@ _snapshot_cache = {}
 def get_snapshot(epic):
     now = time.time()
 
-    # Cached snapshot (3 seconds)
     if epic in _snapshot_cache:
         bid, offer, ts = _snapshot_cache[epic]
         if now - ts < 3:
@@ -45,7 +42,6 @@ def sync_closed_trades():
 
     log = load_raw_log()
 
-    # Build set of dealIds that already have CLOSED entries to avoid duplicates
     closed_ids = {
         str(t.get("dealId"))
         for t in log
@@ -60,15 +56,13 @@ def sync_closed_trades():
     raw_positions = session.get_positions()
 
     if raw_positions is None:
-        print("[SYNC] Positions unavailable → skipping")
+        print("[SYNC] Positions unavailable → skipping", flush=True)
         return
 
-    # If API returns empty list → rate limit / transient → DO NOT close anything
     if raw_positions == []:
-        print("[SYNC] Empty positions snapshot → skipping close detection")
+        print("[SYNC] Empty positions snapshot → skipping close detection", flush=True)
         return
 
-    # Build raw dealId + size map from raw positions
     raw_ids = set()
     raw_size_map = {}
 
@@ -84,63 +78,51 @@ def sync_closed_trades():
     for trade in open_trades:
         deal_id = str(trade.get("dealId"))
 
-        # Already logged via manual close or previous sync
         if deal_id in _last_close_cache or deal_id in closed_ids:
             continue
 
-        # Check size from raw positions
         size = raw_size_map.get(deal_id, None)
         try:
             size_val = float(size) if size is not None else None
         except Exception:
             size_val = None
 
-        # If size > 0 → still open
         if size_val is not None and size_val > 0:
             continue
 
-        # CLOSE CONDITION #1 — size becomes 0
         size_zero = size_val == 0
-
-        # CLOSE CONDITION #2 — disappearance confirmed over last snapshots
         disappeared = (
             deal_id not in raw_ids
             and (deal_id in _last_raw_1 or deal_id in _last_raw_2)
         )
 
-        # If neither condition is true → skip
         if not (size_zero or disappeared):
             continue
 
         epic = trade.get("epic")
-        direction = trade.get("side")
+        direction = (trade.get("side") or "").lower()
         trade_size = float(trade.get("size"))
         entry_price = float(trade.get("entry_price"))
 
         bid, offer = get_snapshot(epic)
         if bid is None or offer is None:
-            print("[SYNC] Snapshot unavailable → skipping")
+            print("[SYNC] Snapshot unavailable → skipping", flush=True)
             continue
 
-        # Correct LONG / SHORT logic
-        if direction.lower() == "long":
+        if direction == "long":
             exit_price = bid
-        else:
-            exit_price = offer
-
-        # Compute PnL
-        if direction.lower() == "long":
             pnl = (exit_price - entry_price) * trade_size
         else:
+            exit_price = offer
             pnl = (entry_price - exit_price) * trade_size
 
-        print(f"[SYNC] CLOSED detected → epic={epic}, exit={exit_price}, pnl={pnl}")
+        print(f"[SYNC] CLOSED detected → epic={epic}, exit={exit_price}, pnl={pnl}", flush=True)
 
         log_closed_trade(
             ticker=trade.get("ticker"),
             epic=epic,
             deal_id=deal_id,
-            side=direction,
+            side=direction.upper(),
             size=trade_size,
             entry_price=entry_price,
             exit_price=exit_price,
@@ -154,6 +136,5 @@ def sync_closed_trades():
 
         _last_close_cache[deal_id] = True
 
-    # Shift snapshots
     _last_raw_2 = _last_raw_1
     _last_raw_1 = raw_ids.copy()

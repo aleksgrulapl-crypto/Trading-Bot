@@ -9,7 +9,6 @@ import config
 
 LOG_FILE = config.TRADE_LOG_FILE
 
-# Ensure directory exists
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 
 
@@ -17,18 +16,9 @@ def _now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-# ---------------------------------------------------------
-# RAW LOAD (for dashboard)
-# ---------------------------------------------------------
-
 def load_raw_log():
-    """
-    Load the raw trade log from disk.
-    Used by dashboard for normalization/dedupe.
-    """
     if not os.path.exists(LOG_FILE):
         return []
-
     try:
         with open(LOG_FILE, "r") as f:
             data = json.load(f)
@@ -41,16 +31,8 @@ def load_raw_log():
         return []
 
 
-# ---------------------------------------------------------
-# SAFE SAVE (atomic)
-# ---------------------------------------------------------
-
 def save_log(log):
-    """
-    Save the trade log using atomic write.
-    """
     tmp_file = LOG_FILE + ".tmp"
-
     try:
         with open(tmp_file, "w") as f:
             json.dump(log, f, indent=4)
@@ -59,9 +41,14 @@ def save_log(log):
         print(f"[TRADE_LOG] Failed to save log: {e}")
 
 
-# ---------------------------------------------------------
-# LOG OPEN TRADE (UNIFIED FORMAT)
-# ---------------------------------------------------------
+def _normalize_side(side):
+    s = str(side).upper() if side else None
+    if s == "BUY":
+        return "LONG"
+    if s == "SELL":
+        return "SHORT"
+    return s
+
 
 def log_open_trade(
     ticker,
@@ -75,27 +62,22 @@ def log_open_trade(
     timeframe=None,
     timestamp=None,
 ):
-    """
-    Log an OPEN trade in unified format.
-    Separate row, not updated later.
-    """
     log = load_raw_log()
+
+    norm_side = _normalize_side(side)
 
     entry = {
         "dealId": str(deal_id) if deal_id else None,
         "ticker": ticker or epic,
         "epic": epic,
-        "side": str(side).upper() if side else None,
+        "side": norm_side,
         "size": float(size) if size is not None else None,
-
         "entry_price": float(entry_price) if entry_price is not None else None,
         "exit_price": None,
         "pnl": None,
-
         "time_entered": timestamp or _now(),
         "time_exited": None,
         "status": "OPEN",
-
         "sl": sl,
         "tp": tp,
         "timeframe": timeframe,
@@ -105,14 +87,10 @@ def log_open_trade(
     save_log(log)
 
     print(
-        f"[TRADE_LOG] Logged OPEN trade → {ticker} {side} size={size} dealId={deal_id}",
+        f"[TRADE_LOG] Logged OPEN trade → {ticker} {norm_side} size={size} dealId={deal_id}",
         flush=True,
     )
 
-
-# ---------------------------------------------------------
-# LOG CLOSED TRADE (UNIFIED FORMAT)
-# ---------------------------------------------------------
 
 def log_closed_trade(
     ticker,
@@ -129,27 +107,22 @@ def log_closed_trade(
     time_entered=None,
     timestamp=None,
 ):
-    """
-    Log a CLOSED trade in unified format.
-    Separate row, not merged with OPEN.
-    """
     log = load_raw_log()
+
+    norm_side = _normalize_side(side) or "CLOSE"
 
     entry = {
         "dealId": str(deal_id) if deal_id else None,
         "ticker": ticker or epic,
         "epic": epic,
-        "side": str(side).upper() if side else "CLOSE",
+        "side": norm_side,
         "size": float(size) if size is not None else None,
-
         "entry_price": float(entry_price) if entry_price is not None else None,
         "exit_price": float(exit_price) if exit_price is not None else None,
         "pnl": float(pnl) if pnl is not None else None,
-
         "time_entered": time_entered,
         "time_exited": timestamp or _now(),
         "status": "CLOSED",
-
         "sl": sl,
         "tp": tp,
         "timeframe": timeframe,
@@ -159,20 +132,12 @@ def log_closed_trade(
     save_log(log)
 
     print(
-        f"[TRADE_LOG] Logged CLOSED trade → {ticker} CLOSE size={size} pnl={pnl}",
+        f"[TRADE_LOG] Logged CLOSED trade → {ticker} {norm_side} size={size} pnl={pnl}",
         flush=True,
     )
 
 
-# ---------------------------------------------------------
-# RESET LOG (WIPE EVERYTHING)
-# ---------------------------------------------------------
-
 def reset_log():
-    """
-    Hard reset: wipe all trades from the log file.
-    Use when you want a clean slate.
-    """
     try:
         with open(LOG_FILE, "w") as f:
             json.dump([], f)

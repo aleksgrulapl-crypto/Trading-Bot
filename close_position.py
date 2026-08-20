@@ -1,8 +1,7 @@
 # ============================
-# CLOSE POSITION MODULE (FINAL — HYBRID EXIT PRICE + CORRECT DEALID)
+# CLOSE POSITION MODULE (FINAL — HYBRID EXIT + NORMALIZED SIDE)
 # ============================
 
-import time
 import session
 from auth import auth
 from trade_log import load_raw_log, log_closed_trade
@@ -28,9 +27,6 @@ def _find_open_trade(deal_id):
 
 
 def _fetch_close_details_from_history(deal_id):
-    """
-    Pull exit price + realized PnL from Capital.com history.
-    """
     try:
         url = f"{API_HISTORY_TRANSACTIONS}?max=100"
         r = session.request("GET", url)
@@ -60,9 +56,6 @@ def _fetch_close_details_from_history(deal_id):
 
 
 def _snapshot_exit(epic, direction, entry_price, size):
-    """
-    Fallback exit using live snapshot (bid/offer).
-    """
     try:
         url = f"{API_MARKET}/{epic}"
         r = session.request("GET", url)
@@ -76,12 +69,16 @@ def _snapshot_exit(epic, direction, entry_price, size):
         if bid is None or offer is None:
             return None, None
 
-        if direction and direction.upper() in ("LONG", "BUY"):
+        entry_price = float(entry_price)
+        size = float(size)
+
+        d = (direction or "").upper()
+        if d in ("LONG", "BUY"):
             exit_price = bid
-            pnl = (exit_price - float(entry_price)) * float(size)
+            pnl = (exit_price - entry_price) * size
         else:
             exit_price = offer
-            pnl = (float(entry_price) - exit_price) * float(size)
+            pnl = (entry_price - exit_price) * size
 
         return exit_price, pnl
 
@@ -91,18 +88,8 @@ def _snapshot_exit(epic, direction, entry_price, size):
 
 
 def close_position(position_id):
-    """
-    Close a position using Capital.com API + log closed trade.
-    Hybrid exit:
-        1. Try history (official)
-        2. If missing, use snapshot
-    """
-
     auth.ensure_token()
 
-    # ---------------------------------------------------------
-    # 1. SEND CLOSE REQUEST
-    # ---------------------------------------------------------
     try:
         url = f"{API_POSITIONS}/{position_id}/close"
         print(f"[CLOSE] URL → {url}", flush=True)
@@ -123,9 +110,6 @@ def close_position(position_id):
         print(f"[CLOSE] Exception during close: {e}", flush=True)
         return {"status": "error", "message": str(e)}
 
-    # ---------------------------------------------------------
-    # 2. LOOK UP OPEN TRADE + BASIC CONTEXT
-    # ---------------------------------------------------------
     try:
         open_trade = _find_open_trade(position_id)
         pos = _find_enriched_position(position_id)
@@ -144,20 +128,14 @@ def close_position(position_id):
         timeframe = open_trade.get("timeframe") if open_trade else None
         time_entered = open_trade.get("time_entered") if open_trade else None
 
-        # ---------------------------------------------------------
-        # 3. FETCH EXIT PRICE + REALIZED PnL FROM HISTORY (Option C)
-        # ---------------------------------------------------------
         exit_price, pnl = _fetch_close_details_from_history(position_id)
 
         if exit_price is None or pnl is None:
-            print("[CLOSE] History missing, trying snapshot fallback", flush=True)
+            print("[CLOSE] History missing, using snapshot fallback", flush=True)
             exit_price, pnl = _snapshot_exit(epic, direction, entry_price, size)
 
         print(f"[CLOSE] Final exit_price={exit_price}, pnl={pnl}", flush=True)
 
-        # ---------------------------------------------------------
-        # 4. LOG CLOSED TRADE
-        # ---------------------------------------------------------
         log_closed_trade(
             ticker=ticker,
             epic=epic,

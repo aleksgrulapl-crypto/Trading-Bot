@@ -9,10 +9,6 @@ from config import API_POSITIONS, API_ACCOUNT, API_MARKET, EPIC_MAP
 from utils import timestamp
 import report
 
-# ---------------------------------------------------------
-# SHARED STATE
-# ---------------------------------------------------------
-
 shared_state = {
     "account": {},
     "positions": [],
@@ -30,10 +26,6 @@ _cache = {
 }
 
 
-# ---------------------------------------------------------
-# HEADERS
-# ---------------------------------------------------------
-
 def get_headers():
     auth.ensure_token()
     return {
@@ -45,14 +37,9 @@ def get_headers():
     }
 
 
-# ---------------------------------------------------------
-# REQUEST WRAPPER
-# ---------------------------------------------------------
-
 def request(method, url, json=None):
     headers = get_headers()
 
-    # Minimal, targeted diagnostics
     if "/positions/" in url and "/close" in url:
         print("[SESSION] CLOSE REQUEST", flush=True)
         print("[SESSION] METHOD  →", method, flush=True)
@@ -75,22 +62,7 @@ def request(method, url, json=None):
         return None
 
 
-# ---------------------------------------------------------
-# GET POSITIONS (RAW)
-# ---------------------------------------------------------
-
 def get_positions():
-    """
-    Fetch raw positions from Capital.com.
-    Returns the raw API structure:
-    [
-        {
-            "position": {...},
-            "market": {...}
-        },
-        ...
-    ]
-    """
     url = f"{API_POSITIONS}?includeProfitLoss=true"
     response = request("GET", url)
 
@@ -114,16 +86,7 @@ def get_positions():
         return []
 
 
-# ---------------------------------------------------------
-# ENRICH POSITIONS (DASHBOARD FORMAT)
-# ---------------------------------------------------------
-
 def enrich_positions(raw_positions):
-    """
-    Convert raw Capital.com positions into dashboard-friendly objects.
-    id  = dealId (for legacy use)
-    dealId = explicit field for close button and logging.
-    """
     enriched = []
 
     for item in raw_positions:
@@ -136,8 +99,6 @@ def enrich_positions(raw_positions):
         size = pos.get("size")
         entry_price = pos.get("level")
 
-        # LONG (BUY) → current_price = bid (you would sell)
-        # SHORT (SELL) → current_price = offer (you would buy back)
         if direction == "BUY":
             current_price = market.get("bid")
         else:
@@ -148,32 +109,22 @@ def enrich_positions(raw_positions):
         enriched.append({
             "id": deal_id,
             "dealId": deal_id,
-
             "dealReference": pos.get("dealReference"),
             "ticker": ticker,
             "epic": market.get("epic"),
-
             "size": size,
             "price": entry_price,
             "current_price": current_price,
-
             "direction": direction,
             "profit": round(profit, 2),
-
             "stopLevel": pos.get("stopLevel"),
             "limitLevel": pos.get("profitLevel"),
-
             "currency": pos.get("currency"),
-
             "signature": f"{ticker}|{direction}|{size}|{entry_price}",
         })
 
     return enriched
 
-
-# ---------------------------------------------------------
-# GET ACCOUNT
-# ---------------------------------------------------------
 
 def get_account():
     now = time.time()
@@ -200,10 +151,6 @@ def get_account():
         return _cache["account"]["data"]
 
 
-# ---------------------------------------------------------
-# ENRICH ACCOUNT
-# ---------------------------------------------------------
-
 def enrich_account(raw):
     if not raw:
         return {}
@@ -214,42 +161,39 @@ def enrich_account(raw):
     pnl = bal.get("profitLoss", 0)
     available = bal.get("available", 0)
 
-    equity = balance + pnl  # Capital.com definition
+    equity = balance + pnl
 
     margin_warning = None
     if available < 0:
         margin_warning = "⚠ Margin Warning: Available balance is negative."
 
     return {
-        "funds": round(equity, 2),        # Equity (labelled Funds on dashboard)
+        "funds": round(equity, 2),        # Equity
         "balance": round(balance, 2),     # Balance
-        "pnl": round(pnl, 2),             # Floating PnL
-        "available": round(available, 2), # Available funds
-        "margin": 0.0,                    # Will be overridden by dashboard using positions
+        "pnl": round(pnl, 2),
+        "available": round(available, 2),
+        "margin": 0.0,                    # overridden in dashboard
         "available_color": "red" if available < 0 else "lime",
         "margin_warning": margin_warning
     }
 
 
-# ---------------------------------------------------------
-# USED MARGIN FROM POSITIONS
-# ---------------------------------------------------------
-
 def compute_used_margin(raw_positions):
     total = 0.0
     for item in raw_positions:
         pos = item.get("position", {})
-        m = pos.get("margin", 0)
+        size = pos.get("size")
+        level = pos.get("level")
+        leverage = pos.get("leverage") or 1
         try:
-            total += float(m)
+            size_f = float(size)
+            level_f = float(level)
+            lev_f = float(leverage)
+            total += (size_f * level_f) / lev_f
         except Exception:
             pass
     return round(total, 2)
 
-
-# ---------------------------------------------------------
-# EPIC LOOKUP
-# ---------------------------------------------------------
 
 def verify_epic(symbol):
     symbol = symbol.upper()
@@ -279,10 +223,6 @@ def verify_epic(symbol):
         return {"epic": None, "source": "exception"}
 
 
-# ---------------------------------------------------------
-# DAILY REPORT
-# ---------------------------------------------------------
-
 def get_daily_report():
     try:
         report_data = report.get_daily_report()
@@ -292,10 +232,6 @@ def get_daily_report():
         print(f"[REPORT] Failed to load daily report: {e}", flush=True)
         return {}
 
-
-# ---------------------------------------------------------
-# UPDATE LAST TRADE / WEBHOOK
-# ---------------------------------------------------------
 
 def update_last_trade():
     shared_state["system_status"]["last_trade"] = timestamp()
