@@ -234,21 +234,27 @@ def dashboard_home():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
+    # Override margin using positions
+    used_margin = session.compute_used_margin(raw_positions)
+    account["margin"] = used_margin
+
     try:
-        open_pnl = sum(p.get("pnl", 0) or 0 for p in positions)
-        if account.get("balance") is not None:
-            account["balance"] = round(account["balance"] + open_pnl, 2)
+        open_pnl = sum(p.get("profit", 0) or 0 for p in positions)
+        if account.get("funds") is not None:
+            account["funds"] = round(account["funds"] + open_pnl, 2)
     except Exception as e:
         print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
 
     combined_raw = load_raw_log()
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
 
+    # Sort by timestamp, ticker, size, entry_price (your preferred signature)
     combined_trades.sort(
         key=lambda t: (
-            t.get("time_exited")
-            or t.get("time_entered")
-            or ""
+            t.get("time_exited") or t.get("time_entered") or "",
+            str(t.get("ticker")),
+            float(t.get("size")) if isinstance(t.get("size"), (int, float, str)) and str(t.get("size")).replace('.', '', 1).isdigit() else 0.0,
+            float(t.get("entry_price")) if isinstance(t.get("entry_price"), (int, float, str)) and str(t.get("entry_price")).replace('.', '', 1).isdigit() else 0.0,
         ),
         reverse=True
     )
@@ -286,10 +292,13 @@ def dashboard_data():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
+    used_margin = session.compute_used_margin(raw_positions)
+    account["margin"] = used_margin
+
     try:
-        open_pnl = sum(p.get("pnl", 0) or 0 for p in positions)
-        if account.get("balance") is not None:
-            account["balance"] = round(account["balance"] + open_pnl, 2)
+        open_pnl = sum(p.get("profit", 0) or 0 for p in positions)
+        if account.get("funds") is not None:
+            account["funds"] = round(account["funds"] + open_pnl, 2)
     except Exception as e:
         print(f"[DASHBOARD] live equity calc failed (data): {e}", flush=True)
 
@@ -298,9 +307,10 @@ def dashboard_data():
 
     combined_trades.sort(
         key=lambda t: (
-            t.get("time_exited")
-            or t.get("time_entered")
-            or ""
+            t.get("time_exited") or t.get("time_entered") or "",
+            str(t.get("ticker")),
+            float(t.get("size")) if isinstance(t.get("size"), (int, float, str)) and str(t.get("size")).replace('.', '', 1).isdigit() else 0.0,
+            float(t.get("entry_price")) if isinstance(t.get("entry_price"), (int, float, str)) and str(t.get("entry_price")).replace('.', '', 1).isdigit() else 0.0,
         ),
         reverse=True
     )

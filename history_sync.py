@@ -44,6 +44,14 @@ def sync_closed_trades():
     global _last_raw_1, _last_raw_2
 
     log = load_raw_log()
+
+    # Build set of dealIds that already have CLOSED entries to avoid duplicates
+    closed_ids = {
+        str(t.get("dealId"))
+        for t in log
+        if t.get("status") == "CLOSED" and t.get("dealId") is not None
+    }
+
     open_trades = [t for t in log if t.get("status") == "OPEN"]
 
     if not open_trades:
@@ -76,8 +84,8 @@ def sync_closed_trades():
     for trade in open_trades:
         deal_id = str(trade.get("dealId"))
 
-        # Already logged
-        if deal_id in _last_close_cache:
+        # Already logged via manual close or previous sync
+        if deal_id in _last_close_cache or deal_id in closed_ids:
             continue
 
         # Check size from raw positions

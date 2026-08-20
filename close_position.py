@@ -1,12 +1,13 @@
 # ============================
-# CLOSE POSITION MODULE (FINAL — CORRECT DEALID + EXIT PRICE FROM HISTORY)
+# CLOSE POSITION MODULE (FINAL — HYBRID EXIT PRICE + CORRECT DEALID)
 # ============================
 
+import time
 import session
 from auth import auth
 from trade_log import load_raw_log, log_closed_trade
 from utils import timestamp
-from config import API_POSITIONS, API_HISTORY_TRANSACTIONS
+from config import API_POSITIONS, API_HISTORY_TRANSACTIONS, API_MARKET
 
 
 def _find_enriched_position(position_id):
@@ -29,7 +30,6 @@ def _find_open_trade(deal_id):
 def _fetch_close_details_from_history(deal_id):
     """
     Pull exit price + realized PnL from Capital.com history.
-    This is the ONLY reliable source for closed trade data.
     """
     try:
         url = f"{API_HISTORY_TRANSACTIONS}?max=100"
@@ -59,11 +59,43 @@ def _fetch_close_details_from_history(deal_id):
         return None, None
 
 
+def _snapshot_exit(epic, direction, entry_price, size):
+    """
+    Fallback exit using live snapshot (bid/offer).
+    """
+    try:
+        url = f"{API_MARKET}/{epic}"
+        r = session.request("GET", url)
+        if not r or r.status_code != 200:
+            return None, None
+
+        snapshot = r.json().get("snapshot", {})
+        bid = snapshot.get("bid")
+        offer = snapshot.get("offer")
+
+        if bid is None or offer is None:
+            return None, None
+
+        if direction and direction.upper() in ("LONG", "BUY"):
+            exit_price = bid
+            pnl = (exit_price - float(entry_price)) * float(size)
+        else:
+            exit_price = offer
+            pnl = (float(entry_price) - exit_price) * float(size)
+
+        return exit_price, pnl
+
+    except Exception as e:
+        print(f"[CLOSE] Snapshot exit failed: {e}", flush=True)
+        return None, None
+
+
 def close_position(position_id):
     """
     Close a position using Capital.com API + log closed trade.
-    Uses the correct endpoint:
-        POST /positions/{dealId}/close
+    Hybrid exit:
+        1. Try history (official)
+        2. If missing, use snapshot
     """
 
     auth.ensure_token()
@@ -101,7 +133,6 @@ def close_position(position_id):
         ticker = (pos.get("ticker") if pos else None) or (open_trade.get("ticker") if open_trade else None)
         epic = (pos.get("epic") if pos else None) or (open_trade.get("epic") if open_trade else None)
 
-        # Capital.com uses BUY/SELL, your bot uses LONG/SHORT
         direction_raw = (pos.get("direction") if pos else None) or (open_trade.get("side") if open_trade else None)
         direction = direction_raw.upper() if direction_raw else None
 
@@ -114,11 +145,15 @@ def close_position(position_id):
         time_entered = open_trade.get("time_entered") if open_trade else None
 
         # ---------------------------------------------------------
-        # 3. FETCH EXIT PRICE + REALIZED PnL FROM HISTORY
+        # 3. FETCH EXIT PRICE + REALIZED PnL FROM HISTORY (Option C)
         # ---------------------------------------------------------
         exit_price, pnl = _fetch_close_details_from_history(position_id)
 
-        print(f"[CLOSE] History exit_price={exit_price}, pnl={pnl}", flush=True)
+        if exit_price is None or pnl is None:
+            print("[CLOSE] History missing, trying snapshot fallback", flush=True)
+            exit_price, pnl = _snapshot_exit(epic, direction, entry_price, size)
+
+        print(f"[CLOSE] Final exit_price={exit_price}, pnl={pnl}", flush=True)
 
         # ---------------------------------------------------------
         # 4. LOG CLOSED TRADE
