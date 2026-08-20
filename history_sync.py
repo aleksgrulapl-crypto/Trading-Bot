@@ -1,5 +1,5 @@
 # ============================
-# SYNC CLOSED TRADES (FINAL — NEVER MISS CLOSES, NEVER FALSE CLOSES)
+# SYNC CLOSED TRADES (FINAL — DISAPPEARANCE + UPL FALLBACK)
 # ============================
 
 import time
@@ -58,6 +58,9 @@ def sync_closed_trades():
     enriched_positions = session.enrich_positions(raw_positions) or []
     current_positions = set(str(p.get("id")) for p in enriched_positions)
 
+    # Build UPL lookup
+    upl_map = {str(p.get("id")): p.get("profit") for p in enriched_positions}
+
     for trade in open_trades:
         deal_id = str(trade.get("dealId"))
 
@@ -69,11 +72,18 @@ def sync_closed_trades():
         if deal_id in current_positions:
             continue
 
-        # ❗ NEW CLOSE LOGIC:
-        # Only treat disappearance as close if the dealId existed
-        # in ANY of the last 2 snapshots.
-        if deal_id not in _last_positions_1 and deal_id not in _last_positions_2:
-            # This prevents false closes from rate-limit empty lists
+        # ❗ CLOSE CONDITION #1 — Disappearance (with 2-snapshot confirmation)
+        disappeared = (
+            deal_id not in current_positions
+            and (deal_id in _last_positions_1 or deal_id in _last_positions_2)
+        )
+
+        # ❗ CLOSE CONDITION #2 — UPL fallback (Capital.com stale position bug)
+        upl_value = upl_map.get(deal_id, None)
+        upl_closed = upl_value is None
+
+        # If neither condition is true → skip
+        if not disappeared and not upl_closed:
             continue
 
         # Fetch snapshot
