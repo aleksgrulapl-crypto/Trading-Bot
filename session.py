@@ -157,22 +157,31 @@ def enrich_account(raw):
 
     bal = raw.get("balance", {})
 
-    balance = bal.get("balance", 0)
-    pnl = bal.get("profitLoss", 0)
-    available = bal.get("available", 0)
+    # Capital.com semantics:
+    # funds   = cash balance
+    # profitLoss = floating PnL
+    # equity = funds + profitLoss
+    # available = available to trade
+    # margin = used margin
 
-    equity = balance + pnl
+    funds = bal.get("funds", 0)          # cash
+    pnl = bal.get("profitLoss", 0)       # floating PnL
+    available = bal.get("available", 0)  # available
+    margin = bal.get("margin", 0)        # used margin
+
+    equity = funds + pnl                 # Capital equity
 
     margin_warning = None
     if available < 0:
         margin_warning = "⚠ Margin Warning: Available balance is negative."
 
     return {
-        "funds": round(equity, 2),        # Equity
-        "balance": round(balance, 2),     # Balance
+        "funds": round(funds, 2),          # label: Funds (cash)
+        "equity": round(equity, 2),        # label: Equity
+        "balance": round(funds, 2),        # if you still show Balance, use funds
         "pnl": round(pnl, 2),
         "available": round(available, 2),
-        "margin": 0.0,                    # overridden in dashboard
+        "margin": round(margin, 2),
         "available_color": "red" if available < 0 else "lime",
         "margin_warning": margin_warning
     }

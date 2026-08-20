@@ -201,34 +201,25 @@ def dashboard_home():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
-    used_margin = session.compute_used_margin(raw_positions)
-    account["margin"] = used_margin
+    # ❌ DO NOT adjust funds/equity with open PnL here
+    # Capital already includes PnL in equity/funds semantics
 
-    try:
-        open_pnl = sum(p.get("profit", 0) or 0 for p in positions)
-        if account.get("funds") is not None:
-            account["funds"] = round(account["funds"] + open_pnl, 2)
-    except Exception as e:
-        print(f"[DASHBOARD] live equity calc failed: {e}", flush=True)
+    combined_raw = []  # we’re skipping trade log for now
 
-    combined_raw = load_raw_log()
-    combined_trades = normalize_trades(dedupe_trades(combined_raw))
-
-    combined_trades.sort(
-        key=lambda t: (
-            t.get("time_exited") or t.get("time_entered") or "",
-            str(t.get("ticker")),
-            float(t.get("size")) if isinstance(t.get("size"), (int, float)) else 0.0,
-            float(t.get("entry_price")) if isinstance(t.get("entry_price"), (int, float)) else 0.0,
-        ),
-        reverse=True
-    )
-
-    analytics = compute_analytics(filter_completed(combined_trades))
+    analytics = {
+        "win_rate": None,
+        "avg_win": None,
+        "avg_loss": None,
+        "expectancy": None,
+        "total_pl": None,
+        "max_drawdown": None,
+        "trade_count": 0,
+        "story": None
+    }
 
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
-    session.shared_state["trade_log"] = combined_trades
+    session.shared_state["trade_log"] = combined_raw
     session.shared_state["analytics"] = analytics
 
     return render_template(
@@ -237,7 +228,7 @@ def dashboard_home():
         cache_bust=time.time(),
         account=account,
         positions=positions,
-        trades=combined_trades,
+        trades=combined_raw,
         analytics=analytics
     )
 
