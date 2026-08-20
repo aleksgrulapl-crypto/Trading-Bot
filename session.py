@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (DIAGNOSTIC — STABLE POSITION PIPELINE)
+# SESSION MODULE (STABLE POSITION PIPELINE)
 # ============================
 
 import time
@@ -52,15 +52,11 @@ def get_headers():
 def request(method, url, json=None):
     headers = get_headers()
 
-    print("[SESSION] session object =", auth.session, flush=True)
-    print("[SESSION] session type =", type(auth.session), flush=True)
-
-    # Log specifically for close-position calls
+    # Minimal, targeted diagnostics
     if "/positions/" in url and "/close" in url:
         print("[SESSION] CLOSE REQUEST", flush=True)
         print("[SESSION] METHOD  →", method, flush=True)
         print("[SESSION] URL     →", url, flush=True)
-        print("[SESSION] HEADERS →", headers, flush=True)
         print("[SESSION] BODY    →", json, flush=True)
 
     try:
@@ -99,6 +95,7 @@ def get_positions():
     response = request("GET", url)
 
     if not response or response.status_code != 200:
+        print("[SESSION] get_positions → non-200 or no response, returning []", flush=True)
         return []
 
     try:
@@ -139,7 +136,6 @@ def enrich_positions(raw_positions):
         size = pos.get("size")
         entry_price = pos.get("level")
 
-        # CORRECT:
         # LONG (BUY) → current_price = bid (you would sell)
         # SHORT (SELL) → current_price = offer (you would buy back)
         if direction == "BUY":
@@ -187,6 +183,7 @@ def get_account():
     response = request("GET", API_ACCOUNT)
 
     if not response or response.status_code != 200:
+        print("[SESSION] get_account → non-200 or no response, returning cached", flush=True)
         return _cache["account"]["data"]
 
     try:

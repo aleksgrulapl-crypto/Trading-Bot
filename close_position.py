@@ -32,7 +32,6 @@ def _fetch_close_details_from_history(deal_id):
     This is the ONLY reliable source for closed trade data.
     """
     try:
-        # You can tune params (max, type) if needed
         url = f"{API_HISTORY_TRANSACTIONS}?max=100"
         r = session.request("GET", url)
 
@@ -47,10 +46,8 @@ def _fetch_close_details_from_history(deal_id):
         pnl = None
 
         for tx in transactions:
-            # Capital.com usually exposes either dealId or positionId here
             tx_deal_id = tx.get("dealId") or tx.get("positionId")
             if str(tx_deal_id) == str(deal_id):
-                # Common fields: closeLevel / level / price, profitAndLoss / pnl
                 exit_price = tx.get("closeLevel") or tx.get("level") or tx.get("price")
                 pnl = tx.get("profitAndLoss") or tx.get("pnl")
                 break
@@ -69,7 +66,6 @@ def close_position(position_id):
         POST /positions/{dealId}/close
     """
 
-    # Ensure authenticated
     auth.ensure_token()
 
     # ---------------------------------------------------------
@@ -100,11 +96,15 @@ def close_position(position_id):
     # ---------------------------------------------------------
     try:
         open_trade = _find_open_trade(position_id)
-        pos = _find_enriched_position(position_id)  # may be None after close
+        pos = _find_enriched_position(position_id)
 
         ticker = (pos.get("ticker") if pos else None) or (open_trade.get("ticker") if open_trade else None)
         epic = (pos.get("epic") if pos else None) or (open_trade.get("epic") if open_trade else None)
-        direction = (pos.get("direction") if pos else None) or (open_trade.get("side") if open_trade else None)
+
+        # Capital.com uses BUY/SELL, your bot uses LONG/SHORT
+        direction_raw = (pos.get("direction") if pos else None) or (open_trade.get("side") if open_trade else None)
+        direction = direction_raw.upper() if direction_raw else None
+
         size = (pos.get("size") if pos else None) or (open_trade.get("size") if open_trade else None)
         entry_price = (pos.get("price") if pos else None) or (open_trade.get("entry_price") if open_trade else None)
 

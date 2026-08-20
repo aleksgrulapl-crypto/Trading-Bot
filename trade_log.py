@@ -31,7 +31,11 @@ def load_raw_log():
 
     try:
         with open(LOG_FILE, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+            if isinstance(data, list):
+                return data
+            print("[TRADE_LOG] Log file is not a list, resetting to empty list")
+            return []
     except Exception as e:
         print(f"[TRADE_LOG] Failed to load log: {e}")
         return []
@@ -127,7 +131,7 @@ def log_closed_trade(
 ):
     """
     Log a CLOSED trade in unified format.
-Separate row, not merged with OPEN.
+    Separate row, not merged with OPEN.
     """
     log = load_raw_log()
 
@@ -158,6 +162,7 @@ Separate row, not merged with OPEN.
         f"[TRADE_LOG] Logged CLOSED trade → {ticker} CLOSE size={size} pnl={pnl}",
         flush=True,
     )
+
 
 # ---------------------------------------------------------
 # RESET LOG (WIPE EVERYTHING)

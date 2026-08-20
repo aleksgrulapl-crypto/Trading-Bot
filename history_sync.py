@@ -19,6 +19,7 @@ _snapshot_cache = {}
 def get_snapshot(epic):
     now = time.time()
 
+    # Cached snapshot (3 seconds)
     if epic in _snapshot_cache:
         bid, offer, ts = _snapshot_cache[epic]
         if now - ts < 3:
@@ -54,6 +55,11 @@ def sync_closed_trades():
         print("[SYNC] Positions unavailable → skipping")
         return
 
+    # If API returns empty list → rate limit / transient → DO NOT close anything
+    if raw_positions == []:
+        print("[SYNC] Empty positions snapshot → skipping close detection")
+        return
+
     # Build raw dealId + size map from raw positions
     raw_ids = set()
     raw_size_map = {}
@@ -74,13 +80,14 @@ def sync_closed_trades():
         if deal_id in _last_close_cache:
             continue
 
-        # If we still see the position with non-zero size → still open
+        # Check size from raw positions
         size = raw_size_map.get(deal_id, None)
         try:
             size_val = float(size) if size is not None else None
         except Exception:
             size_val = None
 
+        # If size > 0 → still open
         if size_val is not None and size_val > 0:
             continue
 
@@ -107,14 +114,14 @@ def sync_closed_trades():
             print("[SYNC] Snapshot unavailable → skipping")
             continue
 
-        # Correct side
-        if direction.lower() == "buy":
+        # Correct LONG / SHORT logic
+        if direction.lower() == "long":
             exit_price = bid
         else:
             exit_price = offer
 
         # Compute PnL
-        if direction.lower() == "buy":
+        if direction.lower() == "long":
             pnl = (exit_price - entry_price) * trade_size
         else:
             pnl = (entry_price - exit_price) * trade_size

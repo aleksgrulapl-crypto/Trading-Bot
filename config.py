@@ -16,9 +16,6 @@ API_POSITIONS = f"{API_BASE}/api/v1/positions"
 API_MARKET = f"{API_BASE}/api/v1/markets"
 API_HISTORY_TRANSACTIONS = f"{API_BASE}/api/v1/history/transactions"
 
-# ❌ REMOVED: from auth import auth  (circular import)
-# DO NOT import auth here.
-
 CAPITAL_API_KEY = os.getenv("CAPITAL_API_KEY")
 CAPITAL_USERNAME = os.getenv("CAPITAL_USERNAME")
 CAPITAL_PASSWORD = os.getenv("CAPITAL_PASSWORD")
@@ -72,7 +69,10 @@ DAILY_REPORT_ENABLED = True
 DAILY_REPORT_HOUR = 22
 DAILY_REPORT_MINUTE = 0
 
+# Persistent trade log on mounted disk
 TRADE_LOG_FILE = "/data/trade_log.json"
+
+# Daily report can stay in /tmp (ephemeral)
 DAILY_REPORT_FILE = "/tmp/daily_report.json"
 
 CACHE_TTL_SECONDS = 2
