@@ -163,24 +163,23 @@ def enrich_account(raw):
 
     bal = raw.get("balance", {})
 
-    # Capital.com semantics:
-    # funds       = cash balance (static)
+    # Correct Capital.com mapping:
+    # funds       = static cash balance
     # profitLoss  = floating PnL
-    # equity      = funds + profitLoss
-    # available   = available to trade
-    # margin      = used margin (ignored on dashboard)
+    # available   = free margin
+    # balance     = equity (we do NOT use this)
 
-    balance = bal.get("funds", 0)          # static cash balance
-    pnl = bal.get("profitLoss", 0)         # floating PnL
-    available = bal.get("available", 0)    # available to trade
+    funds = bal.get("funds", 0)
+    pnl = bal.get("profitLoss", 0)
+    available = bal.get("available", 0)
 
-    equity = balance + pnl                 # Equity = Balance + ProfitLoss
+    equity = funds + pnl
 
     return {
         "equity": round(equity, 2),
-        "balance": round(balance, 2),
+        "balance": round(funds, 2),
         "pnl": round(pnl, 2),
-        "available": round(available, 2),
+        "available": round(available, 2)
     }
 
 
