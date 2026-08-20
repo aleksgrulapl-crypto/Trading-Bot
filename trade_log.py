@@ -1,5 +1,5 @@
 # ============================
-# TRADE LOG MODULE (UNIFIED OPEN/CLOSED ROWS + RAW LOAD)
+# TRADE LOG MODULE (CLEAN + NORMALIZED SIDE)
 # ============================
 
 import json
@@ -22,125 +22,76 @@ def load_raw_log():
     try:
         with open(LOG_FILE, "r") as f:
             data = json.load(f)
-            if isinstance(data, list):
-                return data
-            print("[TRADE_LOG] Log file is not a list, resetting to empty list")
-            return []
-    except Exception as e:
-        print(f"[TRADE_LOG] Failed to load log: {e}")
+            return data if isinstance(data, list) else []
+    except:
         return []
 
 
 def save_log(log):
-    tmp_file = LOG_FILE + ".tmp"
-    try:
-        with open(tmp_file, "w") as f:
-            json.dump(log, f, indent=4)
-        os.replace(tmp_file, LOG_FILE)
-    except Exception as e:
-        print(f"[TRADE_LOG] Failed to save log: {e}")
+    tmp = LOG_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(log, f, indent=4)
+    os.replace(tmp, LOG_FILE)
 
 
-def _normalize_side(side):
-    s = str(side).upper() if side else None
+def normalize_side(side):
+    if not side:
+        return None
+    s = side.upper()
     if s == "BUY":
-        return "LONG"
+        return "Long"
     if s == "SELL":
-        return "SHORT"
-    return s
+        return "Short"
+    if s == "LONG":
+        return "Long"
+    if s == "SHORT":
+        return "Short"
+    return side.capitalize()
 
 
-def log_open_trade(
-    ticker,
-    epic,
-    deal_id,
-    side,
-    size,
-    entry_price,
-    sl=None,
-    tp=None,
-    timeframe=None,
-    timestamp=None,
-):
+def log_open_trade(**kwargs):
     log = load_raw_log()
 
-    norm_side = _normalize_side(side)
-
     entry = {
-        "dealId": str(deal_id) if deal_id else None,
-        "ticker": ticker or epic,
-        "epic": epic,
-        "side": norm_side,
-        "size": float(size) if size is not None else None,
-        "entry_price": float(entry_price) if entry_price is not None else None,
+        "dealId": str(kwargs.get("deal_id")),
+        "ticker": kwargs.get("ticker"),
+        "epic": kwargs.get("epic"),
+        "side": normalize_side(kwargs.get("side")),
+        "size": float(kwargs.get("size")),
+        "entry_price": float(kwargs.get("entry_price")),
         "exit_price": None,
         "pnl": None,
-        "time_entered": timestamp or _now(),
+        "time_entered": kwargs.get("timestamp") or _now(),
         "time_exited": None,
         "status": "OPEN",
-        "sl": sl,
-        "tp": tp,
-        "timeframe": timeframe,
+        "sl": kwargs.get("sl"),
+        "tp": kwargs.get("tp"),
+        "timeframe": kwargs.get("timeframe"),
     }
 
     log.append(entry)
     save_log(log)
 
-    print(
-        f"[TRADE_LOG] Logged OPEN trade → {ticker} {norm_side} size={size} dealId={deal_id}",
-        flush=True,
-    )
 
-
-def log_closed_trade(
-    ticker,
-    epic,
-    deal_id,
-    side,
-    size,
-    entry_price,
-    exit_price,
-    pnl,
-    sl=None,
-    tp=None,
-    timeframe=None,
-    time_entered=None,
-    timestamp=None,
-):
+def log_closed_trade(**kwargs):
     log = load_raw_log()
 
-    norm_side = _normalize_side(side) or "CLOSE"
-
     entry = {
-        "dealId": str(deal_id) if deal_id else None,
-        "ticker": ticker or epic,
-        "epic": epic,
-        "side": norm_side,
-        "size": float(size) if size is not None else None,
-        "entry_price": float(entry_price) if entry_price is not None else None,
-        "exit_price": float(exit_price) if exit_price is not None else None,
-        "pnl": float(pnl) if pnl is not None else None,
-        "time_entered": time_entered,
-        "time_exited": timestamp or _now(),
+        "dealId": str(kwargs.get("deal_id")),
+        "ticker": kwargs.get("ticker"),
+        "epic": kwargs.get("epic"),
+        "side": normalize_side(kwargs.get("side")),
+        "size": float(kwargs.get("size")),
+        "entry_price": float(kwargs.get("entry_price")),
+        "exit_price": float(kwargs.get("exit_price")),
+        "pnl": float(kwargs.get("pnl")),
+        "time_entered": kwargs.get("time_entered"),
+        "time_exited": kwargs.get("timestamp") or _now(),
         "status": "CLOSED",
-        "sl": sl,
-        "tp": tp,
-        "timeframe": timeframe,
+        "sl": kwargs.get("sl"),
+        "tp": kwargs.get("tp"),
+        "timeframe": kwargs.get("timeframe"),
     }
 
     log.append(entry)
     save_log(log)
-
-    print(
-        f"[TRADE_LOG] Logged CLOSED trade → {ticker} {norm_side} size={size} pnl={pnl}",
-        flush=True,
-    )
-
-
-def reset_log():
-    try:
-        with open(LOG_FILE, "w") as f:
-            json.dump([], f)
-        print("[TRADE_LOG] Log reset — all trades cleared", flush=True)
-    except Exception as e:
-        print(f"[TRADE_LOG] Failed to reset log: {e}", flush=True)

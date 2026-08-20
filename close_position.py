@@ -1,160 +1,106 @@
 # ============================
-# CLOSE POSITION MODULE (FINAL — HYBRID EXIT + NORMALIZED SIDE)
+# CLOSE POSITION MODULE (CLEAN + NORMALIZED SIDE)
 # ============================
 
 import session
 from auth import auth
-from trade_log import load_raw_log, log_closed_trade
+from trade_log import log_closed_trade, load_raw_log
 from utils import timestamp
 from config import API_POSITIONS, API_HISTORY_TRANSACTIONS, API_MARKET
 
 
-def _find_enriched_position(position_id):
-    raw_positions = session.get_positions() or []
-    enriched = session.enrich_positions(raw_positions) or []
-    for p in enriched:
-        if str(p.get("id")) == str(position_id) or str(p.get("dealId")) == str(position_id):
-            return p
-    return None
+def normalize_side(side):
+    if not side:
+        return None
+    s = side.upper()
+    if s == "BUY":
+        return "Long"
+    if s == "SELL":
+        return "Short"
+    if s == "LONG":
+        return "Long"
+    if s == "SHORT":
+        return "Short"
+    return side.capitalize()
 
 
 def _find_open_trade(deal_id):
-    log = load_raw_log() or []
-    for entry in reversed(log):
-        if entry.get("status") == "OPEN" and str(entry.get("dealId")) == str(deal_id):
-            return entry
+    log = load_raw_log()
+    for t in reversed(log):
+        if t.get("status") == "OPEN" and str(t.get("dealId")) == str(deal_id):
+            return t
     return None
 
 
-def _fetch_close_details_from_history(deal_id):
-    try:
-        url = f"{API_HISTORY_TRANSACTIONS}?max=100"
-        r = session.request("GET", url)
-
-        if not r or r.status_code != 200:
-            print(f"[CLOSE] History fetch failed: {r.status_code if r else 'no_response'}", flush=True)
-            return None, None
-
-        data = r.json()
-        transactions = data.get("transactions", [])
-
-        exit_price = None
-        pnl = None
-
-        for tx in transactions:
-            tx_deal_id = tx.get("dealId") or tx.get("positionId")
-            if str(tx_deal_id) == str(deal_id):
-                exit_price = tx.get("closeLevel") or tx.get("level") or tx.get("price")
-                pnl = tx.get("profitAndLoss") or tx.get("pnl")
-                break
-
-        return exit_price, pnl
-
-    except Exception as e:
-        print(f"[CLOSE] Exception while reading history: {e}", flush=True)
-        return None, None
-
-
 def _snapshot_exit(epic, direction, entry_price, size):
-    try:
-        url = f"{API_MARKET}/{epic}"
-        r = session.request("GET", url)
-        if not r or r.status_code != 200:
-            return None, None
-
-        snapshot = r.json().get("snapshot", {})
-        bid = snapshot.get("bid")
-        offer = snapshot.get("offer")
-
-        if bid is None or offer is None:
-            return None, None
-
-        entry_price = float(entry_price)
-        size = float(size)
-
-        d = (direction or "").upper()
-        if d in ("LONG", "BUY"):
-            exit_price = bid
-            pnl = (exit_price - entry_price) * size
-        else:
-            exit_price = offer
-            pnl = (entry_price - exit_price) * size
-
-        return exit_price, pnl
-
-    except Exception as e:
-        print(f"[CLOSE] Snapshot exit failed: {e}", flush=True)
+    r = session.request("GET", f"{API_MARKET}/{epic}")
+    if not r or r.status_code != 200:
         return None, None
 
+    snap = r.json().get("snapshot", {})
+    bid = snap.get("bid")
+    offer = snap.get("offer")
 
-def close_position(position_id):
+    if direction == "Long":
+        exit_price = bid
+        pnl = (exit_price - entry_price) * size
+    else:
+        exit_price = offer
+        pnl = (entry_price - exit_price) * size
+
+    return exit_price, pnl
+
+
+def _history_exit(deal_id):
+    r = session.request("GET", f"{API_HISTORY_TRANSACTIONS}?max=100")
+    if not r or r.status_code != 200:
+        return None, None
+
+    txs = r.json().get("transactions", [])
+    for tx in txs:
+        if str(tx.get("dealId")) == str(deal_id):
+            exit_price = tx.get("closeLevel") or tx.get("level") or tx.get("price")
+            pnl = tx.get("profitAndLoss") or tx.get("pnl")
+            return exit_price, pnl
+
+    return None, None
+
+
+def close_position(deal_id):
     auth.ensure_token()
 
-    try:
-        url = f"{API_POSITIONS}/{position_id}/close"
-        print(f"[CLOSE] URL → {url}", flush=True)
+    r = session.request("POST", f"{API_POSITIONS}/{deal_id}/close")
+    if not r or r.status_code != 200:
+        print("[CLOSE] Failed")
+        return
 
-        response = session.request("POST", url)
+    open_trade = _find_open_trade(deal_id)
+    pos = session.enrich_positions(session.get_positions())
 
-        if not response:
-            print("[CLOSE] No response from close endpoint", flush=True)
-            return {"status": "error", "message": "no_response"}
+    pos_match = None
+    for p in pos:
+        if str(p.get("dealId")) == str(deal_id):
+            pos_match = p
+            break
 
-        print(f"[CLOSE] STATUS → {response.status_code}", flush=True)
-        print(f"[CLOSE] RESPONSE → {response.text}", flush=True)
+    ticker = pos_match.get("ticker") if pos_match else open_trade.get("ticker")
+    epic = pos_match.get("epic") if pos_match else open_trade.get("epic")
+    direction = normalize_side(pos_match.get("direction") if pos_match else open_trade.get("side"))
+    size = float(pos_match.get("size") if pos_match else open_trade.get("size"))
+    entry_price = float(pos_match.get("price") if pos_match else open_trade.get("entry_price"))
 
-        if response.status_code != 200:
-            return {"status": "error", "message": response.text}
+    exit_price, pnl = _history_exit(deal_id)
+    if exit_price is None or pnl is None:
+        exit_price, pnl = _snapshot_exit(epic, direction, entry_price, size)
 
-    except Exception as e:
-        print(f"[CLOSE] Exception during close: {e}", flush=True)
-        return {"status": "error", "message": str(e)}
-
-    try:
-        open_trade = _find_open_trade(position_id)
-        pos = _find_enriched_position(position_id)
-
-        ticker = (pos.get("ticker") if pos else None) or (open_trade.get("ticker") if open_trade else None)
-        epic = (pos.get("epic") if pos else None) or (open_trade.get("epic") if open_trade else None)
-
-        direction_raw = (pos.get("direction") if pos else None) or (open_trade.get("side") if open_trade else None)
-        direction = direction_raw.upper() if direction_raw else None
-
-        size = (pos.get("size") if pos else None) or (open_trade.get("size") if open_trade else None)
-        entry_price = (pos.get("price") if pos else None) or (open_trade.get("entry_price") if open_trade else None)
-
-        sl = open_trade.get("sl") if open_trade else None
-        tp = open_trade.get("tp") if open_trade else None
-        timeframe = open_trade.get("timeframe") if open_trade else None
-        time_entered = open_trade.get("time_entered") if open_trade else None
-
-        exit_price, pnl = _fetch_close_details_from_history(position_id)
-
-        if exit_price is None or pnl is None:
-            print("[CLOSE] History missing, using snapshot fallback", flush=True)
-            exit_price, pnl = _snapshot_exit(epic, direction, entry_price, size)
-
-        print(f"[CLOSE] Final exit_price={exit_price}, pnl={pnl}", flush=True)
-
-        log_closed_trade(
-            ticker=ticker,
-            epic=epic,
-            deal_id=position_id,
-            side=direction,
-            size=size,
-            entry_price=entry_price,
-            exit_price=exit_price,
-            pnl=pnl,
-            sl=sl,
-            tp=tp,
-            timeframe=timeframe,
-            time_entered=time_entered,
-            timestamp=timestamp()
-        )
-
-    except Exception as e:
-        print(f"[CLOSE] Failed to log CLOSED trade: {e}", flush=True)
-
-    session.update_last_trade()
-
-    return {"status": "success", "message": f"Position {position_id} closed."}
+    log_closed_trade(
+        deal_id=deal_id,
+        ticker=ticker,
+        epic=epic,
+        side=direction,
+        size=size,
+        entry_price=entry_price,
+        exit_price=exit_price,
+        pnl=pnl,
+        time_entered=open_trade.get("time_entered"),
+        timeframe

@@ -1,5 +1,5 @@
 # ============================
-# SESSION MODULE (STABLE POSITION PIPELINE)
+# SESSION MODULE (CLEAN + CAPITAL.COM EXACT VALUES)
 # ============================
 
 import time
@@ -25,6 +25,9 @@ _cache = {
     "account": {"ts": 0, "data": {}}
 }
 
+# ---------------------------------------------------------
+# REQUEST WRAPPER
+# ---------------------------------------------------------
 
 def get_headers():
     auth.ensure_token()
@@ -39,12 +42,6 @@ def get_headers():
 
 def request(method, url, json=None):
     headers = get_headers()
-
-    if "/positions/" in url and "/close" in url:
-        print("[SESSION] CLOSE REQUEST", flush=True)
-        print("[SESSION] METHOD  →", method, flush=True)
-        print("[SESSION] URL     →", url, flush=True)
-        print("[SESSION] BODY    →", json, flush=True)
 
     try:
         response = auth.session.request(method, url, headers=headers, json=json)
@@ -62,12 +59,16 @@ def request(method, url, json=None):
         return None
 
 
+# ---------------------------------------------------------
+# POSITIONS
+# ---------------------------------------------------------
+
 def get_positions():
     url = f"{API_POSITIONS}?includeProfitLoss=true"
     response = request("GET", url)
 
     if not response or response.status_code != 200:
-        print("[SESSION] get_positions → non-200 or no response, returning []", flush=True)
+        print("[SESSION] get_positions → non-200 or no response", flush=True)
         return []
 
     try:
@@ -86,12 +87,18 @@ def get_positions():
         return []
 
 
+def normalize_direction(direction):
+    if not direction:
+        return None
+    d = direction.upper()
+    if d == "BUY":
+        return "Long"
+    if d == "SELL":
+        return "Short"
+    return direction.capitalize()
+
+
 def enrich_positions(raw_positions):
-    """
-    Convert raw Capital.com positions into dashboard-friendly objects.
-    id  = dealId (for legacy use)
-    dealId = explicit field for close button and logging.
-    """
     enriched = []
 
     for item in raw_positions:
@@ -100,14 +107,14 @@ def enrich_positions(raw_positions):
 
         deal_id = pos.get("dealId")
         ticker = market.get("symbol")
-        direction = pos.get("direction")
+        direction_raw = pos.get("direction")
+        direction = normalize_direction(direction_raw)
+
         size = pos.get("size")
         entry_price = pos.get("level")
 
-        # CORRECT:
-        # LONG (BUY) → current_price = bid (you would sell)
-        # SHORT (SELL) → current_price = offer (you would buy back)
-        if direction == "BUY":
+        # BUY → bid, SELL → offer
+        if direction_raw == "BUY":
             current_price = market.get("bid")
         else:
             current_price = market.get("offer")
@@ -117,27 +124,26 @@ def enrich_positions(raw_positions):
         enriched.append({
             "id": deal_id,
             "dealId": deal_id,
-
             "dealReference": pos.get("dealReference"),
             "ticker": ticker,
             "epic": market.get("epic"),
-
             "size": size,
             "price": entry_price,
             "current_price": current_price,
-
             "direction": direction,
             "profit": round(profit, 2),
-
             "stopLevel": pos.get("stopLevel"),
             "limitLevel": pos.get("profitLevel"),
-
             "currency": pos.get("currency"),
-
             "signature": f"{ticker}|{direction}|{size}|{entry_price}",
         })
 
     return enriched
+
+
+# ---------------------------------------------------------
+# ACCOUNT
+# ---------------------------------------------------------
 
 def get_account():
     now = time.time()
@@ -147,7 +153,7 @@ def get_account():
     response = request("GET", API_ACCOUNT)
 
     if not response or response.status_code != 200:
-        print("[SESSION] get_account → non-200 or no response, returning cached", flush=True)
+        print("[SESSION] get_account → non-200 or no response", flush=True)
         return _cache["account"]["data"]
 
     try:
@@ -170,90 +176,19 @@ def enrich_account(raw):
 
     bal = raw.get("balance", {})
 
-    # Capital.com fields:
-    # funds       → cash
-    # balance     → sometimes same as funds, sometimes separate
-    # profitLoss  → floating PnL
-    # available   → available to trade
-    # margin      → used margin
-
-    funds = bal.get("funds", 0)
-    balance = bal.get("balance", funds)
+    balance = bal.get("balance", 0)
     pnl = bal.get("profitLoss", 0)
     available = bal.get("available", 0)
     margin = bal.get("margin", 0)
 
-    margin_warning = None
-    if available < 0:
-        margin_warning = "⚠ Margin Warning: Available balance is negative."
+    equity = balance + pnl
 
     return {
-        "funds": round(funds, 2),          # cash
-        "balance": round(balance, 2),      # will be turned into live equity in dashboard
+        "equity": round(equity, 2),
+        "balance": round(balance, 2),
         "pnl": round(pnl, 2),
         "available": round(available, 2),
         "margin": round(margin, 2),
         "available_color": "red" if available < 0 else "lime",
-        "margin_warning": margin_warning
+        "margin_warning": "⚠ Margin Warning" if available < 0 else None
     }
-
-def compute_used_margin(raw_positions):
-    total = 0.0
-    for item in raw_positions:
-        pos = item.get("position", {})
-        size = pos.get("size")
-        level = pos.get("level")
-        leverage = pos.get("leverage") or 1
-        try:
-            size_f = float(size)
-            level_f = float(level)
-            lev_f = float(leverage)
-            total += (size_f * level_f) / lev_f
-        except Exception:
-            pass
-    return round(total, 2)
-
-
-def verify_epic(symbol):
-    symbol = symbol.upper()
-
-    if symbol in EPIC_MAP:
-        return {"epic": EPIC_MAP[symbol], "source": "map"}
-
-    try:
-        url = f"{API_MARKET}/{symbol}"
-        r = request("GET", url)
-
-        if not r or r.status_code != 200:
-            print(f"[EPIC] API lookup failed for {symbol}", flush=True)
-            return {"epic": None, "source": "api_error"}
-
-        data = r.json()
-        epic = data.get("instrument", {}).get("epic")
-
-        if epic:
-            return {"epic": epic, "source": "api"}
-
-        print(f"[EPIC] No EPIC found for {symbol}", flush=True)
-        return {"epic": None, "source": "not_found"}
-
-    except Exception as e:
-        print(f"[EPIC] Exception during lookup: {e}", flush=True)
-        return {"epic": None, "source": "exception"}
-
-
-def get_daily_report():
-    try:
-        report_data = report.get_daily_report()
-        shared_state["daily_report"] = report_data
-        return report_data
-    except Exception as e:
-        print(f"[REPORT] Failed to load daily report: {e}", flush=True)
-        return {}
-
-
-def update_last_trade():
-    shared_state["system_status"]["last_trade"] = timestamp()
-
-def update_last_webhook():
-    shared_state["system_status"]["last_webhook"] = timestamp()
