@@ -220,7 +220,7 @@
                             {%- if t.pnl_gbp is not none -%}
                                 {{ t.pnl_gbp }}
                             {%- elif t.pnl is not none -%}
-                                {{ (t.pnl * (config.FX_USD_GBP if config and getattr(config,'FX_USD_GBP',None) else 0.78))|round(2) }}
+                                {{ (t.pnl * (config.FX_USD_GBP if config and config.FX_USD_GBP else 0.78))|round(2) }}
                             {%- else -%}
                                 —
                             {%- endif -%}
