@@ -90,15 +90,23 @@ def _humanize(dt_str: Optional[str]) -> Optional[str]:
         return None
     return d.strftime("%d-%m-%Y %H:%M:%S")
 
+
 def _read_fx_rate() -> float:
     """
     Read FX rate from environment. This function is used at compute time so
     changes to the environment (or config sync at startup) are respected.
+    Default set to 0.738 (update env or config to change).
     """
     try:
-        return float(os.environ.get("FX_USD_GBP", "0.78"))
+        # Prefer explicit environment variable; fall back to config if present.
+        val = os.environ.get("FX_USD_GBP", None)
+        if val is not None:
+            return float(val)
+        if config is not None and getattr(config, "FX_USD_GBP", None) is not None:
+            return float(config.FX_USD_GBP)
+        return 0.738
     except Exception:
-        return 0.78
+        return 0.738
 
 def load_raw_log(path: str = LOG_PATH) -> List[Dict[str, Any]]:
     if not os.path.exists(path):

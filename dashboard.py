@@ -7,6 +7,7 @@
 import functools
 import time
 import math
+from statistics import mean
 import logging
 import os
 from flask import Blueprint, request, render_template, redirect, jsonify
@@ -149,6 +150,12 @@ def filter_completed(trades):
 
 
 def compute_analytics(trades):
+    """
+    Compute analytics from a list of trade dicts.
+    Expects each trade to have a numeric 'pnl' (USD) when closed.
+    Returns win_rate (percent), avg_win, avg_loss, expectancy, total_pl, max_drawdown (negative), trade_count, story.
+    """
+
     if not trades:
         return {
             "win_rate": None,
@@ -161,43 +168,68 @@ def compute_analytics(trades):
             "story": None
         }
 
+    # Normalize and filter trades: only consider trades with numeric pnl values for numeric metrics.
     cleaned = []
     for t in trades:
-        pnl = t.get("pnl", 0)
+        # Keep original dict but ensure numeric pnl when possible
+        pnl_raw = t.get("pnl", None)
+        pnl_num = None
         try:
-            t["pnl"] = float(pnl)
-        except (TypeError, ValueError):
-            t["pnl"] = 0.0
-        cleaned.append(t)
+            if pnl_raw is not None and str(pnl_raw).strip() != "":
+                pnl_num = float(pnl_raw)
+        except Exception:
+            pnl_num = None
+        # copy to avoid mutating caller's list
+        copy_t = dict(t)
+        copy_t["pnl"] = pnl_num
+        cleaned.append(copy_t)
 
-    trades = cleaned
+    # Use closed trades only (if your trades list includes open trades, filter them out)
+    closed = [t for t in cleaned if t.get("status") == "CLOSED" or t.get("time_exited")]
 
-    wins = [t["pnl"] for t in trades if t["pnl"] > 0]
-    losses = [t["pnl"] for t in trades if t["pnl"] < 0]
+    # Extract numeric pnls
+    pnls = [t["pnl"] for t in closed if t.get("pnl") is not None]
 
-    trade_count = len(trades)
-    win_rate = round(len(wins) / trade_count * 100, 2) if trade_count else None
-    avg_win = round(sum(wins) / len(wins), 2) if wins else None
-    avg_loss = round(sum(losses) / len(losses), 2) if losses else None
+    # Separate wins, losses, zeros
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    zeros = [p for p in pnls if p == 0]
+
+    trade_count = len(closed)
+
+    # Win rate: wins / (wins + losses) — ignore zero-PnL trades for win rate calculation
+    denom = len(wins) + len(losses)
+    win_rate = None
+    if denom > 0:
+        win_rate = round((len(wins) / denom) * 100, 2)
+
+    avg_win = round(mean(wins), 2) if wins else None
+    avg_loss = round(mean(losses), 2) if losses else None
 
     expectancy = None
-    if avg_win is not None and avg_loss is not None and win_rate is not None:
-        p_win = win_rate / 100
-        p_loss = 1 - p_win
-        expectancy = round(p_win * avg_win + p_loss * avg_loss, 2)
+    if denom > 0 and avg_win is not None and avg_loss is not None:
+        p_win = len(wins) / denom
+        # avg_loss is negative; expectancy will reflect average PnL per trade
+        expectancy = round(p_win * avg_win + (1 - p_win) * avg_loss, 4)
 
+    # Running equity and max drawdown (negative value)
     running = 0.0
-    max_peak = -math.inf
-    max_drawdown = 0.0
-
-    # compute running equity curve and drawdown
-    for t in trades:
-        running += t["pnl"]
-        if max_peak == -math.inf:
-            max_peak = running
+    peak = -math.inf
+    max_drawdown = 0.0  # will store the most negative (min) running - peak
+    # Use the chronological order of closed trades as provided
+    for t in closed:
+        pnl_val = t.get("pnl")
+        if pnl_val is None:
+            pnl_val = 0.0
+        running += float(pnl_val)
+        if peak == -math.inf:
+            peak = running
         else:
-            max_peak = max(max_peak, running)
-        max_drawdown = min(max_drawdown, running - max_peak)
+            peak = max(peak, running)
+        # drawdown = running - peak (<= 0)
+        drawdown = running - peak
+        if drawdown < max_drawdown:
+            max_drawdown = drawdown
 
     total_pl = round(running, 2)
 
@@ -211,7 +243,6 @@ def compute_analytics(trades):
         "trade_count": trade_count,
         "story": "Discipline and controlled losses define the curve."
     }
-
 
 @dashboard.route("/dashboard")
 @login_required
