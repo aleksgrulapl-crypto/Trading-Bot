@@ -25,7 +25,6 @@ CAPITAL_USERNAME = os.getenv("CAPITAL_USERNAME")
 CAPITAL_PASSWORD = os.getenv("CAPITAL_PASSWORD")
 
 # Debugging / logging control
-# Set to True in development only; keep False in production
 DEBUG_LOGS = os.getenv("DEBUG_LOGS", "False").lower() in ("1", "true", "yes")
 
 # Trading parameters
@@ -36,6 +35,14 @@ LEVERAGE = int(os.getenv("LEVERAGE", 5))
 
 FIXED_SL_PERC = float(os.getenv("FIXED_SL_PERC", 0.10))
 FIXED_TP_PERC = float(os.getenv("FIXED_TP_PERC", 0.20))
+
+# FX conversion (USD -> GBP)
+# - Keep a default so the app works without env set.
+# - Override in production via environment variable FX_USD_GBP.
+try:
+    FX_USD_GBP = float(os.getenv("FX_USD_GBP", "0.78"))
+except Exception:
+    FX_USD_GBP = 0.78
 
 # Ticker-specific settings (can be extended via env or external config)
 TICKER_SETTINGS = {
@@ -63,7 +70,6 @@ TICKER_SETTINGS = {
 
 # UI / dashboard
 DASHBOARD_TITLE = os.getenv("DASHBOARD_TITLE", "AG Capital Trader")
-# For security, set dashboard password via env in production
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "Killen123%")
 
 # Timezone and reporting
@@ -73,7 +79,6 @@ DAILY_REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", 22))
 DAILY_REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", 0))
 
 # File paths and persistence
-# TRADE_LOG_PATH is used by trade_log.py (env override supported)
 TRADE_LOG_PATH = os.getenv("TRADE_LOG_PATH", os.getenv("TRADE_LOG_FILE", "/data/trade_log.json"))
 DAILY_REPORT_FILE = os.getenv("DAILY_REPORT_FILE", "/tmp/daily_report.json")
 

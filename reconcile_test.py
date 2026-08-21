@@ -2,16 +2,13 @@
 """
 reconcile_test.py
 
-Reconciliation helper:
-- Reports live positions that are not present in trade_log (match order: dealId -> dealReference -> ticker+entry_price)
-- Reports closed transactions in history that are not reflected in trade_log (missing exit_price/time_exited)
-- Optionally applies fixes when run with --apply:
-    * set dealId for entries that were logged with dealReference only
-    * close trades by dealId or fallback by ticker+entry_price when exit info is found
+Safe reconciliation helper that uses trade_log's canonical helpers:
+- upsert_open_trade for open positions
+- close_trade_by_dealId and close_trade_fallback for closes
 
 Usage:
-    python3 reconcile_test.py                # dry-run, prints findings
-    python3 reconcile_test.py --apply        # apply fixes to trade_log.json
+    python3 reconcile_test.py                # dry-run
+    python3 reconcile_test.py --apply        # apply fixes (non-destructive upserts/closes)
     python3 reconcile_test.py --path /data/trade_log.json --apply
 """
 
@@ -21,109 +18,33 @@ import os
 import shutil
 from typing import Any, Dict, List, Optional
 
-# Default path (change with --path)
 DEFAULT_LOG_PATH = "/data/trade_log.json"
 
-# Import local modules if available
-try:
-    from trade_log import load_raw_log, append_open_trade, set_dealId_for_dealReference, close_trade_by_dealId, close_trade_fallback, save_raw_log
-except Exception:
-    # Fallback implementations if trade_log module not importable
-    def load_raw_log(path=DEFAULT_LOG_PATH):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
+# Prefer trade_log helpers; fail fast if missing
+from trade_log import (
+    load_raw_log,
+    upsert_open_trade,
+    set_dealId_for_dealReference,
+    close_trade_by_dealId,
+    close_trade_fallback,
+)
 
-    def save_raw_log(trades, path=DEFAULT_LOG_PATH):
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(trades, f, indent=2, ensure_ascii=False)
-            return True
-        except Exception:
-            return False
-
-    def append_open_trade(payload):
-        trades = load_raw_log()
-        trades.append(payload)
-        save_raw_log(trades)
-        return payload
-
-    def set_dealId_for_dealReference(dealReference, dealId):
-        trades = load_raw_log()
-        updated = False
-        for t in trades:
-            if t.get("dealReference") == dealReference and not t.get("dealId"):
-                t["dealId"] = dealId
-                t["notes"] = (t.get("notes") or "") + f" | dealId_mapped={dealId}"
-                updated = True
-                break
-        if updated:
-            save_raw_log(trades)
-        return updated
-
-    def close_trade_by_dealId(dealId, exit_price=None, time_exited=None, note=None):
-        trades = load_raw_log()
-        updated = None
-        for t in trades:
-            if t.get("dealId") and str(t.get("dealId")) == str(dealId) and t.get("status") != "CLOSED":
-                if exit_price is not None:
-                    t["exit_price"] = exit_price
-                t["time_exited"] = time_exited or t.get("time_exited") or None
-                t["status"] = "CLOSED"
-                if note:
-                    t["notes"] = (t.get("notes") or "") + " | " + note
-                updated = t
-                break
-        if updated:
-            save_raw_log(trades)
-        return updated
-
-    def close_trade_fallback(ticker, entry_price, exit_price=None, time_exited=None, note=None):
-        trades = load_raw_log()
-        updated = None
-        for t in trades:
-            if t.get("status") != "CLOSED" and t.get("ticker") == ticker:
-                try:
-                    if float(t.get("entry_price", 0)) == float(entry_price):
-                        if exit_price is not None:
-                            t["exit_price"] = exit_price
-                        t["time_exited"] = time_exited or t.get("time_exited") or None
-                        t["status"] = "CLOSED"
-                        if note:
-                            t["notes"] = (t.get("notes") or "") + " | " + note
-                        updated = t
-                        break
-                except Exception:
-                    continue
-        if updated:
-            save_raw_log(trades)
-        return updated
-
-# Session wrapper to call your session.request/get_positions/history endpoints
+# session wrapper
 try:
     import session
 except Exception:
     session = None
 
 def fetch_live_positions() -> List[Dict[str, Any]]:
-    """Return enriched live positions if session.get_positions exists, else try reading from API endpoints."""
     if session and hasattr(session, "get_positions"):
         try:
             return session.get_positions() or []
         except Exception:
             pass
-    # fallback: no live positions available
     return []
 
 def fetch_history_transactions() -> List[Dict[str, Any]]:
-    """
-    Try to fetch recent history transactions from configured endpoints.
-    If session.request exists and config.API_BASE is available, attempt to call history endpoints.
-    """
-    txs = []
-    # Try session.request if available
+    txs: List[Dict[str, Any]] = []
     try:
         import config
         if session and hasattr(session, "request"):
@@ -145,17 +66,13 @@ def fetch_history_transactions() -> List[Dict[str, Any]]:
                     try:
                         body = r.json() or {}
                     except Exception:
-                        try:
-                            body = json.loads(r.text)
-                        except Exception:
-                            body = {}
+                        body = json.loads(r.text or "[]")
                     if isinstance(body, dict):
-                        for key in ("transactions", "items", "activity", "history"):
+                        for key in ("transactions", "items", "activity", "history", "positions"):
                             if key in body and isinstance(body[key], list):
                                 txs = body[key]
                                 break
                         if not txs:
-                            # try to find any list inside
                             for v in body.values():
                                 if isinstance(v, list):
                                     txs = v
@@ -201,7 +118,7 @@ def find_matching_log_entry(trades_maps, dealId: Optional[str], dealRef: Optiona
     sig = _make_signature(dealId, dealRef, ticker, entry_price)
     if sig in by_signature:
         return by_signature[sig], "signature"
-    # fallback: try tolerant numeric match on entry_price + ticker
+    # tolerant fallback
     for s, t in by_signature.items():
         try:
             if (t.get("ticker") == ticker) and abs(float(t.get("entry_price", 0)) - float(entry_price or 0)) <= 1e-6:
@@ -211,16 +128,12 @@ def find_matching_log_entry(trades_maps, dealId: Optional[str], dealRef: Optiona
     return None, None
 
 def extract_exit_info_from_tx(tx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
-    Try to extract dealId, dealReference, exit_price, time_exited, ticker, entry_price from a history transaction.
-    """
     dealId = tx.get("dealId") or tx.get("deal_id") or tx.get("positionId")
     dealRef = tx.get("dealReference") or tx.get("deal_reference")
     exit_price = tx.get("price") or tx.get("closePrice") or tx.get("exitPrice") or tx.get("closedPrice")
     time_exited = tx.get("date") or tx.get("createdDate") or tx.get("closedDate") or tx.get("timestamp")
     ticker = tx.get("symbol") or tx.get("instrument") or tx.get("epic")
     entry_price = tx.get("entryPrice") or tx.get("openPrice") or tx.get("level")
-    # nested search
     for k in ("transaction", "data", "details", "position", "market"):
         nested = tx.get(k)
         if isinstance(nested, dict):
@@ -244,15 +157,7 @@ def extract_exit_info_from_tx(tx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def main(log_path: str, apply_changes: bool):
     print("=== Reconciliation test ===")
-    trades = load_raw_log() if 'load_raw_log' in globals() and callable(load_raw_log) else []
-    # If load_raw_log from module expects no args, use it; else try reading file
-    if not trades:
-        try:
-            with open(log_path, "r", encoding="utf-8") as f:
-                trades = json.load(f)
-        except Exception:
-            trades = []
-
+    trades = load_raw_log() or []
     print(f"Loaded {len(trades)} trades from {log_path}")
 
     trades_maps = build_log_maps(trades)
@@ -337,17 +242,17 @@ def main(log_path: str, apply_changes: bool):
 
     # APPLY changes
     print("\n=== Applying fixes ===")
-    # backup
-    bak = f"{log_path}.reconcilebak.{os.getenv('USER','user')}.{os.path.basename(log_path)}.{os.urandom(4).hex()}"
+    bak = f"{log_path}.reconcilebak.{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.json"
     try:
-        shutil.copy2(log_path, bak)
-        print(f"[INFO] Backed up original log to {bak}")
+        if os.path.exists(log_path):
+            shutil.copy2(log_path, bak)
+            print(f"[INFO] Backed up original log to {bak}")
     except Exception as e:
         print("[WARN] Could not create backup:", e)
 
-    # a) add unmatched live positions
+    # a) add unmatched live positions via upsert_open_trade
     if unmatched_live:
-        print(f"Adding {len(unmatched_live)} live positions to trade_log")
+        print(f"Adding {len(unmatched_live)} live positions to trade_log (upsert)")
         for u in unmatched_live:
             payload = {
                 "dealId": u.get("dealId"),
@@ -357,16 +262,12 @@ def main(log_path: str, apply_changes: bool):
                 "size": u.get("raw").get("size") if isinstance(u.get("raw"), dict) else None,
                 "entry_price": u.get("entry_price"),
                 "time_entered": u.get("raw").get("time_entered") if isinstance(u.get("raw"), dict) else None,
-                "exit_price": None,
-                "time_exited": None,
-                "pnl": None,
-                "status": "OPEN",
                 "notes": "Imported from live positions (reconcile_test)"
             }
-            append_open_trade(payload)
-            print("Appended live position:", u.get("dealReference") or u.get("dealId"))
+            res = upsert_open_trade(payload)
+            print("Upserted live position:", u.get("dealReference") or u.get("dealId"), "result:", bool(res))
 
-    # b) apply closes found in history
+    # b) apply closes found in history using canonical helpers
     if closes_found:
         for c in closes_found:
             hist = c["history"]
@@ -384,9 +285,9 @@ def main(log_path: str, apply_changes: bool):
                     print("Closed by dealId:", log_entry.get("dealId"), "result:", bool(res))
                 elif dealRef:
                     if dealId:
-                        updated = set_dealId_for_dealReference(dealRef, dealId)
-                        print("Mapped dealReference -> dealId:", dealRef, "->", dealId, "updated:", updated)
-                        if updated:
+                        mapped = set_dealId_for_dealReference(dealRef, dealId)
+                        print("Mapped dealReference -> dealId:", dealRef, "->", dealId, "mapped:", mapped)
+                        if mapped:
                             res = close_trade_by_dealId(dealId, exit_price=exit_price, time_exited=time_exited, note="Applied from history")
                             print("Closed after mapping dealId:", dealId, "result:", bool(res))
                     else:
@@ -396,7 +297,7 @@ def main(log_path: str, apply_changes: bool):
                     res = close_trade_fallback(ticker, entry_price, exit_price=exit_price, time_exited=time_exited, note="Applied from history")
                     print("Closed by fallback (ticker+entry):", ticker, entry_price, "result:", bool(res))
             else:
-                print("No log entry for history close. Creating a closed record in trade_log.")
+                # create a closed record via upsert then close (ensures canonical fields and PnL)
                 payload = {
                     "dealId": dealId,
                     "dealReference": dealRef,
@@ -405,14 +306,18 @@ def main(log_path: str, apply_changes: bool):
                     "size": 0,
                     "entry_price": entry_price or 0,
                     "time_entered": None,
-                    "exit_price": exit_price,
-                    "time_exited": time_exited,
-                    "pnl": None,
-                    "status": "CLOSED",
                     "notes": "Imported closed trade from history (reconcile_test)"
                 }
-                append_open_trade(payload)
-                print("Created closed record for history item.")
+                up = upsert_open_trade(payload)
+                if up:
+                    if up.get("dealId"):
+                        res = close_trade_by_dealId(up.get("dealId"), exit_price=exit_price, time_exited=time_exited, note="Imported closed trade (reconcile_test)")
+                        print("Created and closed record by dealId:", up.get("dealId"), "result:", bool(res))
+                    else:
+                        res = close_trade_fallback(up.get("ticker"), up.get("entry_price"), exit_price=exit_price, time_exited=time_exited, note="Imported closed trade (reconcile_test)")
+                        print("Created and closed record by fallback:", up.get("ticker"), up.get("entry_price"), "result:", bool(res))
+                else:
+                    print("Failed to create closed record for history item:", json.dumps(hist, default=str))
 
     print("=== Fixes applied. Please inspect trade_log.json ===")
 

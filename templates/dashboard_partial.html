@@ -12,14 +12,14 @@
                 <div class="metric">
                     <div class="metric-label">Win Rate</div>
                     <div class="metric-value metric-neutral">
-                        {{ analytics.win_rate|default('—') }}%
+                        {{ analytics.win_rate is not none and analytics.win_rate or '—' }}%
                     </div>
                 </div>
 
                 <div class="metric">
                     <div class="metric-label">Expectancy / Trade</div>
-                    <div class="metric-value {% if analytics.expectancy and analytics.expectancy >= 0 %}metric-good{% else %}metric-bad{% endif %}">
-                        {{ analytics.expectancy|default('—') }}
+                    <div class="metric-value {% if analytics.expectancy is not none and analytics.expectancy >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+                        {{ analytics.expectancy is not none and analytics.expectancy or '—' }}
                     </div>
                 </div>
 
@@ -34,8 +34,8 @@
             <div class="metrics-row" style="margin-top: 10px;">
                 <div class="metric">
                     <div class="metric-label">Profit / Loss</div>
-                    <div class="metric-value {% if analytics.total_pl and analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
-                        {{ analytics.total_pl|default('—') }}
+                    <div class="metric-value {% if analytics.total_pl is not none and analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+                        {{ analytics.total_pl is not none and analytics.total_pl or '—' }}
                     </div>
                 </div>
 
@@ -85,27 +85,30 @@
                 <tbody>
                 {% for p in positions %}
                     <tr>
-                        <td>{{ p.ticker }}</td>
+                        <td>{{ p.ticker or p.epic or '—' }}</td>
 
                         <td>
-                            {% if p.direction == 'Long' %}
+                            {% set dir = p.direction or p.side %}
+                            {% if dir == 'Long' %}
                                 <span class="pill pill-long">Long</span>
-                            {% else %}
+                            {% elif dir == 'Short' %}
                                 <span class="pill pill-short">Short</span>
+                            {% else %}
+                                <span class="pill pill-status">{{ dir or '—' }}</span>
                             {% endif %}
                         </td>
 
-                        <td>{{ p.size }}</td>
-                        <td>{{ p.price|default('—') }}</td>
+                        <td>{{ p.size|default('—') }}</td>
+                        <td>{{ p.entry_price is not none and p.entry_price or p.price|default('—') }}</td>
                         <td>{{ p.current_price|default('—') }}</td>
                         <td>{{ p.stopLevel|default('—') }} / {{ p.limitLevel|default('—') }}</td>
 
-                        <td class="{% if p.profit and p.profit >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
-                            {{ p.profit|default('—') }}
+                        <td class="{% if p.profit is not none and p.profit >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+                            {{ p.profit is not none and p.profit or '—' }}
                         </td>
 
                         <td>
-                            <a href="/dashboard/close/{{ p.dealId }}" class="pill pill-status">
+                            <a href="/dashboard/close/{{ p.dealId or p.id }}" class="pill pill-status">
                                 Close
                             </a>
                         </td>
@@ -137,37 +140,49 @@
                         <th>Side</th>
                         <th>Size</th>
                         <th>Entry / Exit</th>
-                        <th>PnL</th>
+                        <th>PNL (USD)</th>
+                        <th>PNL (GBP)</th>
                     </tr>
                 </thead>
                 <tbody>
                 {% for t in trades %}
                     <tr>
-                        <td>{{ t.time_entered|default('—') }}</td>
-                        <td>{{ t.time_exited|default('—') }}</td>
+                        <td class="small">{{ t.time_entered_human or t.time_entered or '—' }}</td>
+                        <td class="small">{{ t.time_exited_human or t.time_exited or '—' }}</td>
 
-                        <td>{{ t.ticker }}</td>
+                        <td>{{ t.ticker or '—' }}</td>
 
                         <td>
-                            {% if t.side == 'Long' %}
+                            {% set side = t.side or t.direction %}
+                            {% if side == 'Long' %}
                                 <span class="pill pill-long">Long</span>
-                            {% elif t.side == 'Short' %}
+                            {% elif side == 'Short' %}
                                 <span class="pill pill-short">Short</span>
                             {% else %}
-                                <span class="pill pill-status">{{ t.side|default('—') }}</span>
+                                <span class="pill pill-status">{{ side or '—' }}</span>
                             {% endif %}
                         </td>
 
-                        <td>{{ t.size }}</td>
+                        <td>{{ t.size|default('—') }}</td>
 
                         <td>
-                            {{ t.entry_price|default('—') }}
+                            {{ t.entry_price is not none and t.entry_price or t.get('entryPrice') or '—' }}
                             →
-                            {{ t.exit_price|default('—') }}
+                            {{ t.exit_price is not none and t.exit_price or t.get('exitPrice') or '—' }}
                         </td>
 
-                        <td class="{% if t.pnl and t.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
-                            {{ t.pnl|default('—') }}
+                        <td class="{% if t.pnl is not none and t.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+                            {{ t.pnl is not none and t.pnl or '—' }}
+                        </td>
+
+                        <td class="{% if t.pnl_gbp is not none and t.pnl_gbp >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+                            {%- if t.pnl_gbp is not none -%}
+                                {{ t.pnl_gbp }}
+                            {%- elif t.pnl is not none -%}
+                                {{ (t.pnl * (config.FX_USD_GBP if config and getattr(config,'FX_USD_GBP',None) else 0.78))|round(2) }}
+                            {%- else -%}
+                                —
+                            {%- endif -%}
                         </td>
                     </tr>
                 {% endfor %}

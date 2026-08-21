@@ -111,11 +111,14 @@ def enrich_positions(raw_positions: List[dict]) -> List[dict]:
         ticker = market.get("symbol") or pos.get("instrumentName") or None
         direction_raw = pos.get("direction")
         direction = _normalize_direction(direction_raw)
+        # provide both names to avoid mismatch across modules
+        side = direction
         size = pos.get("size")
-        entry_price = pos.get("level")
+        entry_price = pos.get("level") or pos.get("entry_price") or pos.get("entryPrice")
 
         current_price = None
         try:
+            # For a Long (BUY) the current price to compare is the bid (price you can sell at)
             if direction_raw and str(direction_raw).upper() == "BUY":
                 current_price = market.get("bid")
             else:
@@ -123,10 +126,9 @@ def enrich_positions(raw_positions: List[dict]) -> List[dict]:
         except Exception:
             current_price = None
 
-        profit = pos.get("upl", 0)
-
+        profit_raw = pos.get("upl", pos.get("profit", 0))
         try:
-            profit_val = round(float(profit or 0), 2)
+            profit_val = round(float(profit_raw or 0), 2)
         except Exception:
             profit_val = 0.0
 
@@ -137,14 +139,21 @@ def enrich_positions(raw_positions: List[dict]) -> List[dict]:
             "ticker": ticker,
             "epic": market.get("epic"),
             "size": size,
+            # keep legacy key 'price' but add canonical 'entry_price'
             "price": entry_price,
+            "entry_price": entry_price,
             "current_price": current_price,
             "direction": direction,
+            "side": side,
             "profit": profit_val,
+            "upl": profit_val,
             "stopLevel": pos.get("stopLevel"),
             "limitLevel": pos.get("profitLevel"),
             "currency": pos.get("currency"),
             "signature": f"{ticker}|{direction}|{size}|{entry_price}",
+            # keep raw nested objects for any downstream code that expects them
+            "raw_position": pos,
+            "raw_market": market,
         })
 
     return enriched

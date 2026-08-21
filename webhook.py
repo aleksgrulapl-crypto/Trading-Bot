@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # webhook.py
-# ============================
-# WEBHOOK MODULE (PATCHED: idempotent webhook processing + original TradingView flow)
-# ============================
+# Idempotent webhook handler integrated with trade_log.upsert_open_trade and close_trade_by_dealId
 
 import os
 import time
@@ -18,7 +16,13 @@ from order import place_order
 from auth import auth
 from config import API_ACCOUNTS, API_MARKET, API_BASE, DEBUG_LOGS
 from scheduler import start_scheduler
-from trade_log import load_raw_log, save_raw_log, append_open_trade, set_dealId_for_dealReference, close_trade_by_dealId
+from trade_log import (
+    load_raw_log,
+    save_raw_log,
+    upsert_open_trade,
+    set_dealId_for_dealReference,
+    close_trade_by_dealId,
+)
 from close_position import close_position as close_position_module
 
 # parser import: try both common names for compatibility
@@ -28,15 +32,15 @@ except Exception:
     try:
         from parser import parse_tradingview_alert
     except Exception:
-        # fallback stub that blocks everything
         def parse_tradingview_alert(_):
             return {"blocked": True, "reason": "parser_unavailable"}
 
-# dashboard blueprint import (may raise if not present)
+# dashboard blueprint import (robust)
+dashboard_blueprint = None
 try:
     from dashboard import dashboard as dashboard_blueprint
-except Exception:
-    dashboard_blueprint = None
+except Exception as e:
+    logging.getLogger("webhook").warning("dashboard import failed: %s", e)
 
 # App setup
 app = Flask(__name__)
@@ -63,21 +67,12 @@ if not logger.handlers:
     logger.addHandler(handler)
 
 
-# -----------------------------
 # Helpers
-# -----------------------------
 def _safe_get_json(raw_text: str) -> Any:
-    """
-    Try multiple strategies to parse incoming payload:
-      1) request.get_json(force=True)
-      2) json.loads(raw_text)
-      3) fallback to raw string
-    """
     try:
         return request.get_json(force=True)
     except Exception:
         pass
-
     try:
         return json.loads(raw_text)
     except Exception:
@@ -88,9 +83,6 @@ def _ok_response(payload: Dict[str, Any], code: int = 200):
     return jsonify(payload), code
 
 
-# -----------------------------
-# Idempotent webhook processing helpers
-# -----------------------------
 def _make_signature(dealId: Optional[str], dealReference: Optional[str], ticker: Optional[str], entry_price: Optional[float]) -> str:
     try:
         entry_norm = round(float(entry_price or 0), 8)
@@ -100,17 +92,14 @@ def _make_signature(dealId: Optional[str], dealReference: Optional[str], ticker:
 
 
 def _find_existing_entry(trades: list, dealId: Optional[str], dealReference: Optional[str], ticker: Optional[str], entry_price: Optional[float]):
-    # 1) match by dealId
     if dealId:
         for t in trades:
             if t.get("dealId") and str(t.get("dealId")) == str(dealId):
                 return t, "dealId"
-    # 2) match by dealReference
     if dealReference:
         for t in trades:
             if t.get("dealReference") and str(t.get("dealReference")) == str(dealReference):
                 return t, "dealReference"
-    # 3) match by signature (dealId|dealReference|ticker|entry_price)
     sig = _make_signature(dealId, dealReference, ticker, entry_price)
     for t in trades:
         existing_sig = _make_signature(t.get("dealId"), t.get("dealReference"), t.get("ticker"), t.get("entry_price"))
@@ -121,11 +110,10 @@ def _find_existing_entry(trades: list, dealId: Optional[str], dealReference: Opt
 
 def process_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Idempotent processing of incoming webhook payloads.
-    - payload: raw JSON from webhook provider (Capital or similar) or other webhook sources
-    Returns a dict with action taken and the trade record.
+    Idempotent processing:
+    - Upsert opens via trade_log.upsert_open_trade
+    - Close via trade_log.close_trade_by_dealId when exit present
     """
-    # Normalize fields from common webhook shapes
     pos = payload.get("position") or payload
     market = payload.get("market") or payload
 
@@ -139,89 +127,50 @@ def process_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     time_entered = pos.get("createdDate") or pos.get("createdDateUTC") or payload.get("time_entered")
     time_exited = payload.get("closedDate") or payload.get("time_exited") or payload.get("timestamp")
 
-    # Load current log
-    trades = load_raw_log()
+    # If this payload looks like a close-only event with dealId, prefer closing
+    if dealId and exit_price not in (None, ""):
+        closed = close_trade_by_dealId(dealId, exit_price=exit_price, time_exited=time_exited, note="Closed via webhook")
+        if closed:
+            return {"action": "closed", "trade": closed}
 
-    # Find existing entry if any
-    existing, how = _find_existing_entry(trades, dealId, dealReference, ticker, entry_price)
-
-    # If we have an existing entry, update it (do not append)
-    if existing:
-        updated = False
-        # map fields that may be missing and should be filled/updated
-        if not existing.get("dealId") and dealId:
-            existing["dealId"] = dealId
-            updated = True
-        if not existing.get("dealReference") and dealReference:
-            existing["dealReference"] = dealReference
-            updated = True
-        if not existing.get("ticker") and ticker:
-            existing["ticker"] = ticker
-            updated = True
-        if not existing.get("side") and side:
-            existing["side"] = side
-            updated = True
-        if (existing.get("size") in (None, 0)) and size:
-            try:
-                existing["size"] = float(size)
-            except Exception:
-                existing["size"] = size
-            updated = True
-        if (existing.get("entry_price") in (None, "")) and entry_price not in (None, ""):
-            try:
-                existing["entry_price"] = float(entry_price)
-            except Exception:
-                existing["entry_price"] = entry_price
-            updated = True
-        # If webhook contains an exit, close the trade
-        if exit_price not in (None, ""):
-            # prefer closing by dealId if present
-            if existing.get("dealId"):
-                close_trade_by_dealId(existing.get("dealId"), exit_price=exit_price, time_exited=time_exited, note="Closed via webhook")
-            else:
-                # set exit fields directly and compute pnl via trade_log save
-                try:
-                    existing["exit_price"] = float(exit_price)
-                except Exception:
-                    existing["exit_price"] = exit_price
-                existing["time_exited"] = time_exited
-                existing["status"] = "CLOSED"
-            updated = True
-
-        if updated:
-            # persist changes
-            save_raw_log(trades)
-            return {"action": "updated", "match_by": how, "trade": existing}
-
-        return {"action": "noop", "match_by": how, "trade": existing}
-
-    # No existing entry found -> append new open/closed trade
-    new = {
+    # Upsert open (will reject malformed payloads)
+    upsert_payload = {
         "dealId": dealId,
         "dealReference": dealReference,
         "ticker": ticker,
         "side": side,
-        "size": float(size) if size not in (None, "") else 0,
-        "entry_price": float(entry_price) if entry_price not in (None, "") else None,
+        "size": size,
+        "entry_price": entry_price,
         "time_entered": time_entered,
-        "exit_price": float(exit_price) if exit_price not in (None, "") else None,
-        "time_exited": time_exited,
-        "status": "CLOSED" if exit_price not in (None, "") else "OPEN",
-        "notes": "Imported from webhook"
+        "notes": payload.get("notes") or "Imported from webhook"
     }
+    upserted = upsert_open_trade(upsert_payload)
+    if upserted:
+        # If payload also contains exit info (rare), close it immediately
+        if exit_price not in (None, ""):
+            if upserted.get("dealId"):
+                closed = close_trade_by_dealId(upserted.get("dealId"), exit_price=exit_price, time_exited=time_exited, note="Closed via webhook")
+                return {"action": "upserted_and_closed", "trade": closed or upserted}
+            else:
+                # fallback: set exit on the upserted record and save
+                trades = load_raw_log()
+                for t in trades:
+                    if t is upserted or (t.get("ticker") == upserted.get("ticker") and t.get("entry_price") == upserted.get("entry_price") and t.get("status") != "CLOSED"):
+                        try:
+                            t["exit_price"] = float(exit_price)
+                        except Exception:
+                            t["exit_price"] = exit_price
+                        t["time_exited"] = time_exited
+                        t["status"] = "CLOSED"
+                        save_raw_log(trades)
+                        return {"action": "upserted_and_closed_fallback", "trade": t}
+        return {"action": "upserted", "trade": upserted}
 
-    appended = append_open_trade(new)
-    if appended:
-        return {"action": "appended", "trade": appended}
-    # fallback: if append failed, write directly to file (last resort)
-    trades.append(new)
-    save_raw_log(trades)
-    return {"action": "appended_fallback", "trade": new}
+    # If upsert failed (malformed), return helpful info
+    return {"action": "rejected", "reason": "malformed_payload", "payload": upsert_payload}
 
 
-# ============================
-# MAIN WEBHOOK
-# ============================
+# Main webhook route
 @app.route("/webhook", methods=["POST"])
 def webhook():
     session.update_last_webhook()
@@ -235,7 +184,6 @@ def webhook():
         logger.warning("Empty webhook body")
         return _ok_response({"status": "error", "message": "Empty body received"})
 
-    # Parse TradingView alert (robust)
     parsed_input = _safe_get_json(raw)
     try:
         alert = parse_tradingview_alert(parsed_input)
@@ -247,8 +195,7 @@ def webhook():
         logger.warning("Parser returned non-dict result")
         return _ok_response({"status": "error", "message": "Parser returned invalid result"})
 
-    # If the parsed alert looks like a broker position/webhook (contains 'position' or 'dealId' or 'market'),
-    # handle it idempotently via process_webhook_payload and return early.
+    # If payload looks like broker position/history, process idempotently
     if isinstance(parsed_input, dict) and (parsed_input.get("position") or parsed_input.get("dealId") or parsed_input.get("market") or parsed_input.get("dealReference")):
         try:
             result = process_webhook_payload(parsed_input)
@@ -274,7 +221,6 @@ def webhook():
     if not symbol or not action:
         return _ok_response({"status": "error", "message": "missing_symbol_or_action"})
 
-    # EPIC lookup
     epic_data = session.verify_epic(symbol)
     epic = epic_data.get("epic")
     logger.debug("EPIC lookup → symbol=%s epic=%s source=%s", symbol, epic, epic_data.get("source"))
@@ -282,7 +228,6 @@ def webhook():
     if not epic:
         return _ok_response({"status": "error", "message": "epic_lookup_failed"})
 
-    # Market snapshot
     market_resp = session.request("GET", f"{API_MARKET}/{epic}")
     if not market_resp or getattr(market_resp, "status_code", 0) != 200:
         logger.warning("Market snapshot unavailable for %s", epic)
@@ -303,7 +248,6 @@ def webhook():
     entry_price = float(offer) if str(action).strip().lower() == "buy" else float(bid)
     logger.debug("Entry price (actual): %s", entry_price)
 
-    # Sizing
     size_info = calculate_size(entry_price=entry_price, sl_price=sl_price, tp_price=tp_price, direction=action, symbol=symbol)
     if size_info.get("blocked"):
         logger.info("Sizing blocked: %s", size_info.get("reason"))
@@ -312,7 +256,6 @@ def webhook():
     size = size_info.get("size")
     logger.info("Final SL=%s TP=%s SIZE=%s", sl_price, tp_price, size)
 
-    # Place order
     try:
         result = place_order(epic, action, size, sl_price, tp_price, timeframe=timeframe)
     except Exception:
@@ -323,14 +266,9 @@ def webhook():
     return _ok_response({"status": "ok", "result": result})
 
 
-# ============================
-# DEBUG ROUTES (SAFE)
-# ============================
+# Debug and other routes unchanged below
 @app.route("/debug/tokens")
 def debug_tokens():
-    """
-    Safe debug: indicate whether tokens are present, do not return secrets.
-    """
     try:
         ok = auth.ensure_token()
         return jsonify({
@@ -343,12 +281,10 @@ def debug_tokens():
         logger.exception("debug_tokens failed")
         return jsonify({"error": "ensure_token_failed"}), 500
 
-
 @app.route("/debug/epic/<symbol>")
 def debug_epic(symbol):
     data = session.verify_epic(symbol)
     return jsonify(data), 200
-
 
 @app.route("/debug/market/<epic>")
 def debug_market(epic):
@@ -360,13 +296,11 @@ def debug_market(epic):
     except Exception:
         return jsonify({"error": "invalid_json"}), 500
 
-
 @app.route("/debug/positions")
 def debug_positions():
     raw = session.get_positions()
     enriched = session.enrich_positions(raw)
     return jsonify({"raw": raw, "enriched": enriched}), 200
-
 
 @app.route("/debug/sizing/<symbol>/<action>/<price>/<sl>/<tp>")
 def debug_sizing(symbol, action, price, sl, tp):
@@ -377,7 +311,6 @@ def debug_sizing(symbol, action, price, sl, tp):
         logger.exception("debug_sizing failed")
         return jsonify({"error": "invalid_parameters"}), 400
 
-
 @app.route("/debug/order/<epic>/<action>/<size>")
 def debug_order(epic, action, size):
     try:
@@ -387,30 +320,22 @@ def debug_order(epic, action, size):
         logger.exception("debug_order failed")
         return jsonify({"error": "order_failed"}), 500
 
-
 @app.route("/debug/close-test/<deal_id>", methods=["GET"])
 def debug_close_test(deal_id):
-    """
-    Test close endpoints: returns raw responses for inspection.
-    """
     from config import API_POSITIONS
-
     url1 = f"{API_POSITIONS}/{deal_id}/close"
     r1 = session.request("POST", url1, json={})
     s1 = getattr(r1, "status_code", None)
     t1 = getattr(r1, "text", None)
-
     url2 = f"{API_POSITIONS}/close-position"
     payload = {"dealId": deal_id, "dealReference": f"p_{deal_id}"}
     r2 = session.request("PUT", url2, json=payload)
     s2 = getattr(r2, "status_code", None)
     t2 = getattr(r2, "text", None)
-
     return jsonify({
         "post_close": {"status": s1, "body": t1},
         "put_close_position": {"status": s2, "body": t2},
     }), 200
-
 
 @app.route("/debug/history")
 def debug_history():
@@ -418,39 +343,18 @@ def debug_history():
     r = session.request("GET", f"{API_HISTORY_TRANSACTIONS}?max=200")
     return jsonify(r.json() if r else {"error": "no response"}), 200
 
-
-# ============================
-# RAW + DASHBOARD ROUTES
-# ============================
 @app.route("/raw")
 def raw_positions():
     raw = session.get_positions()
     return jsonify(raw)
-
 
 @app.route("/raw/account")
 def raw_account():
     r = session.request("GET", API_ACCOUNTS)
     return jsonify(r.json() if r else {}), 200
 
-
 @app.route("/")
 def root():
-    return redirect("/dashboard")
-
-
-@app.route("/dashboard")
-def dashboard_redirect():
-    return redirect("/dashboard/home")
-
-
-@app.route("/dashboard")
-def dashboard_root():
-    return redirect("/dashboard/home")
-
-
-@app.route("/dashboard/home")
-def dashboard_home_redirect():
     return redirect("/dashboard")
 
 

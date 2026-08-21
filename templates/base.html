@@ -25,9 +25,7 @@
             --warning: #facc15;
             --gold: #f5d76e;
         }
-
         * { box-sizing: border-box; }
-
         body {
             margin: 0;
             padding: 0;
@@ -35,7 +33,6 @@
             background: radial-gradient(circle at top, #0f172a 0, #020617 45%, #000 100%);
             color: var(--text);
         }
-
         header {
             background: linear-gradient(90deg, #020617, #0a1a2f);
             padding: 20px 24px;
@@ -45,7 +42,6 @@
             justify-content: flex-start;
             position: relative;
         }
-
         header .title {
             font-size: 24px;
             font-weight: 700;
@@ -53,7 +49,6 @@
             letter-spacing: 0.05em;
             text-shadow: 0 0 8px rgba(245, 215, 110, 0.4);
         }
-
         header .nav {
             position: absolute;
             right: 24px;
@@ -64,163 +59,28 @@
             font-size: 14px;
             align-items: center;
         }
-
-        header .nav a {
-            color: var(--accent);
-            text-decoration: none;
-            font-weight: 500;
-        }
-
-        header .nav a.logout {
-            color: var(--danger);
-        }
-
-        #error-banner {
-            display: none;
-            margin: 12px 24px 0;
-            padding: 10px 14px;
-            border-radius: 8px;
-            background: rgba(248, 113, 113, 0.1);
-            border: 1px solid rgba(248, 113, 113, 0.4);
-            color: var(--danger);
-            font-size: 13px;
-        }
-
-        #dashboard-content {
-            padding: 20px 24px 32px;
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-            gap: 16px;
-        }
-
-        .grid-full {
-            margin-top: 16px;
-        }
-
-        .card {
-            background: rgba(15, 23, 42, 0.9);
-            border-radius: 12px;
-            border: 1px solid rgba(31, 41, 55, 0.9);
-            padding: 14px 16px;
-            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.7);
-        }
-
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            margin-bottom: 10px;
-        }
-
-        .card-title {
-            font-size: 14px;
-            font-weight: 600;
-            letter-spacing: 0.04em;
-            text-transform: uppercase;
-            color: var(--text-muted);
-        }
-
-        .card-subtitle {
-            font-size: 12px;
-            color: var(--accent-soft);
-        }
-
-        .metrics-row {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 10px;
-            margin-top: 8px;
-        }
-
-        .metric {
-            padding: 8px 10px;
-            border-radius: 8px;
-            background: rgba(15, 23, 42, 0.8);
-            border: 1px solid rgba(31, 41, 55, 0.8);
-        }
-
-        .metric-label {
-            font-size: 11px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-        }
-
-        .metric-value {
-            margin-top: 4px;
-            font-size: 15px;
-            font-weight: 600;
-        }
-
-        .metric-good { color: var(--success); }
-        .metric-bad { color: var(--danger); }
-        .metric-neutral { color: var(--accent); }
-
-        .table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
-        }
-
-        .table th,
-        .table td {
-            padding: 6px 8px;
-            border-bottom: 1px solid rgba(31, 41, 55, 0.7);
-        }
-
-        .table th {
-            text-align: left;
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            color: var(--text-muted);
-            background: rgba(15, 23, 42, 0.9);
-        }
-
-        .table tr:hover td {
-            background: rgba(15, 23, 42, 0.7);
-        }
-
-        .pill {
-            display: inline-flex;
-            align-items: center;
-            padding: 2px 8px;
-            border-radius: 999px;
-            font-size: 11px;
-        }
-
-        .pill-long {
-            background: rgba(34, 197, 94, 0.1);
-            color: var(--success);
-            border: 1px solid rgba(34, 197, 94, 0.4);
-        }
-
-        .pill-short {
-            background: rgba(248, 113, 113, 0.1);
-            color: var(--danger);
-            border: 1px solid rgba(248, 113, 113, 0.4);
-        }
-
-        .pill-status {
-            background: rgba(148, 163, 184, 0.1);
-            color: var(--text-muted);
-            border: 1px solid rgba(148, 163, 184, 0.4);
-        }
-
-        .pnl-pos { color: var(--success); }
-        .pnl-neg { color: var(--danger); }
-
-        .small {
-            font-size: 11px;
-            color: var(--text-muted);
-        }
-
-        @media (max-width: 1024px) {
-            .grid { grid-template-columns: minmax(0, 1fr); }
-        }
+        header .nav a { color: var(--accent); text-decoration: none; font-weight: 500; }
+        header .nav a.logout { color: var(--danger); }
+        #error-banner { display: none; margin: 12px 24px 0; padding: 10px 14px; border-radius: 8px; background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.4); color: var(--danger); font-size: 13px; }
+        #dashboard-content { padding: 20px 24px 32px; }
+        .grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; }
+        .card { background: rgba(15, 23, 42, 0.9); border-radius: 12px; border: 1px solid rgba(31, 41, 55, 0.9); padding: 14px 16px; box-shadow: 0 18px 40px rgba(15, 23, 42, 0.7); }
+        .card-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+        .card-title { font-size: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+        .card-subtitle { font-size: 12px; color: var(--accent-soft); }
+        .metrics-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
+        .metric { padding: 8px 10px; border-radius: 8px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(31, 41, 55, 0.8); }
+        .metric-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+        .metric-value { margin-top: 4px; font-size: 15px; font-weight: 600; }
+        .metric-good { color: var(--success); } .metric-bad { color: var(--danger); } .metric-neutral { color: var(--accent); }
+        .table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .table th, .table td { padding: 6px 8px; border-bottom: 1px solid rgba(31, 41, 55, 0.7); }
+        .table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); background: rgba(15, 23, 42, 0.9); }
+        .pill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+        .pill-long { background: rgba(34, 197, 94, 0.1); color: var(--success); border: 1px solid rgba(34, 197, 94, 0.4); }
+        .pill-short { background: rgba(248, 113, 113, 0.1); color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.4); }
+        .small { font-size: 11px; color: var(--text-muted); }
+        @media (max-width: 1024px) { .grid { grid-template-columns: minmax(0, 1fr); } }
     </style>
 </head>
 <body>
@@ -233,18 +93,10 @@
             Equity: {{ account.equity|default('—') }} ·
             Balance: {{ account.balance|default('—') }} ·
             PnL:
-            <span style="
-                font-weight:700;
-                color:{% if account.pnl is not none and account.pnl >= 0 %}
-                    var(--success)
-                {% else %}
-                    var(--danger)
-                {% endif %};
-            ">
+            <span style="font-weight:700; color:{% if account.pnl is not none and account.pnl >= 0 %}var(--success){% else %}var(--danger){% endif %};">
                 {{ account.pnl|default('—') }}
             </span>
-            ·
-            Available: {{ account.available|default('—') }}
+            · Available: {{ account.available|default('—') }}
         </span>
 
         <a href="/dashboard">Dashboard</a>
@@ -255,12 +107,138 @@
 <div id="error-banner"></div>
 
 <div id="dashboard-content">
-    {% block content %}{% endblock %}
+    <div id="dashboard-inner">
+        <!-- Server-side rendered content so first load shows canonical fields -->
+        <div class="grid">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Performance Snapshot</div>
+                        <div class="card-subtitle">Summary of completed trades</div>
+                    </div>
+                    <div class="small">Updated: {{ (session.shared_state.system_status.last_webhook if session and session.shared_state else None) or "" }}</div>
+                </div>
+
+                <div class="metrics-row">
+                    <div class="metric">
+                        <div class="metric-label">Win Rate</div>
+                        <div class="metric-value">{{ analytics.win_rate if analytics.win_rate is not none else '—' }}%</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Trades</div>
+                        <div class="metric-value">{{ analytics.trade_count }}</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Profit / Loss (GBP)</div>
+                        <div class="metric-value {% if analytics.total_pl and analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+                            {{ analytics.total_pl if analytics.total_pl is not none else '—' }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">Account & Open Positions</div>
+                        <div class="card-subtitle">Live positions from broker</div>
+                    </div>
+                    <div class="small">Equity: {{ account.equity|default('—') }}</div>
+                </div>
+
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Size</th>
+                            <th>Entry</th>
+                            <th>Current</th>
+                            <th>SL / TP</th>
+                            <th>PNL (GBP)</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in positions %}
+                        <tr>
+                            <td>{{ p.ticker or p.epic or '—' }}</td>
+                            <td><span class="pill {% if p.direction == 'Long' %}pill-long{% else %}pill-short{% endif %}">{{ p.direction or p.side or '—' }}</span></td>
+                            <td>{{ p.size or '—' }}</td>
+                            <td>{{ p.price or p.entry_price or '—' }}</td>
+                            <td>{{ p.current_price or '—' }}</td>
+                            <td>{{ p.stopLevel or '—' }} / {{ p.limitLevel or '—' }}</td>
+                            <td class="{% if p.profit is not none and p.profit >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+                                {{ p.profit if p.profit is not none else '—' }}
+                            </td>
+                            <td><button onclick="closePosition('{{ p.dealId or p.id }}')">Close</button></td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="8" class="small">No open positions</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="grid-full card" style="margin-top:16px;">
+            <div class="card-header">
+                <div>
+                    <div class="card-title">Completed Trades</div>
+                    <div class="card-subtitle">Closed trades (most recent first)</div>
+                </div>
+                <div class="small">Count: {{ trades|length }}</div>
+            </div>
+
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Exited</th>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th>Size</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>PNL (USD)</th>
+                        <th>PNL (GBP)</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in trades %}
+                    <tr>
+                        <td class="small">{{ t.time_exited_human or t.time_exited or '—' }}</td>
+                        <td>{{ t.ticker or '—' }}</td>
+                        <td><span class="pill {% if t.side and t.side|lower == 'long' %}pill-long{% else %}pill-short{% endif %}">{{ t.side or '—' }}</span></td>
+                        <td>{{ t.size or '—' }}</td>
+                        <td>{{ t.entry_price if t.entry_price is not none else '—' }}</td>
+                        <td>{{ t.exit_price if t.exit_price is not none else '—' }}</td>
+                        <td class="{% if t.pnl is not none and t.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+                            {{ t.pnl if t.pnl is not none else '—' }}
+                        </td>
+                        <td class="{% if t.pnl_gbp is not none and t.pnl_gbp >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+                            {%- if t.pnl_gbp is not none -%}
+                                {{ t.pnl_gbp }}
+                            {%- elif t.pnl is not none -%}
+                                {{ (t.pnl * (config.FX_USD_GBP if config and getattr(config,'FX_USD_GBP',None) else 0.78))|round(2) }}
+                            {%- else -%}
+                                —
+                            {%- endif -%}
+                        </td>
+                        <td class="small">{{ t.notes or '' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="9" class="small">No completed trades</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <script>
 function closePosition(dealId) {
-    fetch(`/dashboard/close/${dealId}`, { method: "GET" })
+    fetch(`/close/${dealId}`, { method: "POST" })
         .then(() => refreshDashboard())
         .catch(err => console.error("Close error:", err));
 }
@@ -276,14 +254,10 @@ function refreshDashboard() {
                 if (container) {
                     container.innerHTML = data.html;
                 }
-
                 const header = document.getElementById('header-account');
                 if (header && data.account) {
                     const pnl = data.account.pnl;
-                    const pnlColor = (pnl !== null && pnl !== undefined && pnl >= 0)
-                        ? 'var(--success)'
-                        : 'var(--danger)';
-
+                    const pnlColor = (pnl !== null && pnl !== undefined && pnl >= 0) ? 'var(--success)' : 'var(--danger)';
                     header.innerHTML =
                         `Equity: ${data.account.equity ?? '—'} · ` +
                         `Balance: ${data.account.balance ?? '—'} · ` +
@@ -291,7 +265,6 @@ function refreshDashboard() {
                         `${pnl ?? '—'}</span> · ` +
                         `Available: ${data.account.available ?? '—'}`;
                 }
-
             } else {
                 errorBanner.innerText = "Dashboard refresh failed: Invalid response.";
                 errorBanner.style.display = "block";
