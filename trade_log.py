@@ -531,5 +531,28 @@ def log_closed_trade(*args, **kwargs) -> Optional[Dict[str, Any]]:
 
     return None
 
+# Backwards compatibility alias for older callers that import append_open_trade
+def append_open_trade(*args, **kwargs):
+    """
+    Compatibility wrapper kept for older modules that import append_open_trade.
+    Delegates to the canonical upsert_open_trade/log_open_trade API.
+    """
+    try:
+        if args and isinstance(args[0], dict):
+            return upsert_open_trade(args[0])
+        payload = {
+            "dealId": kwargs.get("dealId") or kwargs.get("deal_id") or kwargs.get("dealid"),
+            "dealReference": kwargs.get("dealReference") or kwargs.get("deal_reference"),
+            "ticker": kwargs.get("ticker") or kwargs.get("epic") or kwargs.get("symbol"),
+            "side": kwargs.get("side") or kwargs.get("direction"),
+            "size": kwargs.get("size") or kwargs.get("qty") or kwargs.get("quantity"),
+            "entry_price": kwargs.get("entry_price") or kwargs.get("entryPrice") or kwargs.get("price"),
+            "time_entered": kwargs.get("time_entered") or kwargs.get("timestamp") or kwargs.get("time"),
+            "notes": kwargs.get("notes")
+        }
+        return upsert_open_trade(payload)
+    except Exception:
+        return None
+
 def get_trades(path: str = LOG_PATH) -> List[Dict[str, Any]]:
     return load_raw_log(path)
