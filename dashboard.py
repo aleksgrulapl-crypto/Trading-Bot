@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # dashboard.py
-# Production-ready replacement
-# - robust JSON error handling for /dashboard/data
-# - hardened normalization, dedupe, and analytics input sanitization
-# - safe session.shared_state access
-# - clearer login env configuration and logging
-# - stable sorting using ISO timestamps when available
+# Production-ready dashboard blueprint.
+# Key features:
+#   - Robust JSON error handling for /dashboard/data
+#   - Hardened normalization, dedupe, and analytics input sanitization
+#   - Safe per-request context: shared_state updated per request, not globally
+#   - Safe analytics defaults: all keys always present, None values handled
+#   - Close-position endpoint for the dashboard "Close" button
+#   - Clearer login env configuration and logging
 
 import functools
 import time
@@ -256,120 +258,171 @@ def compute_analytics(trades):
     }
 
 
+def _safe_analytics(analytics: dict) -> dict:
+    """Ensure all expected analytics keys are present with safe defaults.
+
+    Prevents template errors when a key is missing or analytics is None.
+    """
+    defaults = {
+        "win_rate": None,
+        "avg_win": None,
+        "avg_loss": None,
+        "expectancy": None,
+        "total_pl": None,
+        "max_drawdown": None,
+        "trade_count": 0,
+        "story": None,
+    }
+    if not isinstance(analytics, dict):
+        return defaults
+    result = dict(defaults)
+    result.update(analytics)
+    return result
+
+
+def _build_request_context():
+    """Build fresh, per-request dashboard context.
+
+    Each call fetches live data independently so concurrent requests
+    do not share mutable state.
+
+    Returns:
+        dict with keys: account, positions, combined_trades, analytics
+    """
+    # Force fresh account cache for this request
+    try:
+        session._cache["account"]["ts"] = 0
+    except Exception:
+        logger.debug("session cache not initialized")
+
+    raw_positions = session.get_positions() or []
+    raw_account = session.get_account() or {}
+
+    positions = session.enrich_positions(raw_positions)
+    account = session.enrich_account(raw_account)
+
+    # Reconcile local trade log against live positions (may update the log file)
+    try:
+        recon = reconcile_with_positions(positions)
+        if getattr(config, "DEBUG_LOGS", False):
+            logger.debug("trade_log reconcile result: %s", recon)
+    except Exception:
+        logger.exception("dashboard: reconcile_with_positions failed")
+
+    combined_raw = load_raw_log()
+    combined_trades = normalize_trades(dedupe_trades(combined_raw))
+    combined_trades.sort(
+        key=lambda t: (t.get("time_exited") or t.get("time_entered") or ""),
+        reverse=True,
+    )
+
+    analytics = _safe_analytics(compute_analytics(filter_completed(combined_trades)))
+
+    return {
+        "account": account,
+        "positions": positions,
+        "combined_trades": combined_trades,
+        "analytics": analytics,
+    }
+
+
 # -----------------------------
 # Views
 # -----------------------------
 @dashboard.route("/dashboard")
 @login_required
 def dashboard_home():
-    # force fresh account fetch
-    try:
-        session._cache["account"]["ts"] = 0
-    except Exception:
-        logger.debug("session cache not initialized")
+    """Render the full dashboard page with fresh per-request context."""
+    ctx = _build_request_context()
 
-    raw_positions = session.get_positions() or []
-    raw_account = session.get_account() or {}
-
-    positions = session.enrich_positions(raw_positions)
-    account = session.enrich_account(raw_account)
-
-    # reconcile local trade log with live positions
-    try:
-        recon = reconcile_with_positions(positions)
-        if getattr(config, "DEBUG_LOGS", False):
-            logger.debug("trade_log reconcile result: %s", recon)
-    except Exception:
-        logger.exception("dashboard: reconcile_with_positions failed")
-
-    combined_raw = load_raw_log()
-    combined_trades = normalize_trades(dedupe_trades(combined_raw))
-
-    # stable sort by ISO timestamps when available
-    def _sort_key(t):
-        return (t.get("time_exited") or t.get("time_entered") or "")
-
-    combined_trades.sort(key=_sort_key, reverse=True)
-
-    analytics = compute_analytics(filter_completed(combined_trades))
-
-    # ensure shared_state exists
+    # Update shared_state so other modules can read the latest snapshot.
+    # This is a best-effort update; it must not fail the request.
     try:
         if not isinstance(session.shared_state, dict):
             session.shared_state = {}
+        session.shared_state["account"] = ctx["account"]
+        session.shared_state["positions"] = ctx["positions"]
+        session.shared_state["trade_log"] = ctx["combined_trades"]
+        session.shared_state["analytics"] = ctx["analytics"]
     except Exception:
-        session.shared_state = {}
-
-    session.shared_state["account"] = account
-    session.shared_state["positions"] = positions
-    session.shared_state["trade_log"] = combined_trades
-    session.shared_state["analytics"] = analytics
+        logger.debug("dashboard: could not update shared_state")
 
     return render_template(
         "dashboard.html",
         title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
         cache_bust=time.time(),
-        account=account,
-        positions=positions,
-        trades=combined_trades,
-        analytics=analytics
+        account=ctx["account"],
+        positions=ctx["positions"],
+        trades=ctx["combined_trades"],
+        analytics=ctx["analytics"],
     )
 
 
 @dashboard.route("/dashboard/data")
 @login_required
 def dashboard_data():
-    # force fresh account fetch
-    try:
-        session._cache["account"]["ts"] = 0
-    except Exception:
-        logger.debug("session cache not initialized")
+    """Return fresh dashboard data as JSON (with rendered HTML partial).
 
-    raw_positions = session.get_positions() or []
-    raw_account = session.get_account() or {}
-
-    positions = session.enrich_positions(raw_positions)
-    account = session.enrich_account(raw_account)
-
-    # reconcile local trade log with live positions
-    try:
-        recon = reconcile_with_positions(positions)
-        if getattr(config, "DEBUG_LOGS", False):
-            logger.debug("trade_log reconcile result: %s", recon)
-    except Exception:
-        logger.exception("dashboard: reconcile_with_positions failed")
-
-    combined_raw = load_raw_log()
-    combined_trades = normalize_trades(dedupe_trades(combined_raw))
-
-    combined_trades.sort(key=lambda t: (t.get("time_exited") or t.get("time_entered") or ""), reverse=True)
-
-    analytics = compute_analytics(filter_completed(combined_trades))
+    Always returns JSON, even on error, to prevent client-side parse failures.
+    """
+    ctx = _build_request_context()
 
     try:
         html = render_template(
             "dashboard_partial.html",
             cache_bust=time.time(),
-            account=account,
-            positions=positions,
-            trades=combined_trades,
-            analytics=analytics
+            account=ctx["account"],
+            positions=ctx["positions"],
+            trades=ctx["combined_trades"],
+            analytics=ctx["analytics"],
         )
         return jsonify({
             "html": html,
-            "account": account,
-            "positions": positions,
-            "trades": combined_trades,
-            "analytics": analytics
+            "account": ctx["account"],
+            "positions": ctx["positions"],
+            "trades": ctx["combined_trades"],
+            "analytics": ctx["analytics"],
         })
     except Exception as exc:
-        # Always return JSON on error to avoid client-side JSON parse errors
         logger.exception("dashboard/data render failed: %s", exc)
         return jsonify({
             "error": "render_failed",
             "message": "Failed to render dashboard partial",
-            "details": str(exc)
+            "details": str(exc),
         }), 500
+
+
+@dashboard.route("/dashboard/close/<position_id>", methods=["POST"])
+@login_required
+def dashboard_close_position(position_id: str):
+    """Close a live position via the dashboard UI.
+
+    Delegates to close_position.close_position() and returns JSON.
+    Internal error details are logged but NOT forwarded to the client.
+    """
+    try:
+        from close_position import close_position as _close
+        result = _close(position_id)
+        # Only return the status and a safe message – never forward internal
+        # exception details or stack traces to the client.
+        safe_result = {
+            "status": result.get("status", "error"),
+            # Use a fixed, safe message string rather than forwarding the
+            # internal broker/exception message directly to the client.
+            "message": (
+                f"Position {position_id} closed successfully."
+                if result.get("status") == "success"
+                else "close_position_failed"
+            ),
+        }
+        if result.get("warning"):
+            safe_result["warning"] = "Trade log update incomplete; position was closed by broker."
+        status_code = 200 if safe_result["status"] == "success" else 500
+        return jsonify(safe_result), status_code
+    except Exception as exc:
+        logger.exception("dashboard: close_position raised for %s", position_id)
+        # Return a generic error message – do not leak the exception string.
+        return jsonify({"status": "error", "message": "close_position_failed"}), 500
 
 
 # -----------------------------

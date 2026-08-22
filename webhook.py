@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 # webhook.py
-# Idempotent webhook handler integrated with trade_log.upsert_open_trade and close_trade_by_dealId
+# Idempotent webhook handler integrated with trade_log.upsert_open_trade and close_trade_by_dealId.
+#
+# Key improvements:
+#   - Dashboard import validation: fails fast if blueprint not exported correctly
+#   - Correlation IDs (UUID) on every webhook request for end-to-end tracing
+#   - Input validation in process_webhook_payload()
+#   - Actionable error messages that include field names and actual values
+#   - Request timeout constant for all outbound broker API calls
 
 import os
 import time
+import uuid
 import json
 import logging
 from typing import Any, Dict, Optional
@@ -25,7 +33,16 @@ from trade_log import (
 )
 from close_position import close_position as close_position_module
 
-# parser import: try both common names for compatibility
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+AUTH_RETRY_COUNT = 6          # attempts to obtain auth token on startup
+AUTH_RETRY_BACKOFF = 5        # seconds between startup auth retries
+BROKER_API_TIMEOUT = 30       # seconds – applied to all outbound broker requests
+
+# ---------------------------------------------------------------------------
+# Parser import: try both common names for compatibility
+# ---------------------------------------------------------------------------
 try:
     from tradingview_parser import parse_tradingview_alert
 except Exception:
@@ -35,29 +52,59 @@ except Exception:
         def parse_tradingview_alert(_):
             return {"blocked": True, "reason": "parser_unavailable"}
 
-# dashboard blueprint import (robust)
+# ---------------------------------------------------------------------------
+# Dashboard blueprint import – fail fast on misconfiguration
+# ---------------------------------------------------------------------------
 dashboard_blueprint = None
 try:
-    from dashboard import dashboard as dashboard_blueprint
-except Exception as e:
-    logging.getLogger("webhook").warning("dashboard import failed: %s", e)
+    from dashboard import dashboard as _imported_blueprint
+    # Validate that the imported object is actually a Flask Blueprint
+    from flask import Blueprint
+    if not isinstance(_imported_blueprint, Blueprint):
+        raise ImportError(
+            f"dashboard.dashboard is not a Flask Blueprint (got {type(_imported_blueprint).__name__}). "
+            "Ensure dashboard.py exports `dashboard = Blueprint(...)`."
+        )
+    dashboard_blueprint = _imported_blueprint
+except ImportError as _dashboard_import_err:
+    # Re-raise import errors so the operator knows exactly what went wrong
+    import sys
+    logging.getLogger("webhook").error(
+        "STARTUP ERROR: Dashboard blueprint import failed – %s. "
+        "Dashboard UI will be unavailable. Fix dashboard.py and restart.",
+        _dashboard_import_err,
+    )
+    # In production-critical setups you may want to hard-fail here.
+    # We allow the app to start without a dashboard so webhooks still work.
+    dashboard_blueprint = None
+except Exception as _dashboard_err:
+    logging.getLogger("webhook").error(
+        "STARTUP ERROR: Unexpected error importing dashboard blueprint – %s. "
+        "Dashboard UI will be unavailable.",
+        _dashboard_err,
+    )
+    dashboard_blueprint = None
 
+# ---------------------------------------------------------------------------
 # App setup
+# ---------------------------------------------------------------------------
 app = Flask(__name__)
 app.config["DEBUG"] = bool(DEBUG_LOGS)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.jinja_env.auto_reload = True
 app.jinja_env.cache = {}
 
-# Register blueprint if available
-if dashboard_blueprint:
+# Register blueprint if available and valid
+if dashboard_blueprint is not None:
     try:
         app.register_blueprint(dashboard_blueprint)
-        logging.getLogger("webhook").info("Dashboard blueprint registered.")
-    except Exception as e:
-        logging.getLogger("webhook").error("Failed to register dashboard blueprint: %s", e)
+        logging.getLogger("webhook").info("Dashboard blueprint registered successfully.")
+    except Exception as _bp_err:
+        logging.getLogger("webhook").error("Failed to register dashboard blueprint: %s", _bp_err)
 
+# ---------------------------------------------------------------------------
 # Logging
+# ---------------------------------------------------------------------------
 logger = logging.getLogger("webhook")
 logger.setLevel(logging.DEBUG if DEBUG_LOGS else logging.INFO)
 if not logger.handlers:
@@ -67,7 +114,10 @@ if not logger.handlers:
     logger.addHandler(handler)
 
 
+# ---------------------------------------------------------------------------
 # Helpers
+# ---------------------------------------------------------------------------
+
 def _safe_get_json(raw_text: str) -> Any:
     try:
         return request.get_json(force=True)
@@ -108,12 +158,86 @@ def _find_existing_entry(trades: list, dealId: Optional[str], dealReference: Opt
     return None, None
 
 
-def process_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _first_not_none(*values):
+    """Return the first value that is not None (0 and '' are preserved)."""
+    for v in values:
+        if v is not None:
+            return v
+    return None
+
+
+def _validate_webhook_payload(payload: Dict[str, Any]) -> Optional[str]:
+    """Return an error string if the payload is obviously malformed, else None.
+
+    Checks:
+      - entry_price must be a positive number when present
+      - exit_price must be a positive number when present
+      - size must be a positive number when present
+      - side/direction must be a recognised string when present
+
+    Uses _first_not_none() instead of 'or' chains so that numeric 0 is not
+    silently swallowed and instead triggers the positivity check.
     """
-    Idempotent processing:
+    pos = payload.get("position") or payload
+    market = payload.get("market") or payload
+
+    entry_price = _first_not_none(pos.get("level"), pos.get("entryPrice"), payload.get("entry_price"), payload.get("entryPrice"))
+    exit_price = _first_not_none(payload.get("price"), payload.get("exit_price"), payload.get("closePrice"))
+    size = _first_not_none(pos.get("size"), pos.get("contractSize"), payload.get("size"))
+    side = pos.get("direction") or payload.get("side")
+
+    if entry_price is not None and entry_price != "":
+        try:
+            ep = float(entry_price)
+            if ep <= 0:
+                return f"entry_price must be positive (got: {ep})"
+        except (TypeError, ValueError):
+            return f"entry_price is not a number (got: {entry_price!r})"
+
+    if exit_price is not None and exit_price != "":
+        try:
+            xp = float(exit_price)
+            if xp <= 0:
+                return f"exit_price must be positive (got: {xp})"
+        except (TypeError, ValueError):
+            return f"exit_price is not a number (got: {exit_price!r})"
+
+    if size is not None and size != "":
+        try:
+            sz = float(size)
+            if sz <= 0:
+                return f"size must be positive (got: {sz})"
+        except (TypeError, ValueError):
+            return f"size is not a number (got: {size!r})"
+
+    if side is not None and side != "":
+        normalized = str(side).strip().lower()
+        if normalized not in ("buy", "sell", "long", "short"):
+            return f"side/direction '{side}' not recognised (expected: buy/sell/long/short)"
+
+    return None
+
+
+def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str, Any]:
+    """Idempotent processing:
     - Upsert opens via trade_log.upsert_open_trade
     - Close via trade_log.close_trade_by_dealId when exit present
+
+    Args:
+        payload: Raw (dict) broker payload.
+        cid:     Correlation ID for log tracing.
+
+    Returns:
+        dict with keys "action" and "trade" (or "reason" on rejection).
     """
+    log_prefix = f"[cid={cid}] " if cid else ""
+
+    # Validate incoming payload before processing
+    validation_error = _validate_webhook_payload(payload)
+    if validation_error:
+        logger.warning("%sprocess_webhook_payload: validation failed – %s", log_prefix, validation_error)
+        return {"action": "rejected", "reason": validation_error, "payload": payload}
+
     pos = payload.get("position") or payload
     market = payload.get("market") or payload
 
@@ -127,13 +251,17 @@ def process_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     time_entered = pos.get("createdDate") or pos.get("createdDateUTC") or payload.get("time_entered")
     time_exited = payload.get("closedDate") or payload.get("time_exited") or payload.get("timestamp")
 
+    logger.debug("%sExtracted fields: dealId=%s ticker=%s side=%s size=%s entry=%s exit=%s",
+                 log_prefix, dealId, ticker, side, size, entry_price, exit_price)
+
     # If this payload looks like a close-only event with dealId, prefer closing
     if dealId and exit_price not in (None, ""):
         closed = close_trade_by_dealId(dealId, exit_price=exit_price, time_exited=time_exited, note="Closed via webhook")
         if closed:
+            logger.info("%sClosed trade dealId=%s exit_price=%s", log_prefix, dealId, exit_price)
             return {"action": "closed", "trade": closed}
 
-    # Upsert open (will reject malformed payloads)
+    # Upsert open (will reject malformed payloads via trade_log validation)
     upsert_payload = {
         "dealId": dealId,
         "dealReference": dealReference,
@@ -146,6 +274,7 @@ def process_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
     upserted = upsert_open_trade(upsert_payload)
     if upserted:
+        logger.info("%sUpserted open trade dealId=%s ticker=%s", log_prefix, dealId, ticker)
         # If payload also contains exit info (rare), close it immediately
         if exit_price not in (None, ""):
             if upserted.get("dealId"):
@@ -166,49 +295,66 @@ def process_webhook_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                         return {"action": "upserted_and_closed_fallback", "trade": t}
         return {"action": "upserted", "trade": upserted}
 
-    # If upsert failed (malformed), return helpful info
-    return {"action": "rejected", "reason": "malformed_payload", "payload": upsert_payload}
+    # Upsert failed (malformed) – return helpful info with validation details
+    logger.warning("%sUpsert rejected – likely missing/invalid entry_price or size. "
+                   "dealId=%s ticker=%s entry_price=%s size=%s",
+                   log_prefix, dealId, ticker, entry_price, size)
+    return {
+        "action": "rejected",
+        "reason": "malformed_payload",
+        "details": {
+            "dealId": dealId,
+            "ticker": ticker,
+            "entry_price": entry_price,
+            "size": size,
+            "side": side,
+        }
+    }
 
 
+# ---------------------------------------------------------------------------
 # Main webhook route
+# ---------------------------------------------------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    # Assign a correlation ID to every request for end-to-end tracing
+    cid = str(uuid.uuid4())[:8]
     session.update_last_webhook()
 
     raw = request.get_data(as_text=True) or ""
     raw = raw.strip()
 
-    logger.debug("RAW webhook body length=%d", len(raw))
+    logger.debug("[cid=%s] RAW webhook body length=%d", cid, len(raw))
 
     if not raw:
-        logger.warning("Empty webhook body")
-        return _ok_response({"status": "error", "message": "Empty body received"})
+        logger.warning("[cid=%s] Empty webhook body", cid)
+        return _ok_response({"status": "error", "message": "Empty body received", "cid": cid})
 
     parsed_input = _safe_get_json(raw)
     try:
         alert = parse_tradingview_alert(parsed_input)
     except Exception:
-        logger.exception("parse_tradingview_alert raised")
-        return _ok_response({"status": "error", "message": "Invalid alert payload"})
+        logger.exception("[cid=%s] parse_tradingview_alert raised", cid)
+        return _ok_response({"status": "error", "message": "Invalid alert payload", "cid": cid})
 
     if not isinstance(alert, dict):
-        logger.warning("Parser returned non-dict result")
-        return _ok_response({"status": "error", "message": "Parser returned invalid result"})
+        logger.warning("[cid=%s] Parser returned non-dict result", cid)
+        return _ok_response({"status": "error", "message": "Parser returned invalid result", "cid": cid})
 
     # If payload looks like broker position/history, process idempotently
     if isinstance(parsed_input, dict) and (parsed_input.get("position") or parsed_input.get("dealId") or parsed_input.get("market") or parsed_input.get("dealReference")):
         try:
-            result = process_webhook_payload(parsed_input)
-            logger.info("Webhook processed idempotently: %s", result.get("action"))
-            return _ok_response({"status": "ok", "action": result.get("action"), "trade": result.get("trade")})
+            result = process_webhook_payload(parsed_input, cid=cid)
+            logger.info("[cid=%s] Webhook processed idempotently: %s", cid, result.get("action"))
+            return _ok_response({"status": "ok", "action": result.get("action"), "trade": result.get("trade"), "cid": cid})
         except Exception:
-            logger.exception("process_webhook_payload failed")
-            return _ok_response({"status": "error", "message": "webhook_processing_failed"})
+            logger.exception("[cid=%s] process_webhook_payload failed", cid)
+            return _ok_response({"status": "error", "message": "webhook_processing_failed", "cid": cid})
 
     # Otherwise treat as TradingView alert for order placement
     if alert.get("blocked"):
-        logger.info("Alert blocked: %s", alert.get("reason"))
-        return _ok_response({"status": "blocked", "reason": alert.get("reason")})
+        logger.info("[cid=%s] Alert blocked: %s", cid, alert.get("reason"))
+        return _ok_response({"status": "blocked", "reason": alert.get("reason"), "cid": cid})
 
     symbol = alert.get("symbol")
     action = alert.get("action")
@@ -216,57 +362,59 @@ def webhook():
     tp_price = alert.get("tp")
     timeframe = alert.get("timeframe")
 
-    logger.info("Parsed alert → symbol=%s action=%s sl=%s tp=%s tf=%s", symbol, action, sl_price, tp_price, timeframe)
+    logger.info("[cid=%s] Parsed alert → symbol=%s action=%s sl=%s tp=%s tf=%s", cid, symbol, action, sl_price, tp_price, timeframe)
 
     if not symbol or not action:
-        return _ok_response({"status": "error", "message": "missing_symbol_or_action"})
+        return _ok_response({"status": "error", "message": "missing_symbol_or_action", "missing_fields": [f for f in ("symbol", "action") if not alert.get(f)], "cid": cid})
 
     epic_data = session.verify_epic(symbol)
     epic = epic_data.get("epic")
-    logger.debug("EPIC lookup → symbol=%s epic=%s source=%s", symbol, epic, epic_data.get("source"))
+    logger.debug("[cid=%s] EPIC lookup → symbol=%s epic=%s source=%s", cid, symbol, epic, epic_data.get("source"))
 
     if not epic:
-        return _ok_response({"status": "error", "message": "epic_lookup_failed"})
+        return _ok_response({"status": "error", "message": "epic_lookup_failed", "symbol": symbol, "cid": cid})
 
-    market_resp = session.request("GET", f"{API_MARKET}/{epic}")
+    market_resp = session.request("GET", f"{API_MARKET}/{epic}", timeout=BROKER_API_TIMEOUT)
     if not market_resp or getattr(market_resp, "status_code", 0) != 200:
-        logger.warning("Market snapshot unavailable for %s", epic)
-        return _ok_response({"status": "error", "message": "market_snapshot_unavailable"})
+        logger.warning("[cid=%s] Market snapshot unavailable for %s", cid, epic)
+        return _ok_response({"status": "error", "message": "market_snapshot_unavailable", "epic": epic, "cid": cid})
 
     try:
         snapshot = market_resp.json().get("snapshot", {}) or {}
     except Exception:
-        logger.exception("Failed to parse market snapshot JSON")
-        return _ok_response({"status": "error", "message": "market_snapshot_parse_error"})
+        logger.exception("[cid=%s] Failed to parse market snapshot JSON", cid)
+        return _ok_response({"status": "error", "message": "market_snapshot_parse_error", "cid": cid})
 
     bid = snapshot.get("bid")
     offer = snapshot.get("offer")
     if bid is None or offer is None:
-        logger.warning("Market prices unavailable for %s", epic)
-        return _ok_response({"status": "error", "message": "price_unavailable"})
+        logger.warning("[cid=%s] Market prices unavailable for %s", cid, epic)
+        return _ok_response({"status": "error", "message": "price_unavailable", "epic": epic, "missing_fields": [f for f in ("bid", "offer") if snapshot.get(f) is None], "cid": cid})
 
     entry_price = float(offer) if str(action).strip().lower() == "buy" else float(bid)
-    logger.debug("Entry price (actual): %s", entry_price)
+    logger.debug("[cid=%s] Entry price (actual): %s", cid, entry_price)
 
     size_info = calculate_size(entry_price=entry_price, sl_price=sl_price, tp_price=tp_price, direction=action, symbol=symbol)
     if size_info.get("blocked"):
-        logger.info("Sizing blocked: %s", size_info.get("reason"))
-        return _ok_response({"status": "blocked", "reason": size_info.get("reason")})
+        logger.info("[cid=%s] Sizing blocked: %s", cid, size_info.get("reason"))
+        return _ok_response({"status": "blocked", "reason": size_info.get("reason"), "sl": sl_price, "tp": tp_price, "entry": entry_price, "cid": cid})
 
     size = size_info.get("size")
-    logger.info("Final SL=%s TP=%s SIZE=%s", sl_price, tp_price, size)
+    logger.info("[cid=%s] Final SL=%s TP=%s SIZE=%s", cid, sl_price, tp_price, size)
 
     try:
         result = place_order(epic, action, size, sl_price, tp_price, timeframe=timeframe)
     except Exception:
-        logger.exception("place_order raised an exception")
-        return _ok_response({"status": "error", "message": "order_failed"})
+        logger.exception("[cid=%s] place_order raised an exception", cid)
+        return _ok_response({"status": "error", "message": "order_failed", "cid": cid})
 
     session.update_last_trade()
-    return _ok_response({"status": "ok", "result": result})
+    return _ok_response({"status": "ok", "result": result, "cid": cid})
 
 
-# Debug and other routes unchanged below
+# ---------------------------------------------------------------------------
+# Debug and utility routes
+# ---------------------------------------------------------------------------
 @app.route("/debug/tokens")
 def debug_tokens():
     try:
@@ -288,7 +436,7 @@ def debug_epic(symbol):
 
 @app.route("/debug/market/<epic>")
 def debug_market(epic):
-    r = session.request("GET", f"{API_MARKET}/{epic}")
+    r = session.request("GET", f"{API_MARKET}/{epic}", timeout=BROKER_API_TIMEOUT)
     if not r:
         return jsonify({"error": "no response"}), 500
     try:
@@ -324,12 +472,12 @@ def debug_order(epic, action, size):
 def debug_close_test(deal_id):
     from config import API_POSITIONS
     url1 = f"{API_POSITIONS}/{deal_id}/close"
-    r1 = session.request("POST", url1, json={})
+    r1 = session.request("POST", url1, json={}, timeout=BROKER_API_TIMEOUT)
     s1 = getattr(r1, "status_code", None)
     t1 = getattr(r1, "text", None)
     url2 = f"{API_POSITIONS}/close-position"
     payload = {"dealId": deal_id, "dealReference": f"p_{deal_id}"}
-    r2 = session.request("PUT", url2, json=payload)
+    r2 = session.request("PUT", url2, json=payload, timeout=BROKER_API_TIMEOUT)
     s2 = getattr(r2, "status_code", None)
     t2 = getattr(r2, "text", None)
     return jsonify({
@@ -340,7 +488,7 @@ def debug_close_test(deal_id):
 @app.route("/debug/history")
 def debug_history():
     from config import API_HISTORY_TRANSACTIONS
-    r = session.request("GET", f"{API_HISTORY_TRANSACTIONS}?max=200")
+    r = session.request("GET", f"{API_HISTORY_TRANSACTIONS}?max=200", timeout=BROKER_API_TIMEOUT)
     return jsonify(r.json() if r else {"error": "no response"}), 200
 
 @app.route("/raw")
@@ -350,7 +498,7 @@ def raw_positions():
 
 @app.route("/raw/account")
 def raw_account():
-    r = session.request("GET", API_ACCOUNTS)
+    r = session.request("GET", API_ACCOUNTS, timeout=BROKER_API_TIMEOUT)
     return jsonify(r.json() if r else {}), 200
 
 @app.route("/")
@@ -358,24 +506,22 @@ def root():
     return redirect("/dashboard")
 
 
-# ============================
-# BOOTSTRAP
-# ============================
+# ---------------------------------------------------------------------------
+# Bootstrap
+# ---------------------------------------------------------------------------
 def _start_app():
-    # Ensure auth token before starting scheduler
-    backoff = 5
-    for _ in range(6):
+    """Obtain an auth token and start the background scheduler."""
+    for attempt in range(AUTH_RETRY_COUNT):
         try:
             if auth.ensure_token():
-                logger.info("Auth token ensured.")
+                logger.info("Auth token ensured (attempt %d).", attempt + 1)
                 break
         except Exception:
-            logger.exception("Auth ensure_token failed; retrying in %s seconds", backoff)
-        time.sleep(backoff)
+            logger.exception("Auth ensure_token failed (attempt %d); retrying in %s seconds", attempt + 1, AUTH_RETRY_BACKOFF)
+        time.sleep(AUTH_RETRY_BACKOFF)
     else:
-        logger.warning("Auth token could not be ensured before startup; continuing anyway.")
+        logger.warning("Auth token could not be ensured after %d attempts; continuing anyway.", AUTH_RETRY_COUNT)
 
-    # Start scheduler (idempotent)
     try:
         start_scheduler()
         logger.info("Scheduler started.")
