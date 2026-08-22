@@ -371,3 +371,41 @@ class TestComputeAnalytics:
         ]
         result = compute_analytics(filter_completed(trades))
         assert result["trade_count"] == 1
+
+
+class TestProtectedRoutes:
+    def test_debug_route_requires_dashboard_auth(self):
+        import webhook
+        client = webhook.app.test_client()
+
+        response = client.get("/debug/tokens")
+
+        assert response.status_code == 302
+        assert response.headers["Location"].endswith("/dashboard/login")
+
+    def test_raw_route_requires_dashboard_auth(self):
+        import webhook
+        client = webhook.app.test_client()
+
+        response = client.get("/raw")
+
+        assert response.status_code == 302
+        assert response.headers["Location"].endswith("/dashboard/login")
+
+
+class TestDashboardCloseDisabled:
+    def test_close_endpoint_is_disabled_but_available(self):
+        from flask import Flask
+        from dashboard import dashboard
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+
+        response = client.post("/dashboard/close/D1")
+        data = response.get_json()
+
+        assert response.status_code == 200
+        assert data["status"] == "disabled"
+        assert "disabled" in data["message"].lower()
