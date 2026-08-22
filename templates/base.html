@@ -166,16 +166,41 @@
                 <div class="metrics-row">
                     <div class="metric">
                         <div class="metric-label">Win Rate</div>
-                        <div class="metric-value">{{ analytics.win_rate if analytics.win_rate is not none else '—' }}%</div>
+                        <div class="metric-value metric-neutral">
+                            {{ analytics.win_rate is not none and analytics.win_rate or '—' }}%
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Expectancy / Trade</div>
+                        <div class="metric-value {% if analytics.expectancy is not none and analytics.expectancy >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+                            {{ analytics.expectancy is not none and analytics.expectancy or '—' }}
+                        </div>
                     </div>
                     <div class="metric">
                         <div class="metric-label">Trades</div>
-                        <div class="metric-value">{{ analytics.trade_count }}</div>
+                        <div class="metric-value metric-neutral">
+                            {{ analytics.trade_count|default('—') }}
+                        </div>
                     </div>
+                </div>
+
+                <div class="metrics-row" style="margin-top: 10px;">
                     <div class="metric">
                         <div class="metric-label">Profit / Loss (GBP)</div>
-                        <div class="metric-value {% if analytics.total_pl and analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
-                            {{ analytics.total_pl if analytics.total_pl is not none else '—' }}
+                        <div class="metric-value {% if analytics.total_pl is not none and analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+                            {{ analytics.total_pl is not none and analytics.total_pl or '—' }}
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Max Drawdown</div>
+                        <div class="metric-value metric-bad">
+                            {{ analytics.max_drawdown|default('—') }}
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Average Win / Loss</div>
+                        <div class="metric-value metric-neutral">
+                            W {{ analytics.avg_win|default('—') }} / L {{ analytics.avg_loss|default('—') }}
                         </div>
                     </div>
                 </div>
@@ -186,10 +211,11 @@
                     <div class="card-title">Account & Open Positions</div>
                 </div>
 
+                {% if positions %}
                 <table class="table">
                     <thead>
                         <tr>
-                            <th>Symbol</th>
+                            <th>Stock</th>
                             <th>Side</th>
                             <th>Size</th>
                             <th>Entry</th>
@@ -203,21 +229,33 @@
                         {% for p in positions %}
                         <tr>
                             <td>{{ p.ticker or p.epic or '—' }}</td>
-                            <td><span class="pill {% if p.direction == 'Long' %}pill-long{% else %}pill-short{% endif %}">{{ p.direction or p.side or '—' }}</span></td>
-                            <td>{{ p.size or '—' }}</td>
-                            <td>{{ p.price or p.entry_price or '—' }}</td>
-                            <td>{{ p.current_price or '—' }}</td>
-                            <td>{{ p.stopLevel or '—' }} / {{ p.limitLevel or '—' }}</td>
-                            <td class="{% if p.profit is not none and p.profit >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
-                                {{ p.profit if p.profit is not none else '—' }}
+                            <td>
+                                {% set dir = p.direction or p.side %}
+                                {% if dir == 'Long' %}
+                                    <span class="pill pill-long">Long</span>
+                                {% elif dir == 'Short' %}
+                                    <span class="pill pill-short">Short</span>
+                                {% else %}
+                                    <span class="pill pill-status">{{ dir or '—' }}</span>
+                                {% endif %}
                             </td>
-                            <td><button onclick="closePosition('{{ p.dealId or p.id }}')">Close</button></td>
+                            <td>{{ p.size|default('—') }}</td>
+                            <td>{{ p.entry_price is not none and p.entry_price or p.price|default('—') }}</td>
+                            <td>{{ p.current_price|default('—') }}</td>
+                            <td>{{ p.stopLevel|default('—') }} / {{ p.limitLevel|default('—') }}</td>
+                            <td class="{% if p.profit is not none and p.profit >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+                                {{ p.profit is not none and p.profit or '—' }}
+                            </td>
+                            <td>
+                                <button onclick="closePosition('{{ p.dealId or p.id }}')">Close</button>
+                            </td>
                         </tr>
-                        {% else %}
-                        <tr><td colspan="8" class="small">No open positions</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
+                {% else %}
+                <div class="small">No open positions.</div>
+                {% endif %}
             </div>
         </div>
 
@@ -227,28 +265,43 @@
                     <div class="card-title">Completed Trades</div>
                 </div>
 
+                {% if trades %}
                 <table class="table">
                     <thead>
                         <tr>
+                            <th>Entered</th>
                             <th>Exited</th>
-                            <th>Symbol</th>
+                            <th>Stock</th>
                             <th>Side</th>
                             <th>Size</th>
                             <th>Entry</th>
                             <th>Exit</th>
                             <th>PnL (GBP)</th>
-                            <th>Notes</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for t in trades %}
                         <tr>
+                            <td class="small">{{ t.time_entered_human or t.time_entered or '—' }}</td>
                             <td class="small">{{ t.time_exited_human or t.time_exited or '—' }}</td>
                             <td>{{ t.ticker or '—' }}</td>
-                            <td><span class="pill {% if t.side and t.side|lower == 'long' %}pill-long{% else %}pill-short{% endif %}">{{ t.side or '—' }}</span></td>
-                            <td>{{ t.size or '—' }}</td>
-                            <td>{{ t.entry_price if t.entry_price is not none else '—' }}</td>
-                            <td>{{ t.exit_price if t.exit_price is not none else '—' }}</td>
+                            <td>
+                                {% set side = t.side or t.direction %}
+                                {% if side == 'Long' %}
+                                    <span class="pill pill-long">Long</span>
+                                {% elif side == 'Short' %}
+                                    <span class="pill pill-short">Short</span>
+                                {% else %}
+                                    <span class="pill pill-status">{{ side or '—' }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ t.size|default('—') }}</td>
+                            <td>
+                                {{ t.entry_price is not none and t.entry_price or t.get('entryPrice') or '—' }}
+                            </td>
+                            <td>
+                                {{ t.exit_price is not none and t.exit_price or t.get('exitPrice') or '—' }}
+                            </td>
                             <td class="{% if t.pnl_gbp is not none and t.pnl_gbp >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
                                 {%- if t.pnl_gbp is not none -%}
                                     {{ t.pnl_gbp }}
@@ -258,13 +311,15 @@
                                     —
                                 {%- endif -%}
                             </td>
-                            <td class="small">{{ t.notes or '' }}</td>
                         </tr>
                         {% else %}
-                        <tr><td colspan="8" class="small">No completed trades</td></tr>
+                        <tr><td colspan="8" class="small">No completed trades.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
+                {% else %}
+                <div class="small">No completed trades.</div>
+                {% endif %}
             </div>
         </div>
     </div>
