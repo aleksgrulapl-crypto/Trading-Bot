@@ -5,7 +5,6 @@
     <div class="card">
       <div class="card-header">
         <div class="card-title">Performance Snapshot</div>
-        <div class="card-subtitle">Live metrics from completed trades</div>
       </div>
 
       <div class="metrics-row">
@@ -33,7 +32,7 @@
 
       <div class="metrics-row" style="margin-top: 10px;">
         <div class="metric">
-          <div class="metric-label">Profit / Loss</div>
+          <div class="metric-label">Profit / Loss (GBP)</div>
           <div class="metric-value {% if analytics.total_pl is not none and analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
             {{ analytics.total_pl is not none and analytics.total_pl or '—' }}
           </div>
@@ -53,17 +52,12 @@
           </div>
         </div>
       </div>
-
-      <div class="small" style="margin-top: 10px;">
-        Story in brief: {{ analytics.story|default('Discipline and controlled losses define the curve.') }}
-      </div>
     </div>
 
     <!-- Account & Open Positions -->
     <div class="card">
       <div class="card-header">
         <div class="card-title">Account & Open Positions</div>
-        <div class="card-subtitle">Live positions from Capital.com</div>
       </div>
 
       {% if positions %}
@@ -76,7 +70,7 @@
             <th>Entry</th>
             <th>Current</th>
             <th>SL / TP</th>
-            <th>PnL</th>
+            <th>PNL (GBP)</th>
             <th></th>
           </tr>
         </thead>
@@ -102,7 +96,7 @@
               {{ p.profit is not none and p.profit or '—' }}
             </td>
             <td>
-              <a href="/dashboard/close/{{ p.dealId or p.id }}" class="pill pill-status">Close</a>
+              <button onclick="closePosition('{{ p.dealId or p.id }}')">Close</button>
             </td>
           </tr>
           {% endfor %}
@@ -115,11 +109,10 @@
   </div>
 
   <!-- Completed Trades -->
-  <div class="grid-full">
+  <div class="grid-full" style="margin-top:16px;">
     <div class="card">
       <div class="card-header">
         <div class="card-title">Completed Trades</div>
-        <div class="card-subtitle">Capital + Excel imported trades</div>
       </div>
 
       {% if trades %}
@@ -131,9 +124,9 @@
             <th>Ticker</th>
             <th>Side</th>
             <th>Size</th>
-            <th>Entry / Exit</th>
-            <th>PNL (USD)</th>
-            <th>PNL (GBP)</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>PnL (GBP)</th>
           </tr>
         </thead>
         <tbody>
@@ -155,11 +148,9 @@
             <td>{{ t.size|default('—') }}</td>
             <td>
               {{ t.entry_price is not none and t.entry_price or t.get('entryPrice') or '—' }}
-              →
-              {{ t.exit_price is not none and t.exit_price or t.get('exitPrice') or '—' }}
             </td>
-            <td class="{% if t.pnl is not none and t.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
-              {{ t.pnl is not none and t.pnl or '—' }}
+            <td>
+              {{ t.exit_price is not none and t.exit_price or t.get('exitPrice') or '—' }}
             </td>
             <td class="{% if t.pnl_gbp is not none and t.pnl_gbp >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
               {%- if t.pnl_gbp is not none -%}
@@ -175,7 +166,7 @@
         </tbody>
       </table>
       {% else %}
-      <div class="small">No completed trades yet.</div>
+      <div class="small">No completed trades.</div>
       {% endif %}
     </div>
   </div>
