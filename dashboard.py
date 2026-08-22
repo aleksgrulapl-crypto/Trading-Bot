@@ -395,34 +395,12 @@ def dashboard_data():
 @dashboard.route("/dashboard/close/<position_id>", methods=["POST"])
 @login_required
 def dashboard_close_position(position_id: str):
-    """Close a live position via the dashboard UI.
-
-    Delegates to close_position.close_position() and returns JSON.
-    Internal error details are logged but NOT forwarded to the client.
-    """
-    try:
-        from close_position import close_position as _close
-        result = _close(position_id)
-        # Only return the status and a safe message – never forward internal
-        # exception details or stack traces to the client.
-        safe_result = {
-            "status": result.get("status", "error"),
-            # Use a fixed, safe message string rather than forwarding the
-            # internal broker/exception message directly to the client.
-            "message": (
-                f"Position {position_id} closed successfully."
-                if result.get("status") == "success"
-                else "close_position_failed"
-            ),
-        }
-        if result.get("warning"):
-            safe_result["warning"] = "Trade log update incomplete; position was closed by broker."
-        status_code = 200 if safe_result["status"] == "success" else 500
-        return jsonify(safe_result), status_code
-    except Exception as exc:
-        logger.exception("dashboard: close_position raised for %s", position_id)
-        # Return a generic error message – do not leak the exception string.
-        return jsonify({"status": "error", "message": "close_position_failed"}), 500
+    """Keep the Close button visible, but disable position-closing from the dashboard."""
+    logger.info("dashboard: close action disabled for %s", position_id)
+    return jsonify({
+        "status": "disabled",
+        "message": "Closing positions from the dashboard is currently disabled.",
+    }), 200
 
 
 # -----------------------------

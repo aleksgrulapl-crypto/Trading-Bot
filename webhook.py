@@ -14,6 +14,7 @@ import time
 import uuid
 import json
 import logging
+import functools
 from typing import Any, Dict, Optional
 
 from flask import Flask, request, jsonify, render_template, redirect
@@ -117,6 +118,14 @@ if not logger.handlers:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _dashboard_login_required(view):
+    @functools.wraps(view)
+    def wrapper(*args, **kwargs):
+        if not request.cookies.get("dashboard_auth"):
+            return redirect("/dashboard/login")
+        return view(*args, **kwargs)
+    return wrapper
 
 def _safe_get_json(raw_text: str) -> Any:
     try:
@@ -416,6 +425,7 @@ def webhook():
 # Debug and utility routes
 # ---------------------------------------------------------------------------
 @app.route("/debug/tokens")
+@_dashboard_login_required
 def debug_tokens():
     try:
         ok = auth.ensure_token()
@@ -430,11 +440,13 @@ def debug_tokens():
         return jsonify({"error": "ensure_token_failed"}), 500
 
 @app.route("/debug/epic/<symbol>")
+@_dashboard_login_required
 def debug_epic(symbol):
     data = session.verify_epic(symbol)
     return jsonify(data), 200
 
 @app.route("/debug/market/<epic>")
+@_dashboard_login_required
 def debug_market(epic):
     r = session.request("GET", f"{API_MARKET}/{epic}", timeout=BROKER_API_TIMEOUT)
     if not r:
@@ -445,12 +457,14 @@ def debug_market(epic):
         return jsonify({"error": "invalid_json"}), 500
 
 @app.route("/debug/positions")
+@_dashboard_login_required
 def debug_positions():
     raw = session.get_positions()
     enriched = session.enrich_positions(raw)
     return jsonify({"raw": raw, "enriched": enriched}), 200
 
 @app.route("/debug/sizing/<symbol>/<action>/<price>/<sl>/<tp>")
+@_dashboard_login_required
 def debug_sizing(symbol, action, price, sl, tp):
     try:
         info = calculate_size(entry_price=float(price), sl_price=float(sl), tp_price=float(tp), direction=action, symbol=symbol)
@@ -460,6 +474,7 @@ def debug_sizing(symbol, action, price, sl, tp):
         return jsonify({"error": "invalid_parameters"}), 400
 
 @app.route("/debug/order/<epic>/<action>/<size>")
+@_dashboard_login_required
 def debug_order(epic, action, size):
     try:
         result = place_order(epic, action, float(size))
@@ -469,6 +484,7 @@ def debug_order(epic, action, size):
         return jsonify({"error": "order_failed"}), 500
 
 @app.route("/debug/close-test/<deal_id>", methods=["GET"])
+@_dashboard_login_required
 def debug_close_test(deal_id):
     from config import API_POSITIONS
     url1 = f"{API_POSITIONS}/{deal_id}/close"
@@ -486,17 +502,20 @@ def debug_close_test(deal_id):
     }), 200
 
 @app.route("/debug/history")
+@_dashboard_login_required
 def debug_history():
     from config import API_HISTORY_TRANSACTIONS
     r = session.request("GET", f"{API_HISTORY_TRANSACTIONS}?max=200", timeout=BROKER_API_TIMEOUT)
     return jsonify(r.json() if r else {"error": "no response"}), 200
 
 @app.route("/raw")
+@_dashboard_login_required
 def raw_positions():
     raw = session.get_positions()
     return jsonify(raw)
 
 @app.route("/raw/account")
+@_dashboard_login_required
 def raw_account():
     r = session.request("GET", API_ACCOUNTS, timeout=BROKER_API_TIMEOUT)
     return jsonify(r.json() if r else {}), 200

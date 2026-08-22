@@ -329,8 +329,15 @@
 let isFirstLoad = true;
 
 function closePosition(dealId) {
-    fetch(`/close/${dealId}`, { method: "POST" })
-        .then(() => refreshDashboard())
+    const errorBanner = document.getElementById('error-banner');
+
+    fetch(`/dashboard/close/${encodeURIComponent(dealId)}`, { method: "POST" })
+        .then(r => r.json())
+        .then(data => {
+            errorBanner.innerText = (data && data.message) || "Close action is disabled.";
+            errorBanner.style.display = "block";
+            refreshDashboard();
+        })
         .catch(err => console.error("Close error:", err));
 }
 
