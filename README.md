@@ -1,3 +1,3 @@
-<<<<<<< HEAD
-=======
->>>>>>> bb11a2f9fe0fcb21ceda481eca77bf913a02b426
+# Trading Bot
+
+A Python-based cryptocurrency trading bot with dashboard and trade logging capabilities.
