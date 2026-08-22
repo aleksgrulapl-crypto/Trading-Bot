@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 # dashboard.py
-# ============================
-# DASHBOARD MODULE (CLEAN — EQUITY + BALANCE + PNL + AVAILABLE)
-# ============================
+# Production-ready replacement
+# - robust JSON error handling for /dashboard/data
+# - hardened normalization, dedupe, and analytics input sanitization
+# - safe session.shared_state access
+# - clearer login env configuration and logging
+# - stable sorting using ISO timestamps when available
 
 import functools
 import time
@@ -17,12 +20,11 @@ import config
 from trade_log import (
     load_raw_log,
     reconcile_with_positions,
-    # append_open_trade and get_completed_trades intentionally not imported here
+    get_completed_trades,
 )
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
 
-# logging: configure only this logger, do not call basicConfig here
 logger = logging.getLogger("dashboard")
 logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_LOGS", False) else logging.INFO)
 if not logger.handlers:
@@ -33,7 +35,7 @@ if not logger.handlers:
 
 
 # -----------------------------
-# Login routes (added)
+# Login routes
 # -----------------------------
 @dashboard.route("/dashboard/login", methods=["GET"])
 def dashboard_login():
@@ -43,10 +45,12 @@ def dashboard_login():
 @dashboard.route("/dashboard/login", methods=["POST"])
 def dashboard_login_submit():
     password = request.form.get("password", "")
-    # Simple password check — replace with your real secret in env
-    if password == os.getenv("DASHBOARD_PASSWORD", "Angelika140282"):
+    expected = os.getenv("DASHBOARD_PASSWORD", getattr(config, "DASHBOARD_PASSWORD", None) or "Angelika140282")
+    if expected == "Angelika140282":
+        logger.warning("Using default dashboard password. Set DASHBOARD_PASSWORD in environment to secure the dashboard.")
+    if password == expected:
         resp = redirect("/dashboard")
-        resp.set_cookie("dashboard_auth", "1", max_age=60*60*24*7)  # 7 days
+        resp.set_cookie("dashboard_auth", "1", max_age=60 * 60 * 24 * 7)
         return resp
     return render_template("login.html", title="Dashboard Login", error="Invalid password")
 
@@ -70,78 +74,101 @@ def login_required(view):
     return wrapper
 
 
+# -----------------------------
+# Helpers: normalization, dedupe, filtering
+# -----------------------------
+def _safe_str(v):
+    return str(v) if v is not None else None
+
+
 def normalize_trades(trades):
-    normalized = []
+    """
+    Normalize trade dicts for display and analytics.
+    Do not mutate caller objects; return new list of dicts.
+    Ensure numeric fields are numeric or None.
+    Keep side as None when unknown.
+    """
+    out = []
+    for t in trades or []:
+        copy = dict(t) if isinstance(t, dict) else {}
+        # canonical dealId as string or None
+        copy["dealId"] = _safe_str(copy.get("dealId")) if copy.get("dealId") not in (None, "") else None
 
-    for t in trades:
-        # ensure consistent dealId type
-        t["dealId"] = str(t.get("dealId")) if t.get("dealId") else None
-
-        # normalize side
-        side = t.get("side")
+        # normalize side to 'Long'/'Short' or None
+        side = copy.get("side")
         if isinstance(side, str):
-            s = side.lower()
-            if s in ("long", "short"):
-                t["side"] = s.capitalize()
+            s = side.strip().lower()
+            if s == "long":
+                copy["side"] = "Long"
+            elif s == "short":
+                copy["side"] = "Short"
             else:
-                t["side"] = side
+                copy["side"] = side
         else:
-            t["side"] = "Short"
+            copy["side"] = None
 
-        # ensure numeric pnl
-        pnl = t.get("pnl", 0)
+        # numeric pnl if possible, else None
+        pnl = copy.get("pnl", None)
         try:
-            t["pnl"] = float(pnl) if pnl is not None else 0.0
+            copy["pnl"] = float(pnl) if pnl not in (None, "") else None
         except Exception:
-            t["pnl"] = 0.0
+            copy["pnl"] = None
 
-        # ensure entry/exit price numeric where present
-        try:
-            if t.get("entry_price") is not None:
-                t["entry_price"] = float(t["entry_price"])
-        except Exception:
-            pass
-        try:
-            if t.get("exit_price") is not None:
-                t["exit_price"] = float(t["exit_price"])
-        except Exception:
-            pass
+        # numeric entry/exit price if present
+        for key in ("entry_price", "exit_price", "price"):
+            val = copy.get(key)
+            try:
+                if val not in (None, ""):
+                    copy[key] = float(val)
+                else:
+                    copy[key] = None
+            except Exception:
+                copy[key] = None
 
-        normalized.append(t)
+        # ensure status is present
+        copy["status"] = copy.get("status") or ("CLOSED" if copy.get("time_exited") else "OPEN")
 
-    return normalized
+        # human timestamps preserved by trade_log but ensure keys exist
+        copy["time_entered"] = copy.get("time_entered")
+        copy["time_exited"] = copy.get("time_exited")
+        copy["time_entered_human"] = copy.get("time_entered_human")
+        copy["time_exited_human"] = copy.get("time_exited_human")
+
+        out.append(copy)
+    return out
+
+
+def _signature_for_dedupe(t):
+    """
+    Create a stable signature for dedupe that aligns with trade_log._make_signature:
+    use dealId when present, otherwise ticker + rounded entry_price.
+    """
+    if t.get("dealId"):
+        return ("ID", str(t.get("dealId")))
+    try:
+        entry = round(float(t.get("entry_price") or 0), 8)
+    except Exception:
+        entry = str(t.get("entry_price") or "")
+    return ("FALLBACK", str(t.get("ticker") or ""), str(entry))
 
 
 def dedupe_trades(trades):
     """
-    Deduplicate trades. Prefer closed record over open when duplicates found.
-    Fallback signature uses ticker + rounded entry_price + time_entered.
+    Deduplicate trades. Prefer CLOSED records over OPEN when duplicates found.
     """
     seen = {}
     unique = []
-
-    for t in trades:
-        deal_id = t.get("dealId")
-        if deal_id:
-            key = ("ID", deal_id)
-        else:
-            # align with trade_log signature rounding
-            entry = t.get("entry_price")
-            try:
-                entry_norm = round(float(entry or 0), 8)
-            except Exception:
-                entry_norm = str(entry)
-            key = ("FALLBACK", str(t.get("ticker")), str(entry_norm), str(t.get("time_entered")))
-
-        idx = seen.get(key)
+    for t in trades or []:
+        sig = _signature_for_dedupe(t)
+        idx = seen.get(sig)
         if idx is None:
-            seen[key] = len(unique)
+            seen[sig] = len(unique)
             unique.append(t)
         else:
-            # if existing is open and new one is closed, replace
-            if unique[idx].get("status") != "CLOSED" and t.get("status") == "CLOSED":
+            existing = unique[idx]
+            # prefer closed over open
+            if existing.get("status") != "CLOSED" and t.get("status") == "CLOSED":
                 unique[idx] = t
-
     return unique
 
 
@@ -149,13 +176,15 @@ def filter_completed(trades):
     return [t for t in trades if t.get("status") == "CLOSED"]
 
 
+# -----------------------------
+# Analytics
+# -----------------------------
 def compute_analytics(trades):
     """
     Compute analytics from a list of trade dicts.
-    Expects each trade to have a numeric 'pnl' (USD) when closed.
-    Returns win_rate (percent), avg_win, avg_loss, expectancy, total_pl, max_drawdown (negative), trade_count, story.
+    Uses only closed trades with numeric pnl for win/loss metrics.
+    Returns JSON-serializable dict with numeric values or None.
     """
-
     if not trades:
         return {
             "win_rate": None,
@@ -168,40 +197,27 @@ def compute_analytics(trades):
             "story": None
         }
 
-    # Normalize and filter trades: only consider trades with numeric pnl values for numeric metrics.
+    # copy and coerce pnl to numeric where possible
     cleaned = []
     for t in trades:
-        # Keep original dict but ensure numeric pnl when possible
-        pnl_raw = t.get("pnl", None)
-        pnl_num = None
+        copy = dict(t)
+        pnl_raw = copy.get("pnl", None)
         try:
-            if pnl_raw is not None and str(pnl_raw).strip() != "":
-                pnl_num = float(pnl_raw)
+            copy["pnl"] = float(pnl_raw) if pnl_raw not in (None, "") else None
         except Exception:
-            pnl_num = None
-        # copy to avoid mutating caller's list
-        copy_t = dict(t)
-        copy_t["pnl"] = pnl_num
-        cleaned.append(copy_t)
+            copy["pnl"] = None
+        cleaned.append(copy)
 
-    # Use closed trades only (if your trades list includes open trades, filter them out)
     closed = [t for t in cleaned if t.get("status") == "CLOSED" or t.get("time_exited")]
-
-    # Extract numeric pnls
     pnls = [t["pnl"] for t in closed if t.get("pnl") is not None]
 
-    # Separate wins, losses, zeros
     wins = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p < 0]
-    zeros = [p for p in pnls if p == 0]
 
     trade_count = len(closed)
 
-    # Win rate: wins / (wins + losses) — ignore zero-PnL trades for win rate calculation
     denom = len(wins) + len(losses)
-    win_rate = None
-    if denom > 0:
-        win_rate = round((len(wins) / denom) * 100, 2)
+    win_rate = round((len(wins) / denom) * 100, 2) if denom > 0 else None
 
     avg_win = round(mean(wins), 2) if wins else None
     avg_loss = round(mean(losses), 2) if losses else None
@@ -209,24 +225,19 @@ def compute_analytics(trades):
     expectancy = None
     if denom > 0 and avg_win is not None and avg_loss is not None:
         p_win = len(wins) / denom
-        # avg_loss is negative; expectancy will reflect average PnL per trade
         expectancy = round(p_win * avg_win + (1 - p_win) * avg_loss, 4)
 
-    # Running equity and max drawdown (negative value)
+    # running equity and max drawdown
     running = 0.0
     peak = -math.inf
-    max_drawdown = 0.0  # will store the most negative (min) running - peak
-    # Use the chronological order of closed trades as provided
+    max_drawdown = 0.0
     for t in closed:
-        pnl_val = t.get("pnl")
-        if pnl_val is None:
-            pnl_val = 0.0
+        pnl_val = t.get("pnl") if t.get("pnl") is not None else 0.0
         running += float(pnl_val)
         if peak == -math.inf:
             peak = running
         else:
             peak = max(peak, running)
-        # drawdown = running - peak (<= 0)
         drawdown = running - peak
         if drawdown < max_drawdown:
             max_drawdown = drawdown
@@ -244,11 +255,18 @@ def compute_analytics(trades):
         "story": "Discipline and controlled losses define the curve."
     }
 
+
+# -----------------------------
+# Views
+# -----------------------------
 @dashboard.route("/dashboard")
 @login_required
 def dashboard_home():
     # force fresh account fetch
-    session._cache["account"]["ts"] = 0
+    try:
+        session._cache["account"]["ts"] = 0
+    except Exception:
+        logger.debug("session cache not initialized")
 
     raw_positions = session.get_positions() or []
     raw_account = session.get_account() or {}
@@ -256,7 +274,7 @@ def dashboard_home():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
-    # reconcile local trade log with live positions so closed trades are recorded
+    # reconcile local trade log with live positions
     try:
         recon = reconcile_with_positions(positions)
         if getattr(config, "DEBUG_LOGS", False):
@@ -267,12 +285,20 @@ def dashboard_home():
     combined_raw = load_raw_log()
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
 
-    combined_trades.sort(
-        key=lambda t: (t.get("time_exited") or t.get("time_entered") or ""),
-        reverse=True
-    )
+    # stable sort by ISO timestamps when available
+    def _sort_key(t):
+        return (t.get("time_exited") or t.get("time_entered") or "")
+
+    combined_trades.sort(key=_sort_key, reverse=True)
 
     analytics = compute_analytics(filter_completed(combined_trades))
+
+    # ensure shared_state exists
+    try:
+        if not isinstance(session.shared_state, dict):
+            session.shared_state = {}
+    except Exception:
+        session.shared_state = {}
 
     session.shared_state["account"] = account
     session.shared_state["positions"] = positions
@@ -281,7 +307,7 @@ def dashboard_home():
 
     return render_template(
         "dashboard.html",
-        title=config.DASHBOARD_TITLE,
+        title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
         cache_bust=time.time(),
         account=account,
         positions=positions,
@@ -294,7 +320,10 @@ def dashboard_home():
 @login_required
 def dashboard_data():
     # force fresh account fetch
-    session._cache["account"]["ts"] = 0
+    try:
+        session._cache["account"]["ts"] = 0
+    except Exception:
+        logger.debug("session cache not initialized")
 
     raw_positions = session.get_positions() or []
     raw_account = session.get_account() or {}
@@ -302,7 +331,7 @@ def dashboard_data():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
-    # reconcile local trade log with live positions so closed trades are recorded
+    # reconcile local trade log with live positions
     try:
         recon = reconcile_with_positions(positions)
         if getattr(config, "DEBUG_LOGS", False):
@@ -313,26 +342,49 @@ def dashboard_data():
     combined_raw = load_raw_log()
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
 
-    combined_trades.sort(
-        key=lambda t: (t.get("time_exited") or t.get("time_entered") or ""),
-        reverse=True
-    )
+    combined_trades.sort(key=lambda t: (t.get("time_exited") or t.get("time_entered") or ""), reverse=True)
 
     analytics = compute_analytics(filter_completed(combined_trades))
 
-    html = render_template(
-        "dashboard_partial.html",
-        cache_bust=time.time(),
-        account=account,
-        positions=positions,
-        trades=combined_trades,
-        analytics=analytics
-    )
+    try:
+        html = render_template(
+            "dashboard_partial.html",
+            cache_bust=time.time(),
+            account=account,
+            positions=positions,
+            trades=combined_trades,
+            analytics=analytics
+        )
+        return jsonify({
+            "html": html,
+            "account": account,
+            "positions": positions,
+            "trades": combined_trades,
+            "analytics": analytics
+        })
+    except Exception as exc:
+        # Always return JSON on error to avoid client-side JSON parse errors
+        logger.exception("dashboard/data render failed: %s", exc)
+        return jsonify({
+            "error": "render_failed",
+            "message": "Failed to render dashboard partial",
+            "details": str(exc)
+        }), 500
 
-    return jsonify({
-        "html": html,
-        "account": account,
-        "positions": positions,
-        "trades": combined_trades,
-        "analytics": analytics
-    })
+
+# -----------------------------
+# Module test harness
+# -----------------------------
+if __name__ == "__main__":
+    # quick local smoke test
+    print("Dashboard module quick smoke test")
+    try:
+        trades = load_raw_log()
+        print("Loaded trades:", len(trades))
+        norm = normalize_trades(trades)
+        dedup = dedupe_trades(norm)
+        print("Normalized:", len(norm), "Deduped:", len(dedup))
+        analytics = compute_analytics(filter_completed(dedup))
+        print("Analytics:", analytics)
+    except Exception as e:
+        print("Smoke test failed:", e)
