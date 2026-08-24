@@ -175,6 +175,21 @@ def _first_not_none(*values):
     return None
 
 
+def _normalize_source(payload: Dict[str, Any], dealId: Optional[str], dealReference: Optional[str], side: Optional[str]) -> str:
+    raw_origin = payload.get("origin") or payload.get("source") or payload.get("trade_source") or payload.get("tradeSource")
+    if raw_origin:
+        return str(raw_origin).strip().lower()
+    if payload.get("webhook") is True or payload.get("cid") or payload.get("alert_id"):
+        return "webhook"
+    if payload.get("manual") is True:
+        return "manual"
+    if dealId is not None or dealReference is not None:
+        return "bot"
+    if side in ("long", "short"):
+        return "manual"
+    return "unknown"
+
+
 def _validate_webhook_payload(payload: Dict[str, Any]) -> Optional[str]:
     """Return an error string if the payload is obviously malformed, else None.
 
@@ -231,17 +246,9 @@ def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str,
     """Idempotent processing:
     - Upsert opens via trade_log.upsert_open_trade
     - Close via trade_log.close_trade_by_dealId when exit present
-
-    Args:
-        payload: Raw (dict) broker payload.
-        cid:     Correlation ID for log tracing.
-
-    Returns:
-        dict with keys "action" and "trade" (or "reason" on rejection).
     """
     log_prefix = f"[cid={cid}] " if cid else ""
 
-    # Validate incoming payload before processing
     validation_error = _validate_webhook_payload(payload)
     if validation_error:
         logger.warning("%sprocess_webhook_payload: validation failed – %s", log_prefix, validation_error)
@@ -253,24 +260,26 @@ def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str,
     dealId = pos.get("dealId") or pos.get("id") or payload.get("dealId")
     dealReference = pos.get("dealReference") or payload.get("dealReference")
     ticker = market.get("symbol") or market.get("epic") or pos.get("instrument") or payload.get("ticker")
-    side = pos.get("direction") or payload.get("side")
+    side_raw = pos.get("direction") or payload.get("side")
+    side = str(side_raw).strip().lower() if side_raw is not None else None
     size = pos.get("size") or pos.get("contractSize") or payload.get("size")
     entry_price = pos.get("level") or pos.get("entryPrice") or payload.get("entry_price") or payload.get("entryPrice")
     exit_price = payload.get("price") or payload.get("exit_price") or payload.get("closePrice")
     time_entered = pos.get("createdDate") or pos.get("createdDateUTC") or payload.get("time_entered")
     time_exited = payload.get("closedDate") or payload.get("time_exited") or payload.get("timestamp")
+    source = _normalize_source(payload, dealId, dealReference, side)
 
     logger.debug("%sExtracted fields: dealId=%s ticker=%s side=%s size=%s entry=%s exit=%s",
                  log_prefix, dealId, ticker, side, size, entry_price, exit_price)
 
-    # If this payload looks like a close-only event with dealId, prefer closing
     if dealId and exit_price not in (None, ""):
-        closed = close_trade_by_dealId(dealId, exit_price=exit_price, time_exited=time_exited, note="Closed via webhook")
+        closed = close_trade_by_dealId(dealId, exit_price=exit_price, time_exited=time_exited, note=f"Closed via webhook ({source})")
         if closed:
+            closed["trade_source"] = source
+            closed["origin"] = source
             logger.info("%sClosed trade dealId=%s exit_price=%s", log_prefix, dealId, exit_price)
             return {"action": "closed", "trade": closed}
 
-    # Upsert open (will reject malformed payloads via trade_log validation)
     upsert_payload = {
         "dealId": dealId,
         "dealReference": dealReference,
@@ -279,18 +288,21 @@ def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str,
         "size": size,
         "entry_price": entry_price,
         "time_entered": time_entered,
-        "notes": payload.get("notes") or "Imported from webhook"
+        "notes": payload.get("notes") or f"Imported from webhook ({source})",
+        "trade_source": source,
+        "origin": source,
     }
     upserted = upsert_open_trade(upsert_payload)
     if upserted:
-        logger.info("%sUpserted open trade dealId=%s ticker=%s", log_prefix, dealId, ticker)
-        # If payload also contains exit info (rare), close it immediately
+        logger.info("%sUpserted open trade dealId=%s ticker=%s source=%s", log_prefix, dealId, ticker, source)
         if exit_price not in (None, ""):
             if upserted.get("dealId"):
-                closed = close_trade_by_dealId(upserted.get("dealId"), exit_price=exit_price, time_exited=time_exited, note="Closed via webhook")
+                closed = close_trade_by_dealId(upserted.get("dealId"), exit_price=exit_price, time_exited=time_exited, note=f"Closed via webhook ({source})")
+                if closed:
+                    closed["trade_source"] = source
+                    closed["origin"] = source
                 return {"action": "upserted_and_closed", "trade": closed or upserted}
             else:
-                # fallback: set exit on the upserted record and save
                 trades = load_raw_log()
                 for t in trades:
                     if t is upserted or (t.get("ticker") == upserted.get("ticker") and t.get("entry_price") == upserted.get("entry_price") and t.get("status") != "CLOSED"):
@@ -300,13 +312,13 @@ def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str,
                             t["exit_price"] = exit_price
                         t["time_exited"] = time_exited
                         t["status"] = "CLOSED"
+                        t["trade_source"] = source
+                        t["origin"] = source
                         save_raw_log(trades)
                         return {"action": "upserted_and_closed_fallback", "trade": t}
         return {"action": "upserted", "trade": upserted}
 
-    # Upsert failed (malformed) – return helpful info with validation details
-    logger.warning("%sUpsert rejected – likely missing/invalid entry_price or size. "
-                   "dealId=%s ticker=%s entry_price=%s size=%s",
+    logger.warning("%sUpsert rejected – likely missing/invalid entry_price or size. dealId=%s ticker=%s entry_price=%s size=%s",
                    log_prefix, dealId, ticker, entry_price, size)
     return {
         "action": "rejected",
@@ -326,7 +338,6 @@ def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str,
 # ---------------------------------------------------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # Assign a correlation ID to every request for end-to-end tracing
     cid = str(uuid.uuid4())[:8]
     session.update_last_webhook()
 
@@ -350,7 +361,6 @@ def webhook():
         logger.warning("[cid=%s] Parser returned non-dict result", cid)
         return _ok_response({"status": "error", "message": "Parser returned invalid result", "cid": cid})
 
-    # If payload looks like broker position/history, process idempotently
     if isinstance(parsed_input, dict) and (parsed_input.get("position") or parsed_input.get("dealId") or parsed_input.get("market") or parsed_input.get("dealReference")):
         try:
             result = process_webhook_payload(parsed_input, cid=cid)
@@ -360,7 +370,6 @@ def webhook():
             logger.exception("[cid=%s] process_webhook_payload failed", cid)
             return _ok_response({"status": "error", "message": "webhook_processing_failed", "cid": cid})
 
-    # Otherwise treat as TradingView alert for order placement
     if alert.get("blocked"):
         logger.info("[cid=%s] Alert blocked: %s", cid, alert.get("reason"))
         return _ok_response({"status": "blocked", "reason": alert.get("reason"), "cid": cid})

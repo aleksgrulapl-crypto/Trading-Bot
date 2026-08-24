@@ -163,6 +163,32 @@ def _rotate_backups(base_backup_path: str) -> None:
         pass
 
 
+def _normalize_side(side: Any) -> Optional[str]:
+    if side is None:
+        return None
+    s = str(side).strip().lower()
+    if s in ("buy", "long"):
+        return "long"
+    if s in ("sell", "short"):
+        return "short"
+    return s or None
+
+
+def _detect_trade_origin(payload: Dict[str, Any], side: Optional[str], dealId: Any, dealReference: Any) -> str:
+    raw_origin = payload.get("origin") or payload.get("source") or payload.get("trade_source") or payload.get("tradeSource")
+    if raw_origin:
+        return str(raw_origin).strip().lower()
+    if payload.get("webhook") is True or payload.get("cid") or payload.get("alert_id"):
+        return "webhook"
+    if payload.get("manual") is True:
+        return "manual"
+    if dealId is not None or dealReference is not None:
+        return "bot"
+    if side in ("long", "short"):
+        return "manual"
+    return "unknown"
+
+
 # ---------------------------------------------------------------------------
 # Public I/O helpers
 # ---------------------------------------------------------------------------
@@ -208,7 +234,6 @@ def save_raw_log(trades: List[Dict[str, Any]], path: str = LOG_PATH) -> bool:
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     old = f.read()
-                # Timestamped backup so we keep a rotation of past versions
                 ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
                 stem, ext = os.path.splitext(BACKUP_PATH)
                 versioned_backup = f"{stem}_{ts}{ext}"
@@ -244,11 +269,7 @@ def _float_equal(a: Any, b: Any, tol: float = FLOAT_TOLERANCE) -> bool:
 
 
 def _compute_pnl_for_trade(trade: Dict[str, Any]) -> Optional[float]:
-    """Compute P&L for a closed trade.
-
-    Returns None when required fields are absent or not numeric, with a
-    warning explaining which field is missing.
-    """
+    """Compute P&L for a closed trade."""
     entry_raw = trade.get("entry_price")
     exit_raw = trade.get("exit_price")
     size_raw = trade.get("size", 0)
@@ -266,11 +287,13 @@ def _compute_pnl_for_trade(trade: Dict[str, Any]) -> Optional[float]:
         entry = float(entry_raw)
         exitp = float(exit_raw)
         size = float(size_raw)
-        side = (trade.get("side") or "").lower()
-        if side in ("long", "buy"):
+        side = _normalize_side(trade.get("side"))
+        if side == "long":
             pnl = (exitp - entry) * size
-        else:
+        elif side == "short":
             pnl = (entry - exitp) * size
+        else:
+            pnl = (exitp - entry) * size
         return round(pnl, 2)
     except Exception:
         logger.exception("trade_log: failed to compute pnl for trade %s",
@@ -311,11 +334,7 @@ def find_trade(dealId: Optional[str] = None, dealReference: Optional[str] = None
 
 
 def validate_trade_payload(payload: Dict[str, Any]) -> Tuple[bool, str]:
-    """Validate required trade fields.
-
-    Returns (True, "") when valid, or (False, reason) describing the first
-    validation failure found.
-    """
+    """Validate required trade fields."""
     pos = payload.get("position") or payload.get("raw") or payload
     market = payload.get("market") or (pos.get("market") if isinstance(pos, dict) else None)
 
@@ -323,7 +342,6 @@ def validate_trade_payload(payload: Dict[str, Any]) -> Tuple[bool, str]:
     size = payload.get("size") or (pos.get("size") if isinstance(pos, dict) else None) or (pos.get("contractSize") if isinstance(pos, dict) else None)
     side = payload.get("side") or (pos.get("direction") if isinstance(pos, dict) else None)
 
-    # entry_price must be a positive number
     try:
         ep = float(entry_price) if entry_price not in (None, "") else None
     except Exception:
@@ -333,7 +351,6 @@ def validate_trade_payload(payload: Dict[str, Any]) -> Tuple[bool, str]:
     if ep <= 0:
         return False, f"entry_price_not_positive (got: {ep})"
 
-    # size must be a positive number
     try:
         sz = float(size) if size not in (None, "") else None
     except Exception:
@@ -343,7 +360,6 @@ def validate_trade_payload(payload: Dict[str, Any]) -> Tuple[bool, str]:
     if sz <= 0:
         return False, f"size_not_positive (got: {sz})"
 
-    # side must be a recognized value (optional but validated when present)
     if side is not None:
         if str(side).strip().lower() not in VALID_SIDES:
             return False, f"invalid_side (got: {side!r}, expected one of {sorted(VALID_SIDES)})"
@@ -352,28 +368,20 @@ def validate_trade_payload(payload: Dict[str, Any]) -> Tuple[bool, str]:
 
 
 def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional[Dict[str, Any]]:
-    """Insert or update an open trade record.
-
-    Validates that entry_price and size are positive numbers and that side
-    (when provided) is a recognized direction string.  Returns None and logs
-    a warning when validation fails.
-
-    This function is thread-safe: it acquires the module-level lock before
-    reading, modifying, and writing the trade log.
-    """
+    """Insert or update an open trade record."""
     pos = payload.get("position") or payload.get("raw") or payload
     market = payload.get("market") or (pos.get("market") if isinstance(pos, dict) else None)
 
     dealId = payload.get("dealId") or (pos.get("dealId") if isinstance(pos, dict) else None)
     dealReference = payload.get("dealReference") or (pos.get("dealReference") if isinstance(pos, dict) else None)
     ticker = payload.get("ticker") or (market.get("symbol") if isinstance(market, dict) else None) or (pos.get("instrument") if isinstance(pos, dict) else None)
-    side = payload.get("side") or (pos.get("direction") if isinstance(pos, dict) else None)
+    side = _normalize_side(payload.get("side") or (pos.get("direction") if isinstance(pos, dict) else None))
     size = payload.get("size") or (pos.get("size") if isinstance(pos, dict) else None) or (pos.get("contractSize") if isinstance(pos, dict) else None)
     entry_price = payload.get("entry_price") or (pos.get("level") if isinstance(pos, dict) else None) or (pos.get("entryPrice") if isinstance(pos, dict) else None)
     time_entered = payload.get("time_entered") or (pos.get("createdDate") if isinstance(pos, dict) else None) or (pos.get("createdDateUTC") if isinstance(pos, dict) else None)
+    origin = _detect_trade_origin(payload, side, dealId, dealReference)
 
-    # Validate and coerce
-    valid, reason = validate_trade_payload(payload)
+    valid, reason = validate_trade_payload({**payload, "side": side})
     if not valid:
         logger.warning("upsert_open_trade: validation failed – %s (dealId=%s dealRef=%s ticker=%s)",
                        reason, dealId, dealReference, ticker)
@@ -422,6 +430,12 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
                 existing["entry_price"] = entry_val; updated = True
             if (existing.get("time_entered") in (None, "")) and time_entered:
                 existing["time_entered"] = time_entered; updated = True
+            if not existing.get("trade_source"):
+                existing["trade_source"] = existing.get("origin") or origin
+                updated = True
+            elif origin and not existing.get("origin"):
+                existing["origin"] = origin
+                updated = True
             if updated:
                 existing["time_entered_human"] = _humanize(existing.get("time_entered"))
                 save_raw_log(trades, path)
@@ -442,6 +456,8 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
             "pnl": None,
             "pnl_gbp": None,
             "status": "OPEN",
+            "trade_source": origin,
+            "origin": origin,
             "notes": payload.get("notes") or "Imported"
         }
         trades.append(new_trade)
@@ -452,10 +468,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
 
 def close_trade_by_dealId(dealId: Any, exit_price: Any = None, time_exited: Optional[str] = None,
                            note: Optional[str] = None, path: str = LOG_PATH) -> Optional[Dict[str, Any]]:
-    """Mark the open trade with *dealId* as CLOSED and compute P&L.
-
-    Thread-safe: acquires the module-level lock.
-    """
+    """Mark the open trade with *dealId* as CLOSED and compute P&L."""
     with _trade_log_lock:
         trades = load_raw_log(path)
         updated = None
@@ -491,48 +504,47 @@ def close_trade_by_dealId(dealId: Any, exit_price: Any = None, time_exited: Opti
 def close_trade_fallback(ticker: Any, entry_price: Any, exit_price: Any = None,
                           time_exited: Optional[str] = None, note: Optional[str] = None,
                           path: str = LOG_PATH) -> Optional[Dict[str, Any]]:
-    """Close the first open trade matching *ticker* + *entry_price* (fuzzy).
-
-    Thread-safe: acquires the module-level lock.
-    """
+    """Close the first open trade matching *ticker* + *entry_price* (fuzzy)."""
     with _trade_log_lock:
         trades = load_raw_log(path)
         updated = None
+        candidates = []
         for t in trades:
             if t.get("status") != "CLOSED" and t.get("ticker") == ticker:
                 if _float_equal(t.get("entry_price", 0), entry_price):
-                    if exit_price is not None:
-                        try:
-                            t["exit_price"] = float(exit_price)
-                        except Exception:
-                            t["exit_price"] = exit_price
-                    t["time_exited"] = time_exited or _now_iso()
-                    t["time_exited_human"] = _humanize(t.get("time_exited"))
-                    t["status"] = "CLOSED"
-                    if t.get("exit_price") is not None:
-                        t["pnl"] = _compute_pnl_for_trade(t)
-                        try:
-                            fx = _read_fx_rate()
-                            t["pnl_gbp"] = round(float(t["pnl"]) * fx, 2) if t.get("pnl") not in (None, "") else None
-                        except Exception:
-                            t["pnl_gbp"] = None
-                    else:
-                        t["pnl"] = None
-                        t["pnl_gbp"] = None
-                    if note:
-                        t["notes"] = (t.get("notes") or "") + " | " + note
-                    updated = t
-                    break
+                    candidates.append(t)
+        if not candidates:
+            return None
+        candidates.sort(key=lambda t: str(t.get("time_entered") or ""), reverse=True)
+        t = candidates[0]
+        if exit_price is not None:
+            try:
+                t["exit_price"] = float(exit_price)
+            except Exception:
+                t["exit_price"] = exit_price
+        t["time_exited"] = time_exited or _now_iso()
+        t["time_exited_human"] = _humanize(t.get("time_exited"))
+        t["status"] = "CLOSED"
+        if t.get("exit_price") is not None:
+            t["pnl"] = _compute_pnl_for_trade(t)
+            try:
+                fx = _read_fx_rate()
+                t["pnl_gbp"] = round(float(t["pnl"]) * fx, 2) if t.get("pnl") not in (None, "") else None
+            except Exception:
+                t["pnl_gbp"] = None
+        else:
+            t["pnl"] = None
+            t["pnl_gbp"] = None
+        if note:
+            t["notes"] = (t.get("notes") or "") + " | " + note
+        updated = t
         if updated:
             save_raw_log(trades, path)
         return updated
 
 
 def set_dealId_for_dealReference(dealReference: Any, dealId: Any, path: str = LOG_PATH) -> bool:
-    """Back-fill *dealId* on a trade previously recorded only by *dealReference*.
-
-    Thread-safe: acquires the module-level lock.
-    """
+    """Back-fill *dealId* on a trade previously recorded only by *dealReference*."""
     if not dealReference or not dealId:
         return False
     with _trade_log_lock:
@@ -550,42 +562,39 @@ def set_dealId_for_dealReference(dealReference: Any, dealId: Any, path: str = LO
 
 
 def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = LOG_PATH) -> Dict[str, List[Dict[str, Any]]]:
-    """Reconcile local trade log against live broker positions.
-
-    Marks log entries as CLOSED when they no longer appear in live positions,
-    and inserts new entries for live positions not yet in the log.
-    Thread-safe: acquires the module-level lock for the write phase.
-    """
+    """Reconcile local trade log against live broker positions."""
     with _trade_log_lock:
         trades = load_raw_log(path)
         closed: List[Dict[str, Any]] = []
         added: List[Dict[str, Any]] = []
 
         live_ids = set()
+        live_positions_by_id = {}
         for p in live_positions or []:
             did = None
             if isinstance(p, dict):
                 did = p.get("dealId") or (p.get("position") or {}).get("dealId")
             if did is not None:
-                live_ids.add(str(did))
+                sdid = str(did)
+                live_ids.add(sdid)
+                live_positions_by_id[sdid] = p
 
         for t in trades:
             if t.get("status") != "CLOSED":
                 did = t.get("dealId")
                 if did is not None and str(did) not in live_ids:
+                    p = live_positions_by_id.get(str(did))
                     exit_price = None
                     time_exited = None
-                    for p in live_positions or []:
-                        pdid = p.get("dealId") or (p.get("position") or {}).get("dealId")
-                        if pdid and str(pdid) == str(did):
-                            exit_price = p.get("exit_price") or p.get("closePrice") or p.get("closedPrice") or p.get("price")
-                            time_exited = p.get("time_exited") or p.get("timeExited") or p.get("closedDate")
-                            break
-                    if exit_price is not None:
-                        try:
-                            t["exit_price"] = float(exit_price)
-                        except Exception:
-                            t["exit_price"] = exit_price
+                    if isinstance(p, dict):
+                        exit_price = p.get("exit_price") or p.get("closePrice") or p.get("closedPrice") or p.get("price")
+                        time_exited = p.get("time_exited") or p.get("timeExited") or p.get("closedDate")
+                    if exit_price is None:
+                        continue
+                    try:
+                        t["exit_price"] = float(exit_price)
+                    except Exception:
+                        t["exit_price"] = exit_price
                     t["time_exited"] = time_exited or _now_iso()
                     t["time_exited_human"] = _humanize(t.get("time_exited"))
                     t["status"] = "CLOSED"
@@ -610,6 +619,7 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
             side = None
             size = None
             time_entered = None
+            trade_source = "unknown"
 
             if isinstance(p, dict):
                 if p.get("dealId") is not None:
@@ -617,9 +627,10 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                     dealReference = p.get("dealReference")
                     ticker = p.get("ticker") or p.get("epic")
                     entry_price = p.get("price") or p.get("entry_price") or p.get("level")
-                    side = p.get("side") or p.get("direction")
+                    side = _normalize_side(p.get("side") or p.get("direction"))
                     size = p.get("size")
                     time_entered = p.get("time_entered") or p.get("createdDate")
+                    trade_source = _detect_trade_origin(p, side, dealId, dealReference)
                 else:
                     pos = p.get("position") or {}
                     market = p.get("market") or {}
@@ -627,9 +638,10 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                     dealReference = pos.get("dealReference") or p.get("dealReference")
                     ticker = market.get("symbol") or pos.get("instrumentName") or pos.get("instrument")
                     entry_price = pos.get("level") or pos.get("price") or pos.get("entry_price")
-                    side = pos.get("direction")
+                    side = _normalize_side(pos.get("direction"))
                     size = pos.get("size")
                     time_entered = pos.get("createdDate") or pos.get("time_entered")
+                    trade_source = _detect_trade_origin(p, side, dealId, dealReference)
 
             sig = _make_signature(dealId, dealReference, ticker, entry_price)
             if sig not in existing_signatures:
@@ -648,6 +660,8 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                         "pnl": None,
                         "pnl_gbp": None,
                         "status": "OPEN",
+                        "trade_source": trade_source,
+                        "origin": trade_source,
                         "notes": "Imported from live positions"
                     }
                 except Exception:
@@ -665,6 +679,8 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                         "pnl": None,
                         "pnl_gbp": None,
                         "status": "OPEN",
+                        "trade_source": trade_source,
+                        "origin": trade_source,
                         "notes": "Imported from live positions (partial)"
                     }
                 trades.append(new_pos)
