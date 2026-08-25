@@ -1,10 +1,10 @@
 # trail_sl.py
 # ============================
-# TRAIL SL MODULE (Option A — One-Time Activation)
+# TRAIL SL MODULE (Continuous Trailing)
 # ============================
 
 import logging
-from typing import Optional, Set
+from typing import Optional
 
 import config
 import session
@@ -17,9 +17,6 @@ if not logger.handlers:
     handler.setFormatter(fmt)
     logger.addHandler(handler)
 logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_LOGS", False) else logging.INFO)
-
-# In-memory set to avoid re-applying the one-time trail to the same position repeatedly.
-_applied_trails: Set[str] = set()
 
 
 def _update_stop_level(deal_id: str, new_sl: float) -> bool:
@@ -44,11 +41,11 @@ def _update_stop_level(deal_id: str, new_sl: float) -> bool:
 
 def run_trailing_sl() -> None:
     """
-    One-time trailing stop:
+    Continuous trailing stop:
       - Activates when profit reaches >= TRAIL_ACTIVATION_PERC (e.g. 0.50 for 50%)
       - Moves SL to entry + profit * TRAIL_SL_PERC (for longs)
         or entry - profit * TRAIL_SL_PERC (for shorts)
-      - Only moves once per position (tracked in-memory)
+      - Re-evaluated on every scheduler tick so the SL keeps rising as price rises
     """
     try:
         positions = session.get_positions() or []
@@ -63,10 +60,6 @@ def run_trailing_sl() -> None:
         if not deal_id:
             continue
         deal_id = str(deal_id)
-
-        # Skip if we've already applied a one-time trail for this deal in this process
-        if deal_id in _applied_trails:
-            continue
 
         # direction normalized by session.enrich_positions is "Long"/"Short"
         direction = (p.get("direction") or "").strip()
@@ -99,7 +92,7 @@ def run_trailing_sl() -> None:
         if profit_perc < float(getattr(config, "TRAIL_ACTIVATION_PERC", TRAIL_ACTIVATION_PERC)):
             continue
 
-        # Compute one-time trail stop
+        # Compute trail stop
         trail_sl = None
         try:
             if dir_lower in ("long", "buy"):
@@ -130,13 +123,10 @@ def run_trailing_sl() -> None:
 
         if not should_update:
             logger.debug("Trail SL not beneficial for %s: existing_sl=%s computed=%s", deal_id, existing_sl_f, trail_sl)
-            # mark as applied to avoid repeated checks if desired; do not mark if you want re-evaluation later
-            _applied_trails.add(deal_id)
             continue
 
         # Apply the new stop level
         if _update_stop_level(deal_id, trail_sl):
-            logger.info("One-time trail applied → deal=%s dir=%s entry=%s current=%s newSL=%s", deal_id, direction, entry_price_f, current_price_f, trail_sl)
-            _applied_trails.add(deal_id)
+            logger.info("Trail SL updated → deal=%s dir=%s entry=%s current=%s newSL=%s", deal_id, direction, entry_price_f, current_price_f, trail_sl)
         else:
             logger.warning("Failed to apply trail SL for deal %s", deal_id)

@@ -29,10 +29,41 @@ _last_raw_1 = set()
 _last_raw_2 = set()
 _last_close_cache = {}
 _snapshot_cache = {}
+# tracks how many consecutive polls a dealId was absent from live positions
+_absent_count: dict = {}
 
 
 def _now() -> float:
     return time.time()
+
+
+def _fetch_exit_from_history(deal_id: str) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Query Capital.com transaction history for the actual close level and P&L.
+    Returns (exit_price, pnl) — either may be None if not found.
+    """
+    try:
+        r = session.request("GET", f"{config.API_HISTORY_TRANSACTIONS}?max=200")
+        if not r or r.status_code != 200:
+            return None, None
+        transactions = (r.json() or {}).get("transactions", []) or []
+        for tx in transactions:
+            tx_id = tx.get("dealId") or tx.get("positionId")
+            if tx_id and str(tx_id) == str(deal_id):
+                ep = tx.get("closeLevel") or tx.get("level") or tx.get("price")
+                pnl = tx.get("profitAndLoss") or tx.get("pnl") or tx.get("profit") or tx.get("profitLoss")
+                try:
+                    ep = float(ep) if ep is not None else None
+                except Exception:
+                    ep = None
+                try:
+                    pnl = float(pnl) if pnl is not None else None
+                except Exception:
+                    pnl = None
+                return ep, pnl
+    except Exception as e:
+        logger.debug("_fetch_exit_from_history error for %s: %s", deal_id, e)
+    return None, None
 
 
 def get_snapshot(epic: str) -> Tuple[Optional[float], Optional[float]]:
@@ -76,7 +107,8 @@ def sync_closed_trades():
     Detect closed trades by:
       - size dropping to zero for a dealId
       - or dealId disappearing from live positions across two consecutive snapshots
-    For each detected close, compute exit price via snapshot and call trade_log to mark closed.
+      - or dealId absent for 3+ consecutive polls (catches positions closed during bot restart)
+    Exit price is sourced from Capital.com transaction history first, with snapshot as fallback.
     """
     global _last_raw_1, _last_raw_2
 
@@ -118,6 +150,19 @@ def sync_closed_trades():
         # size may be None or non-numeric; keep raw value for later parsing
         raw_size_map[did] = pos.get("size")
 
+    # Update consecutive-absence counter for open trades
+    for trade in open_trades:
+        did = trade.get("dealId")
+        if did is None:
+            continue
+        did = str(did)
+        if did in closed_ids:
+            _absent_count.pop(did, None)
+        elif did not in raw_ids:
+            _absent_count[did] = _absent_count.get(did, 0) + 1
+        else:
+            _absent_count.pop(did, None)
+
     # Iterate open trades and detect closes
     for trade in open_trades:
         deal_id = trade.get("dealId")
@@ -141,10 +186,14 @@ def sync_closed_trades():
         if size_val is not None and size_val > 0:
             continue
 
-        # determine disappearance: dealId not in current raw_ids but was present in previous snapshots
+        # disappearance: was in a previous snapshot OR absent 3+ consecutive polls
         disappeared = (
             deal_id not in raw_ids
-            and (deal_id in _last_raw_1 or deal_id in _last_raw_2)
+            and (
+                deal_id in _last_raw_1
+                or deal_id in _last_raw_2
+                or _absent_count.get(deal_id, 0) >= 3
+            )
         )
 
         size_zero = (size_val == 0)
@@ -164,18 +213,27 @@ def sync_closed_trades():
         except Exception:
             entry_price = 0.0
 
-        # get snapshot to compute exit price
-        bid, offer = get_snapshot(epic)
-        if bid is None or offer is None:
-            logger.debug("sync_closed_trades: snapshot unavailable for %s, skipping", epic)
-            continue
+        # Step 1: try to get actual close price from Capital.com transaction history
+        exit_price, pnl = _fetch_exit_from_history(deal_id)
 
-        if direction == "long":
-            exit_price = float(bid)
-            pnl = round((exit_price - entry_price) * trade_size, 2)
-        else:
-            exit_price = float(offer)
-            pnl = round((entry_price - exit_price) * trade_size, 2)
+        # Step 2: fall back to market snapshot if history didn't have it
+        if exit_price is None:
+            bid, offer = get_snapshot(epic)
+            if bid is None or offer is None:
+                logger.debug("sync_closed_trades: snapshot unavailable for %s, skipping", epic)
+                continue
+
+            if direction == "long":
+                exit_price = float(bid)
+            else:
+                exit_price = float(offer)
+
+        # Step 3: compute pnl from exit_price if history didn't provide it
+        if pnl is None and exit_price is not None:
+            if direction == "long":
+                pnl = round((exit_price - entry_price) * trade_size, 2)
+            else:
+                pnl = round((entry_price - exit_price) * trade_size, 2)
 
         logger.info("sync_closed_trades: CLOSED detected → epic=%s dealId=%s exit=%s pnl=%s",
                     epic, deal_id, exit_price, pnl)
@@ -194,6 +252,7 @@ def sync_closed_trades():
 
         # mark as processed to avoid duplicate handling in same run
         _last_close_cache[deal_id] = _now()
+        _absent_count.pop(deal_id, None)
 
     # rotate raw id history for disappearance detection
     _last_raw_2 = _last_raw_1
