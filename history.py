@@ -115,6 +115,8 @@ def convert_capital_trade(raw):
             "timeframe": None,
 
             "trade_id": deal_id,
+            "time_entered": open_timestamp,
+            "time_exited": close_timestamp,
             "open_timestamp": open_timestamp,
             "close_timestamp": close_timestamp,
             "currency": currency or "USD",
