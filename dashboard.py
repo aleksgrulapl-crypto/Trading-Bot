@@ -411,14 +411,23 @@ def dashboard_close_position(position_id: str):
         return jsonify({
             "status": "error",
             "message": "close_exception",
-            "detail": str(exc),
+            "detail": "close_failed_internal",
         }), 500
 
     if isinstance(result, dict) and result.get("status") == "success":
-        return jsonify(result), 200
+        payload = {
+            "status": "success",
+            "message": result.get("message") or f"Position {position_id} closed.",
+        }
+        if result.get("warning"):
+            payload["warning"] = "trade_log_update_failed"
+        return jsonify(payload), 200
 
     if isinstance(result, dict):
-        return jsonify(result), 502
+        return jsonify({
+            "status": "error",
+            "message": result.get("message") or "close_failed",
+        }), 502
 
     return jsonify({
         "status": "error",
