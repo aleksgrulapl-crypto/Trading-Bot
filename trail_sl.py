@@ -32,7 +32,7 @@ def _normalize_percent(value: Optional[float], fallback: float) -> float:
         raw = float(fallback)
 
     # Support values expressed as whole percentages (e.g. 50 -> 0.50, 0.5 -> 0.005)
-    if raw > 1.0:
+    if raw >= 1.0:
         return raw / 100.0
     return raw
 
