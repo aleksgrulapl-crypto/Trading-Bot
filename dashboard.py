@@ -19,6 +19,7 @@ from flask import Blueprint, request, render_template, redirect, jsonify
 
 import session
 import config
+from close_position import close_position as close_live_position
 from trade_log import (
     load_raw_log,
     reconcile_with_positions,
@@ -395,12 +396,43 @@ def dashboard_data():
 @dashboard.route("/dashboard/close/<position_id>", methods=["POST"])
 @login_required
 def dashboard_close_position(position_id: str):
-    """Keep the Close button visible, but disable position-closing from the dashboard."""
-    logger.info("dashboard: close action disabled for %s", position_id)
+    """Close a live broker position from the dashboard."""
+    position_id = str(position_id or "").strip()
+    if not position_id:
+        return jsonify({
+            "status": "error",
+            "message": "missing_position_id",
+        }), 400
+
+    try:
+        result = close_live_position(position_id)
+    except Exception as exc:
+        logger.exception("dashboard: close action failed for %s: %s", position_id, exc)
+        return jsonify({
+            "status": "error",
+            "message": "close_exception",
+            "detail": "close_failed_internal",
+        }), 500
+
+    if isinstance(result, dict) and result.get("status") == "success":
+        payload = {
+            "status": "success",
+            "message": f"Position {position_id} closed.",
+        }
+        if result.get("warning"):
+            payload["warning"] = "trade_log_update_failed"
+        return jsonify(payload), 200
+
+    if isinstance(result, dict):
+        return jsonify({
+            "status": "error",
+            "message": "close_failed",
+        }), 502
+
     return jsonify({
-        "status": "disabled",
-        "message": "Closing positions from the dashboard is currently disabled.",
-    }), 200
+        "status": "error",
+        "message": "invalid_close_response",
+    }), 502
 
 
 # -----------------------------
