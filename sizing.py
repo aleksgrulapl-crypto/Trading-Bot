@@ -101,8 +101,14 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
 
     # 4) Determine equity to use and exposure
     equity_to_use = available * float(getattr(config, "EQUITY_PERCENT", 0.5))
+    max_equity_per_trade = float(getattr(config, "MAX_EQUITY_PER_TRADE", 100.0))
+    if max_equity_per_trade > 0:
+        equity_to_use = min(equity_to_use, max_equity_per_trade)
     leverage = float(getattr(config, "LEVERAGE", 1))
     exposure = equity_to_use * leverage
+    max_exposure_per_trade = float(getattr(config, "MAX_EXPOSURE_PER_TRADE", 500.0))
+    if max_exposure_per_trade > 0:
+        exposure = min(exposure, max_exposure_per_trade)
 
     # 5) Convert exposure to raw size (units)
     try:
@@ -140,8 +146,6 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
     # 7) Final safety checks
     if size <= 0:
         return {"blocked": True, "reason": "computed_size_nonpositive"}
-
-    # Optionally enforce a maximum size (not in original spec) — skip unless configured
 
     # 8) Return final sizing
     return {

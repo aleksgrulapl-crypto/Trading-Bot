@@ -32,6 +32,8 @@ MAX_POSITIONS_PER_TICKER = int(os.getenv("MAX_POSITIONS_PER_TICKER", 3))
 RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", 0.50))
 EQUITY_PERCENT = float(os.getenv("EQUITY_PERCENT", 0.50))
 LEVERAGE = int(os.getenv("LEVERAGE", 5))
+MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 100.0))
+MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 500.0))
 
 FIXED_SL_PERC = float(os.getenv("FIXED_SL_PERC", 0.10))
 FIXED_TP_PERC = float(os.getenv("FIXED_TP_PERC", 0.20))
