@@ -121,5 +121,5 @@ EPIC_MAP = {
 }
 
 # Trailing stop defaults
-TRAIL_ACTIVATION_PERC = float(os.getenv("TRAIL_ACTIVATION_PERC", 0.50))
+TRAIL_ACTIVATION_PERC = float(os.getenv("TRAIL_ACTIVATION_PERC", 0.005))
 TRAIL_SL_PERC = float(os.getenv("TRAIL_SL_PERC", 0.30))

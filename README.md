@@ -45,6 +45,8 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `PORT` | HTTP port (default `5000`) | ⬜ |
 | `RISK_PER_TRADE` | Fraction of equity risked per trade (default `0.50`) | ⬜ |
 | `LEVERAGE` | Leverage multiplier (default `5`) | ⬜ |
+| `TRAIL_ACTIVATION_PERC` | Profit threshold to activate trailing SL (default `0.005` = `0.5%`) | ⬜ |
+| `TRAIL_SL_PERC` | Portion of unrealized profit locked by trailing SL (default `0.30` = `30%`) | ⬜ |
 
 ### Run locally
 
