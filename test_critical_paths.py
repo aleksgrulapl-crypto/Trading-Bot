@@ -175,6 +175,44 @@ class TestFxRateValidation:
         assert rate == pytest.approx(0.738)
 
 
+class TestSizing:
+    def test_caps_exposure_at_500(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 500}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 500.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 100.0)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 500.0)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA")
+
+        assert result["blocked"] is False
+        assert result["equity_used"] == pytest.approx(100.0)
+        assert result["exposure"] == pytest.approx(500.0)
+        assert result["size"] == pytest.approx(5.0)
+
+    def test_uses_lower_available_margin_when_below_cap(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 80}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 80.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 100.0)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 500.0)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA")
+
+        assert result["blocked"] is False
+        assert result["equity_used"] == pytest.approx(80.0)
+        assert result["exposure"] == pytest.approx(400.0)
+        assert result["size"] == pytest.approx(4.0)
+
+
 class TestThreadSafety:
     """Concurrent access tests for trade_log operations."""
 

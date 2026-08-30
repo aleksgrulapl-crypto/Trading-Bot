@@ -7,7 +7,7 @@ A Python/Flask-based automated trading bot for the Capital.com CFD API, with a r
 ## Features
 
 - **Webhook receiver** (`/webhook`) — accepts TradingView alerts and idempotent broker position events
-- **Automated order placement** — sizes positions based on available equity, leverage, and per-ticker minimums
+- **Automated order placement** — sizes positions based on available equity, leverage, per-trade caps, and per-ticker minimums
 - **Trade log** (`/data/trade_log.json`) — thread-safe JSON store with atomic writes and timestamped backups
 - **Real-time dashboard** (`/dashboard`) — performance metrics, open positions, and completed-trade history
 - **Scheduler** — runs the daily report and trailing-stop sync in the background
@@ -45,6 +45,8 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `PORT` | HTTP port (default `5000`) | ⬜ |
 | `RISK_PER_TRADE` | Fraction of equity risked per trade (default `0.50`) | ⬜ |
 | `LEVERAGE` | Leverage multiplier (default `5`) | ⬜ |
+| `MAX_EQUITY_PER_TRADE` | Maximum account equity allocated to a trade before leverage (default `100`) | ⬜ |
+| `MAX_EXPOSURE_PER_TRADE` | Maximum leveraged exposure per trade in GBP (default `500`) | ⬜ |
 | `TRAIL_ACTIVATION_PERC` | Profit threshold to activate trailing SL (default `0.005` = `0.5%`) | ⬜ |
 | `TRAIL_SL_PERC` | Portion of unrealized profit locked by trailing SL (default `0.30` = `30%`) | ⬜ |
 
@@ -164,7 +166,7 @@ webhook.py          Flask app + webhook route + auth bootstrap
 ├── trade_log.py    Thread-safe JSON trade log (lock, atomic write, backup rotation)
 ├── close_position.py  Broker close + trade log update
 ├── order.py        Place broker orders
-├── sizing.py       Position sizing (equity%, leverage, per-ticker mins)
+├── sizing.py       Position sizing (equity%, leverage, per-trade caps, per-ticker mins)
 ├── session.py      Broker HTTP client + position enrichment
 ├── auth.py         Token auth + refresh
 ├── scheduler.py    Background jobs (daily report, trailing stops)
