@@ -393,10 +393,18 @@ class TestProtectedRoutes:
         assert response.headers["Location"].endswith("/dashboard/login")
 
 
-class TestDashboardCloseDisabled:
-    def test_close_endpoint_is_disabled_but_available(self):
+class TestDashboardCloseEndpoint:
+    def test_close_endpoint_calls_close_service(self, monkeypatch):
         from flask import Flask
         from dashboard import dashboard
+
+        called = {}
+
+        def _fake_close(position_id):
+            called["position_id"] = position_id
+            return {"status": "success", "message": f"Position {position_id} closed."}
+
+        monkeypatch.setattr("dashboard.close_live_position", _fake_close)
 
         app = Flask(__name__)
         app.register_blueprint(dashboard)
@@ -407,5 +415,25 @@ class TestDashboardCloseDisabled:
         data = response.get_json()
 
         assert response.status_code == 200
-        assert data["status"] == "disabled"
-        assert "disabled" in data["message"].lower()
+        assert data["status"] == "success"
+        assert called["position_id"] == "D1"
+
+    def test_close_endpoint_bubbles_service_error(self, monkeypatch):
+        from flask import Flask
+        from dashboard import dashboard
+
+        def _fake_close(_position_id):
+            return {"status": "error", "message": "broker_close_failed_400"}
+
+        monkeypatch.setattr("dashboard.close_live_position", _fake_close)
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+
+        response = client.post("/dashboard/close/D1")
+        data = response.get_json()
+
+        assert response.status_code == 502
+        assert data["status"] == "error"
