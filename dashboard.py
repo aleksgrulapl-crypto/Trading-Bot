@@ -417,7 +417,7 @@ def dashboard_close_position(position_id: str):
     if isinstance(result, dict) and result.get("status") == "success":
         payload = {
             "status": "success",
-            "message": result.get("message") or f"Position {position_id} closed.",
+            "message": f"Position {position_id} closed.",
         }
         if result.get("warning"):
             payload["warning"] = "trade_log_update_failed"
@@ -426,7 +426,7 @@ def dashboard_close_position(position_id: str):
     if isinstance(result, dict):
         return jsonify({
             "status": "error",
-            "message": result.get("message") or "close_failed",
+            "message": "close_failed",
         }), 502
 
     return jsonify({
