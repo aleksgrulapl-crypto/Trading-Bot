@@ -19,6 +19,52 @@ if not logger.handlers:
 logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_LOGS", False) else logging.INFO)
 
 
+def _normalize_percent(value: Optional[float], fallback: float) -> float:
+    """
+    Accept both ratio notation (0.30 == 30%) and whole-percent notation (30 == 30%).
+    """
+    try:
+        raw = float(value)
+    except Exception:
+        raw = float(fallback)
+
+    if raw < 0:
+        raw = float(fallback)
+
+    # Support values expressed as whole percentages (e.g. 50 -> 0.50, 0.5 -> 0.005)
+    if raw >= 1.0:
+        return raw / 100.0
+    return raw
+
+
+def _normalize_side(direction: Optional[str]) -> Optional[str]:
+    if not isinstance(direction, str):
+        return None
+    d = direction.strip().lower()
+    if d in ("long", "buy"):
+        return "long"
+    if d in ("short", "sell"):
+        return "short"
+    return None
+
+
+def _round_stop(stop: float, position: dict) -> float:
+    """
+    Round stop based on market precision if available; fallback to 4 decimals.
+    """
+    decimals = 4
+    try:
+        market = (position.get("raw_market") or {}) if isinstance(position, dict) else {}
+        dpf = market.get("decimalPlacesFactor")
+        if dpf is not None:
+            dpf_i = int(dpf)
+            if dpf_i >= 1:
+                decimals = len(str(dpf_i)) - 1
+    except Exception:
+        decimals = 4
+    return round(float(stop), decimals)
+
+
 def _update_stop_level(deal_id: str, new_sl: float) -> bool:
     """
     Update stopLevel for a single position on Capital.com.
@@ -32,7 +78,12 @@ def _update_stop_level(deal_id: str, new_sl: float) -> bool:
 
     resp = session.request("PUT", url, json=payload)
     if not resp or getattr(resp, "status_code", 0) >= 400:
-        logger.warning("Failed to update SL for %s → %s", deal_id, getattr(resp, "status_code", "no_response"))
+        logger.warning(
+            "Failed to update SL for %s → %s body=%s",
+            deal_id,
+            getattr(resp, "status_code", "no_response"),
+            (getattr(resp, "text", "") or "")[:300],
+        )
         return False
 
     logger.info("Updated SL for %s to %s", deal_id, new_sl)
@@ -61,8 +112,12 @@ def run_trailing_sl() -> None:
             continue
         deal_id = str(deal_id)
 
-        # direction normalized by session.enrich_positions is "Long"/"Short"
         direction = (p.get("direction") or "").strip()
+        side = _normalize_side(direction)
+        if side is None:
+            logger.debug("Skipping %s: unsupported direction '%s'", deal_id, direction)
+            continue
+
         entry_price = p.get("price")
         current_price = p.get("current_price")
         existing_sl = p.get("stopLevel") or p.get("stop_level") or p.get("sl")
@@ -76,8 +131,7 @@ def run_trailing_sl() -> None:
             continue
 
         # Compute profit depending on side
-        dir_lower = direction.lower() if isinstance(direction, str) else ""
-        if dir_lower in ("long", "buy"):
+        if side == "long":
             profit = current_price_f - entry_price_f
         else:
             profit = entry_price_f - current_price_f
@@ -89,19 +143,29 @@ def run_trailing_sl() -> None:
         profit_perc = profit / entry_price_f if entry_price_f != 0 else 0.0
 
         # Activation threshold
-        if profit_perc < float(getattr(config, "TRAIL_ACTIVATION_PERC", TRAIL_ACTIVATION_PERC)):
+        activation_perc = _normalize_percent(getattr(config, "TRAIL_ACTIVATION_PERC", TRAIL_ACTIVATION_PERC), TRAIL_ACTIVATION_PERC)
+        if profit_perc < activation_perc:
             continue
 
         # Compute trail stop
         trail_sl = None
         try:
-            if dir_lower in ("long", "buy"):
-                trail_sl = entry_price_f + profit * float(getattr(config, "TRAIL_SL_PERC", TRAIL_SL_PERC))
+            trail_perc = _normalize_percent(getattr(config, "TRAIL_SL_PERC", TRAIL_SL_PERC), TRAIL_SL_PERC)
+            if side == "long":
+                trail_sl = entry_price_f + profit * trail_perc
             else:
-                trail_sl = entry_price_f - profit * float(getattr(config, "TRAIL_SL_PERC", TRAIL_SL_PERC))
-            trail_sl = round(float(trail_sl), 2)
+                trail_sl = entry_price_f - profit * trail_perc
+            trail_sl = _round_stop(float(trail_sl), p)
         except Exception:
             logger.exception("Failed to compute trail SL for %s", deal_id)
+            continue
+
+        # Ensure stop remains protective relative to current price
+        if side == "long" and trail_sl >= current_price_f:
+            logger.debug("Skipping %s: computed long SL %.6f not below current %.6f", deal_id, trail_sl, current_price_f)
+            continue
+        if side == "short" and trail_sl <= current_price_f:
+            logger.debug("Skipping %s: computed short SL %.6f not above current %.6f", deal_id, trail_sl, current_price_f)
             continue
 
         # If existing SL is present, ensure we only move it in the protective direction
@@ -116,9 +180,9 @@ def run_trailing_sl() -> None:
         if existing_sl_f is None:
             should_update = True
         else:
-            if dir_lower in ("long", "buy") and trail_sl > existing_sl_f:
+            if side == "long" and trail_sl > existing_sl_f:
                 should_update = True
-            if dir_lower in ("short", "sell") and trail_sl < existing_sl_f:
+            if side == "short" and trail_sl < existing_sl_f:
                 should_update = True
 
         if not should_update:

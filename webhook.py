@@ -10,11 +10,13 @@
 #   - Request timeout constant for all outbound broker API calls
 
 import os
+import sys
 import time
 import uuid
 import json
 import logging
 import functools
+import threading
 from typing import Any, Dict, Optional
 
 from flask import Flask, request, jsonify, render_template, redirect
@@ -555,6 +557,28 @@ def _start_app():
         logger.info("Scheduler started.")
     except Exception:
         logger.exception("Failed to start scheduler")
+
+
+_bootstrap_lock = threading.Lock()
+_bootstrap_started = False
+
+
+def _in_test_runtime() -> bool:
+    return ("pytest" in sys.modules) or bool(os.getenv("PYTEST_CURRENT_TEST"))
+
+
+def _ensure_bootstrap_background() -> None:
+    global _bootstrap_started
+    with _bootstrap_lock:
+        if _bootstrap_started:
+            return
+        _bootstrap_started = True
+    t = threading.Thread(target=_start_app, daemon=True, name="WebhookBootstrapThread")
+    t.start()
+
+
+if __name__ != "__main__" and not _in_test_runtime():
+    _ensure_bootstrap_background()
 
 
 if __name__ == "__main__":
