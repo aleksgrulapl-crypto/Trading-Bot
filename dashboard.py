@@ -200,13 +200,22 @@ def compute_analytics(trades):
             "story": None
         }
 
-    # copy and coerce pnl to numeric where possible
+    # copy and coerce pnl to numeric where possible.
+    # Prefer pnl_gbp (already FX-converted) so analytics match the dashboard's
+    # "(GBP)" labels; fall back to converting raw USD pnl if pnl_gbp is absent.
+    fx_rate = float(getattr(config, "FX_USD_GBP", 0.78) or 0.78)
     cleaned = []
     for t in trades:
         copy = dict(t)
+        pnl_gbp_raw = copy.get("pnl_gbp", None)
         pnl_raw = copy.get("pnl", None)
         try:
-            copy["pnl"] = float(pnl_raw) if pnl_raw not in (None, "") else None
+            if pnl_gbp_raw not in (None, ""):
+                copy["pnl"] = float(pnl_gbp_raw)
+            elif pnl_raw not in (None, ""):
+                copy["pnl"] = round(float(pnl_raw) * fx_rate, 2)
+            else:
+                copy["pnl"] = None
         except Exception:
             copy["pnl"] = None
         cleaned.append(copy)
@@ -317,12 +326,13 @@ def _build_request_context():
         reverse=True,
     )
 
-    analytics = _safe_analytics(compute_analytics(filter_completed(combined_trades)))
+    completed_trades = filter_completed(combined_trades)
+    analytics = _safe_analytics(compute_analytics(completed_trades))
 
     return {
         "account": account,
         "positions": positions,
-        "combined_trades": combined_trades,
+        "combined_trades": completed_trades,
         "analytics": analytics,
     }
 

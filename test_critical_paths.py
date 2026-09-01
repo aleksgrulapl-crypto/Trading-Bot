@@ -176,23 +176,21 @@ class TestFxRateValidation:
 
 
 class TestSizing:
-    def test_caps_exposure_at_500(self, monkeypatch):
+    def test_uses_equity_percent_and_leverage_without_cap(self, monkeypatch):
         import sizing
 
         monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 500}})
         monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 500.0})
         monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
-        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 100.0)
-        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 500.0)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
 
         result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA")
 
         assert result["blocked"] is False
-        assert result["equity_used"] == pytest.approx(100.0)
-        assert result["exposure"] == pytest.approx(500.0)
-        assert result["size"] == pytest.approx(5.0)
+        assert result["equity_used"] == pytest.approx(500.0)
+        assert result["exposure"] == pytest.approx(2500.0)
+        assert result["size"] == pytest.approx(25.0)
 
     def test_uses_lower_available_margin_when_below_cap(self, monkeypatch):
         import sizing
@@ -201,8 +199,6 @@ class TestSizing:
         monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 80.0})
         monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
-        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 100.0)
-        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 500.0)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
 
         result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA")
@@ -383,7 +379,7 @@ class TestComputeAnalytics:
 
     def test_single_winning_trade(self):
         from dashboard import compute_analytics
-        trades = [{"status": "CLOSED", "pnl": 100.0}]
+        trades = [{"status": "CLOSED", "pnl": 100.0, "pnl_gbp": 100.0}]
         result = compute_analytics(trades)
         assert result["trade_count"] == 1
         assert result["win_rate"] == 100.0
@@ -392,9 +388,9 @@ class TestComputeAnalytics:
     def test_mixed_trades(self):
         from dashboard import compute_analytics
         trades = [
-            {"status": "CLOSED", "pnl": 100.0},
-            {"status": "CLOSED", "pnl": -50.0},
-            {"status": "CLOSED", "pnl": 200.0},
+            {"status": "CLOSED", "pnl": 100.0, "pnl_gbp": 100.0},
+            {"status": "CLOSED", "pnl": -50.0, "pnl_gbp": -50.0},
+            {"status": "CLOSED", "pnl": 200.0, "pnl_gbp": 200.0},
         ]
         result = compute_analytics(trades)
         assert result["trade_count"] == 3
@@ -405,10 +401,18 @@ class TestComputeAnalytics:
         from dashboard import compute_analytics, filter_completed
         trades = [
             {"status": "OPEN", "pnl": None},
-            {"status": "CLOSED", "pnl": 50.0},
+            {"status": "CLOSED", "pnl": 50.0, "pnl_gbp": 50.0},
         ]
         result = compute_analytics(filter_completed(trades))
         assert result["trade_count"] == 1
+
+    def test_analytics_use_gbp_pnl_when_only_usd_pnl_present(self):
+        """When pnl_gbp is missing, pnl should be converted using config.FX_USD_GBP."""
+        from dashboard import compute_analytics
+        import config
+        trades = [{"status": "CLOSED", "pnl": 100.0}]
+        result = compute_analytics(trades)
+        assert result["total_pl"] == pytest.approx(round(100.0 * config.FX_USD_GBP, 2))
 
 
 class TestProtectedRoutes:

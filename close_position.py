@@ -183,10 +183,10 @@ def close_position(position_id: str) -> dict:
     # Step 2 – Call the broker close endpoint
     resp_json = None
     try:
-        url = f"{API_POSITIONS}/{position_id}/close"
+        url = f"{API_POSITIONS}/{position_id}"
         logger.debug("Close URL → %s", url)
 
-        response = session.request("POST", url, timeout=BROKER_API_TIMEOUT)
+        response = session.request("DELETE", url, timeout=BROKER_API_TIMEOUT)
         if not response:
             logger.error("No response from close endpoint for position %s", position_id)
             return {"status": "error", "message": "no_response"}
