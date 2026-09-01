@@ -42,6 +42,53 @@ from close_position import close_position as close_position_module
 AUTH_RETRY_COUNT = 6          # attempts to obtain auth token on startup
 AUTH_RETRY_BACKOFF = 5        # seconds between startup auth retries
 BROKER_API_TIMEOUT = 30       # seconds – applied to all outbound broker requests
+ALERT_DEDUPE_WINDOW = 10      # seconds – suppress identical repeat alerts (TradingView retries)
+
+# In-memory cache of recently processed TradingView alerts, keyed by a
+# signature of the alert content. Used to guard against TradingView
+# redelivering the exact same webhook alert (e.g. on timeout/retry), which
+# would otherwise place two separate market orders for the same signal.
+_recent_alert_cache: Dict[str, float] = {}
+_recent_alert_lock = threading.Lock()
+
+
+def _alert_signature(symbol: Optional[str], action: Optional[str], sl_price: Optional[float],
+                      tp_price: Optional[float], timeframe: Optional[str]) -> str:
+    return f"{symbol or ''}|{action or ''}|{sl_price or ''}|{tp_price or ''}|{timeframe or ''}"
+
+
+def _is_duplicate_alert(signature: str) -> bool:
+    """Return True and record the signature if an identical alert was seen recently."""
+    now = time.time()
+    with _recent_alert_lock:
+        # prune stale entries
+        stale = [k for k, ts in _recent_alert_cache.items() if now - ts > ALERT_DEDUPE_WINDOW]
+        for k in stale:
+            _recent_alert_cache.pop(k, None)
+
+        last_seen = _recent_alert_cache.get(signature)
+        if last_seen is not None and (now - last_seen) <= ALERT_DEDUPE_WINDOW:
+            return True
+        _recent_alert_cache[signature] = now
+        return False
+
+
+def _has_open_trade_for_ticker(ticker: Optional[str]) -> bool:
+    """Return True if the trade log already has an OPEN trade for this ticker/epic."""
+    if not ticker:
+        return False
+    try:
+        trades = load_raw_log()
+    except Exception:
+        logger.exception("_has_open_trade_for_ticker: failed to load trade log")
+        return False
+    ticker_norm = str(ticker).strip().lower()
+    for t in trades:
+        if t.get("status") == "OPEN":
+            existing_ticker = t.get("ticker") or t.get("epic")
+            if existing_ticker and str(existing_ticker).strip().lower() == ticker_norm:
+                return True
+    return False
 
 # ---------------------------------------------------------------------------
 # Parser import: try both common names for compatibility
@@ -393,6 +440,15 @@ def webhook():
 
     if not epic:
         return _ok_response({"status": "error", "message": "epic_lookup_failed", "symbol": symbol, "cid": cid})
+
+    alert_sig = _alert_signature(symbol, action, sl_price, tp_price, timeframe)
+    if _is_duplicate_alert(alert_sig):
+        logger.warning("[cid=%s] Duplicate alert suppressed (repeat within %ss): %s", cid, ALERT_DEDUPE_WINDOW, alert_sig)
+        return _ok_response({"status": "blocked", "reason": "duplicate_alert", "symbol": symbol, "cid": cid})
+
+    if _has_open_trade_for_ticker(epic):
+        logger.warning("[cid=%s] Duplicate order suppressed – open trade already exists for %s", cid, epic)
+        return _ok_response({"status": "blocked", "reason": "duplicate_open_position", "symbol": symbol, "epic": epic, "cid": cid})
 
     market_resp = session.request("GET", f"{API_MARKET}/{epic}", timeout=BROKER_API_TIMEOUT)
     if not market_resp or getattr(market_resp, "status_code", 0) != 200:
