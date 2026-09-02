@@ -309,6 +309,38 @@ def _make_signature(dealId: Any, dealReference: Any, ticker: Any, entry_price: A
     return f"{dealId or ''}|{dealReference or ''}|{ticker or ''}|{entry_norm}"
 
 
+def _find_pending_trade_by_ticker(trades: List[Dict[str, Any]], ticker: Any,
+                                   side: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Find a still-open trade that has no dealId yet for *ticker* (optionally *side*).
+
+    This is used as a fallback match when a broker-confirmed dealId/entry_price/size
+    doesn't exactly line up with the values recorded at order-placement time (e.g. a
+    requested size of 6.8 gets filled by the broker as 6.83, or the entry price moved
+    slightly between the market snapshot used for sizing and the actual fill). Without
+    this fallback, the mismatch causes a brand-new duplicate trade-log entry to be
+    created for the same real position, leaving the original entry (still lacking a
+    dealId) stuck open forever once the real position closes.
+    """
+    if not ticker:
+        return None
+    ticker_norm = str(ticker).strip().lower()
+    candidates = [
+        t for t in trades
+        if t.get("status") != "CLOSED" and not t.get("dealId")
+        and t.get("ticker") and str(t.get("ticker")).strip().lower() == ticker_norm
+    ]
+    if side:
+        side_norm = _normalize_side(side)
+        if side_norm:
+            narrowed = [t for t in candidates if not t.get("side") or _normalize_side(t.get("side")) == side_norm]
+            if narrowed:
+                candidates = narrowed
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: str(t.get("time_entered") or ""), reverse=True)
+    return candidates[0]
+
+
 # ---------------------------------------------------------------------------
 # Core public API
 # ---------------------------------------------------------------------------
@@ -414,6 +446,15 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
                     existing = t
                     break
 
+        matched_via_pending = False
+        if not existing and dealId:
+            # A broker-confirmed dealId didn't exactly match any existing entry
+            # (e.g. differing entry_price/size due to slippage or fill rounding).
+            # Fall back to matching a still-pending trade for the same ticker
+            # instead of creating a duplicate open-position entry.
+            existing = _find_pending_trade_by_ticker(trades, ticker, side)
+            matched_via_pending = existing is not None
+
         if existing:
             updated = False
             if not existing.get("dealId") and dealId:
@@ -428,6 +469,14 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
                 existing["size"] = size_val; updated = True
             if (existing.get("entry_price") in (None, "")) and entry_val > 0:
                 existing["entry_price"] = entry_val; updated = True
+            if matched_via_pending:
+                # The broker-confirmed values are the source of truth; correct any
+                # earlier estimate (e.g. requested size 6.8 filled as 6.83) so the
+                # log reflects the real position instead of leaving it mismatched.
+                if size_val > 0 and not _float_equal(existing.get("size"), size_val):
+                    existing["size"] = size_val; updated = True
+                if entry_val > 0 and not _float_equal(existing.get("entry_price"), entry_val):
+                    existing["entry_price"] = entry_val; updated = True
             if (existing.get("time_entered") in (None, "")) and time_entered:
                 existing["time_entered"] = time_entered; updated = True
             if not existing.get("trade_source"):
@@ -567,6 +616,7 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
         trades = load_raw_log(path)
         closed: List[Dict[str, Any]] = []
         added: List[Dict[str, Any]] = []
+        matched_updates: List[Dict[str, Any]] = []
 
         live_ids = set()
         live_positions_by_id = {}
@@ -644,50 +694,87 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                     trade_source = _detect_trade_origin(p, side, dealId, dealReference)
 
             sig = _make_signature(dealId, dealReference, ticker, entry_price)
-            if sig not in existing_signatures:
-                try:
-                    new_pos = {
-                        "dealId": dealId,
-                        "dealReference": dealReference,
-                        "ticker": ticker,
-                        "side": side,
-                        "size": float(size or 0),
-                        "entry_price": float(entry_price or 0),
-                        "time_entered": time_entered or _now_iso(),
-                        "time_entered_human": _humanize(time_entered or _now_iso()),
-                        "time_exited": None,
-                        "time_exited_human": None,
-                        "pnl": None,
-                        "pnl_gbp": None,
-                        "status": "OPEN",
-                        "trade_source": trade_source,
-                        "origin": trade_source,
-                        "notes": "Imported from live positions"
-                    }
-                except Exception:
-                    new_pos = {
-                        "dealId": dealId,
-                        "dealReference": dealReference,
-                        "ticker": ticker,
-                        "side": side,
-                        "size": size or 0,
-                        "entry_price": entry_price or 0,
-                        "time_entered": time_entered or _now_iso(),
-                        "time_entered_human": _humanize(time_entered or _now_iso()),
-                        "time_exited": None,
-                        "time_exited_human": None,
-                        "pnl": None,
-                        "pnl_gbp": None,
-                        "status": "OPEN",
-                        "trade_source": trade_source,
-                        "origin": trade_source,
-                        "notes": "Imported from live positions (partial)"
-                    }
-                trades.append(new_pos)
-                added.append(new_pos)
-                existing_signatures.add(sig)
+            if sig in existing_signatures:
+                continue
 
-        if closed or added:
+            # Try to match an existing entry by dealId alone (ignoring entry_price
+            # differences caused by slippage) before falling back to a still-pending
+            # (dealId-less) entry for the same ticker. Either match is corrected in
+            # place with the broker-confirmed size/entry_price rather than creating a
+            # duplicate open-position entry that would never get closed.
+            matched = None
+            if dealId:
+                for t in trades:
+                    if t.get("dealId") and str(t.get("dealId")) == str(dealId):
+                        matched = t
+                        break
+            if matched is None and dealId:
+                matched = _find_pending_trade_by_ticker(trades, ticker, side)
+
+            if matched is not None:
+                changed = False
+                if not matched.get("dealId") and dealId:
+                    matched["dealId"] = dealId; changed = True
+                if not matched.get("dealReference") and dealReference:
+                    matched["dealReference"] = dealReference; changed = True
+                try:
+                    if size not in (None, "", 0) and not _float_equal(matched.get("size"), size):
+                        matched["size"] = float(size); changed = True
+                except Exception:
+                    pass
+                try:
+                    if entry_price not in (None, "", 0) and not _float_equal(matched.get("entry_price"), entry_price):
+                        matched["entry_price"] = float(entry_price); changed = True
+                except Exception:
+                    pass
+                if changed:
+                    existing_signatures.add(_make_signature(matched.get("dealId"), matched.get("dealReference"), matched.get("ticker"), matched.get("entry_price")))
+                    matched_updates.append(matched)
+                continue
+
+            try:
+                new_pos = {
+                    "dealId": dealId,
+                    "dealReference": dealReference,
+                    "ticker": ticker,
+                    "side": side,
+                    "size": float(size or 0),
+                    "entry_price": float(entry_price or 0),
+                    "time_entered": time_entered or _now_iso(),
+                    "time_entered_human": _humanize(time_entered or _now_iso()),
+                    "time_exited": None,
+                    "time_exited_human": None,
+                    "pnl": None,
+                    "pnl_gbp": None,
+                    "status": "OPEN",
+                    "trade_source": trade_source,
+                    "origin": trade_source,
+                    "notes": "Imported from live positions"
+                }
+            except Exception:
+                new_pos = {
+                    "dealId": dealId,
+                    "dealReference": dealReference,
+                    "ticker": ticker,
+                    "side": side,
+                    "size": size or 0,
+                    "entry_price": entry_price or 0,
+                    "time_entered": time_entered or _now_iso(),
+                    "time_entered_human": _humanize(time_entered or _now_iso()),
+                    "time_exited": None,
+                    "time_exited_human": None,
+                    "pnl": None,
+                    "pnl_gbp": None,
+                    "status": "OPEN",
+                    "trade_source": trade_source,
+                    "origin": trade_source,
+                    "notes": "Imported from live positions (partial)"
+                }
+            trades.append(new_pos)
+            added.append(new_pos)
+            existing_signatures.add(sig)
+
+        if closed or added or matched_updates:
             save_raw_log(trades, path)
 
     return {"closed": closed, "added": added}

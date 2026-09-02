@@ -109,6 +109,69 @@ class TestUpsertOpenTrade:
         assert r2 is not None
         assert len(trades) == 1, "Second upsert of same dealId must not create duplicate"
 
+    def test_broker_confirmed_dealid_backfills_pending_trade_not_duplicate(self, tmp_path):
+        """A pending (dealId-less) trade recorded at order time should be matched and
+        corrected by ticker when the broker-confirmed dealId/size/entry_price arrive
+        slightly different (slippage/fill rounding), instead of creating a duplicate
+        open-position entry that never gets closed."""
+        from trade_log import upsert_open_trade, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {"dealId": None, "dealReference": "ref123", "ticker": "MRVL", "side": "buy",
+             "size": 6.8, "entry_price": 100.00},
+            path=path,
+        )
+        upsert_open_trade(
+            {"dealId": "D999", "dealReference": None, "ticker": "MRVL", "side": "buy",
+             "size": 6.83, "entry_price": 100.02},
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1, "Broker-confirmed position must not create a duplicate entry"
+        assert trades[0]["dealId"] == "D999"
+        assert trades[0]["size"] == pytest.approx(6.83)
+        assert trades[0]["entry_price"] == pytest.approx(100.02)
+
+
+class TestReconcileWithPositions:
+    """Tests for trade_log.reconcile_with_positions duplicate-prevention."""
+
+    def test_live_position_backfills_pending_trade_instead_of_duplicating(self, tmp_path):
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log, close_trade_by_dealId
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {"dealId": None, "dealReference": "ref123", "ticker": "MRVL", "side": "buy",
+             "size": 6.8, "entry_price": 100.00},
+            path=path,
+        )
+
+        live_positions = [{
+            "dealId": "D999", "dealReference": None, "ticker": "MRVL", "side": "buy",
+            "size": 6.83, "entry_price": 100.02,
+        }]
+        result = reconcile_with_positions(live_positions, path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1, "Reconcile must not create a duplicate entry for the same real position"
+        assert not result["added"], "No new entry should be added when a pending trade is backfilled"
+        assert trades[0]["dealId"] == "D999"
+        assert trades[0]["size"] == pytest.approx(6.83)
+
+        # Closing by the real dealId must close the single entry cleanly (no orphan left OPEN).
+        closed = close_trade_by_dealId("D999", exit_price=105.0, path=path)
+        assert closed is not None
+        assert closed["status"] == "CLOSED"
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert trades[0]["status"] == "CLOSED"
+
 
 class TestCloseTradeByDealId:
     """Tests for trade_log.close_trade_by_dealId."""
@@ -183,6 +246,8 @@ class TestSizing:
         monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 500.0})
         monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 0)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 0)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
 
         result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA")
@@ -207,6 +272,25 @@ class TestSizing:
         assert result["equity_used"] == pytest.approx(80.0)
         assert result["exposure"] == pytest.approx(400.0)
         assert result["size"] == pytest.approx(4.0)
+
+    def test_equity_and_exposure_capped_at_configured_max(self, monkeypatch):
+        """Even with a large available balance, equity/exposure per trade are capped."""
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA")
+
+        assert result["blocked"] is False
+        assert result["equity_used"] == pytest.approx(200.0)
+        assert result["exposure"] == pytest.approx(1000.0)
+        assert result["size"] == pytest.approx(10.0)
 
 
 class TestThreadSafety:
