@@ -618,6 +618,8 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
         added: List[Dict[str, Any]] = []
         matched_updates: List[Dict[str, Any]] = []
 
+        reopened: List[Dict[str, Any]] = []
+
         live_ids = set()
         live_positions_by_id = {}
         for p in live_positions or []:
@@ -628,6 +630,26 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                 sdid = str(did)
                 live_ids.add(sdid)
                 live_positions_by_id[sdid] = p
+
+        # Self-heal: if a trade was previously (and incorrectly) marked CLOSED —
+        # e.g. by a webhook "close" alert whose exit_price/dealId didn't reflect an
+        # actual broker-side close — but the broker still reports that dealId as an
+        # open live position, the broker is the source of truth. Revert the trade
+        # to OPEN so it doesn't appear simultaneously as an open position and as a
+        # duplicate completed trade in the log/analytics.
+        if live_ids:
+            for t in trades:
+                if t.get("status") == "CLOSED":
+                    did = t.get("dealId")
+                    if did is not None and str(did) in live_ids:
+                        t["status"] = "OPEN"
+                        t["exit_price"] = None
+                        t["time_exited"] = None
+                        t["time_exited_human"] = None
+                        t["pnl"] = None
+                        t["pnl_gbp"] = None
+                        t["notes"] = (t.get("notes") or "") + " | Reopened: broker still reports this position open"
+                        reopened.append(t)
 
         for t in trades:
             if t.get("status") != "CLOSED":
@@ -774,10 +796,10 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
             added.append(new_pos)
             existing_signatures.add(sig)
 
-        if closed or added or matched_updates:
+        if closed or added or matched_updates or reopened:
             save_raw_log(trades, path)
 
-    return {"closed": closed, "added": added}
+    return {"closed": closed, "added": added, "reopened": reopened}
 
 
 def get_completed_trades(path: str = LOG_PATH) -> List[Dict[str, Any]]:
