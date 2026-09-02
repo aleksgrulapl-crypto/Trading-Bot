@@ -172,6 +172,60 @@ class TestReconcileWithPositions:
         assert len(trades) == 1
         assert trades[0]["status"] == "CLOSED"
 
+    def test_live_position_with_mismatched_dealid_merges_into_existing_open_trade(self, tmp_path):
+        """A live position reported under a dealId that doesn't match any known
+        dealId or dealId-less pending trade must still be merged into the
+        existing OPEN trade for that ticker/side rather than logged as a
+        second, duplicate entry (the bug shown on the dashboard where a
+        completed 'self-closed' trade appears alongside the real open
+        position for the same ticker)."""
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        # Existing OPEN trade already carries a dealId (e.g. reconciled earlier).
+        upsert_open_trade(
+            {"dealId": "D-OLD", "dealReference": "refA", "ticker": "MRVL", "side": "sell",
+             "size": 4.8, "entry_price": 204.95},
+            path=path,
+        )
+
+        # Broker reports the same ticker/side under a different dealId.
+        live_positions = [{
+            "dealId": "D-NEW", "dealReference": None, "ticker": "MRVL", "side": "sell",
+            "size": 4.88, "entry_price": 204.95,
+        }]
+        result = reconcile_with_positions(live_positions, path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1, "Reconcile must not create a duplicate entry for the same ticker/side"
+        assert not result["added"]
+
+    def test_live_position_for_different_ticker_still_added(self, tmp_path):
+        """Sanity check: the widened dedup match must not swallow genuinely
+        different positions for other tickers."""
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {"dealId": "D-OLD", "dealReference": "refA", "ticker": "MRVL", "side": "sell",
+             "size": 4.8, "entry_price": 204.95},
+            path=path,
+        )
+
+        live_positions = [{
+            "dealId": "D-OTHER", "dealReference": None, "ticker": "NFLX", "side": "sell",
+            "size": 50.0, "entry_price": 82.62,
+        }]
+        result = reconcile_with_positions(live_positions, path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 2
+        assert result["added"]
+
 
 class TestCloseTradeByDealId:
     """Tests for trade_log.close_trade_by_dealId."""
@@ -563,3 +617,46 @@ class TestDashboardCloseEndpoint:
 
         assert response.status_code == 502
         assert data["status"] == "error"
+
+
+# ======================================================================== #
+#  webhook: per-ticker order lock (prevents duplicate real broker orders)  #
+# ======================================================================== #
+
+class TestTickerOrderLock:
+    """Tests for webhook._get_ticker_order_lock, which serializes the
+    'check for an open trade -> place order' section per ticker so two
+    near-simultaneous requests for the same ticker can't both race past the
+    open-trade check and place two real orders at the broker."""
+
+    def _webhook_module(self):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import webhook as wh
+        return wh
+
+    def test_same_ticker_returns_same_lock_case_insensitive(self):
+        wh = self._webhook_module()
+        lock1 = wh._get_ticker_order_lock("MRVL")
+        lock2 = wh._get_ticker_order_lock("mrvl")
+        assert lock1 is lock2
+
+    def test_different_tickers_get_different_locks(self):
+        wh = self._webhook_module()
+        lock1 = wh._get_ticker_order_lock("MRVL")
+        lock2 = wh._get_ticker_order_lock("NFLX")
+        assert lock1 is not lock2
+
+    def test_second_concurrent_acquire_for_same_ticker_fails_fast(self):
+        wh = self._webhook_module()
+        lock = wh._get_ticker_order_lock("DUPTEST")
+        assert lock.acquire(blocking=False) is True
+        try:
+            # Simulates a second near-simultaneous webhook request for the
+            # same ticker while the first is still mid-flight placing an order.
+            assert lock.acquire(blocking=False) is False
+        finally:
+            lock.release()
+        # Lock is free again once released, so a later, non-overlapping
+        # request for the same ticker can proceed normally.
+        assert lock.acquire(blocking=False) is True
+        lock.release()

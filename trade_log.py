@@ -341,6 +341,42 @@ def _find_pending_trade_by_ticker(trades: List[Dict[str, Any]], ticker: Any,
     return candidates[0]
 
 
+def _find_open_trade_by_ticker_any_dealid(trades: List[Dict[str, Any]], ticker: Any,
+                                           side: Optional[str], dealId: Any) -> Optional[Dict[str, Any]]:
+    """Find any still-open trade for *ticker* (+ *side*) other than one already
+    carrying *dealId*, regardless of whether it has a dealId of its own.
+
+    Used as a last-resort fallback in reconcile_with_positions() before
+    creating a brand-new log entry for a broker-reported position. Without
+    this, a live position whose dealId doesn't exactly match any known dealId
+    or pending (dealId-less) entry – e.g. because the local trade was already
+    reconciled/mapped under a slightly different dealId, or was opened outside
+    the normal order.place_order() flow – gets logged as a second, duplicate
+    entry for a ticker that already has a genuine open position, instead of
+    being recognised as the same real trade.
+    """
+    if not ticker:
+        return None
+    ticker_norm = str(ticker).strip().lower()
+    dealId_norm = str(dealId) if dealId is not None else None
+    candidates = [
+        t for t in trades
+        if t.get("status") != "CLOSED"
+        and t.get("ticker") and str(t.get("ticker")).strip().lower() == ticker_norm
+        and (dealId_norm is None or str(t.get("dealId")) != dealId_norm)
+    ]
+    if side:
+        side_norm = _normalize_side(side)
+        if side_norm:
+            narrowed = [t for t in candidates if not t.get("side") or _normalize_side(t.get("side")) == side_norm]
+            if narrowed:
+                candidates = narrowed
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: str(t.get("time_entered") or ""), reverse=True)
+    return candidates[0]
+
+
 # ---------------------------------------------------------------------------
 # Core public API
 # ---------------------------------------------------------------------------
@@ -732,6 +768,12 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                         break
             if matched is None and dealId:
                 matched = _find_pending_trade_by_ticker(trades, ticker, side)
+            if matched is None:
+                # Last resort: an already-open trade for this ticker/side exists
+                # but wasn't matched above (e.g. it already carries a different
+                # dealId). Merge into it instead of creating a duplicate entry
+                # for what is almost certainly the same real position.
+                matched = _find_open_trade_by_ticker_any_dealid(trades, ticker, side, dealId)
 
             if matched is not None:
                 changed = False
