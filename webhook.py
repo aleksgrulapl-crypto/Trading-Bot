@@ -24,6 +24,7 @@ from flask import Flask, request, jsonify, render_template, redirect
 import session
 from sizing import calculate_size
 from order import place_order
+from sl_tp import FixedSLTP
 from auth import auth
 from config import API_ACCOUNTS, API_MARKET, API_BASE, DEBUG_LOGS
 from scheduler import start_scheduler
@@ -469,6 +470,21 @@ def webhook():
 
     entry_price = float(offer) if str(action).strip().lower() == "buy" else float(bid)
     logger.debug("[cid=%s] Entry price (actual): %s", cid, entry_price)
+
+    # Compute SL/TP from fixed risk percentages of entry price (config.FIXED_SL_PERC /
+    # FIXED_TP_PERC), overriding whatever levels the TradingView alert supplied, so
+    # every trade risks a consistent, predictable amount regardless of the signal.
+    if str(action).strip().lower() == "buy":
+        fixed_sl, fixed_tp = FixedSLTP.long_levels(entry_price)
+    else:
+        fixed_sl, fixed_tp = FixedSLTP.short_levels(entry_price)
+
+    if fixed_sl is None or fixed_tp is None:
+        logger.warning("[cid=%s] Failed to compute fixed SL/TP for %s @ %s", cid, symbol, entry_price)
+        return _ok_response({"status": "error", "message": "sl_tp_calculation_failed", "entry": entry_price, "cid": cid})
+
+    sl_price, tp_price = fixed_sl, fixed_tp
+    logger.info("[cid=%s] Fixed SL/TP applied → sl=%s tp=%s (alert sl=%s tp=%s)", cid, sl_price, tp_price, alert.get("sl"), alert.get("tp"))
 
     size_info = calculate_size(entry_price=entry_price, sl_price=sl_price, tp_price=tp_price, direction=action, symbol=symbol)
     if size_info.get("blocked"):

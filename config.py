@@ -33,8 +33,19 @@ RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", 0.50))
 EQUITY_PERCENT = float(os.getenv("EQUITY_PERCENT", 0.50))
 LEVERAGE = int(os.getenv("LEVERAGE", 5))
 
-FIXED_SL_PERC = float(os.getenv("FIXED_SL_PERC", 0.10))
-FIXED_TP_PERC = float(os.getenv("FIXED_TP_PERC", 0.20))
+# Hard caps applied on top of EQUITY_PERCENT so a single trade never risks more
+# than a fixed amount of capital, regardless of account balance:
+#   MAX_EQUITY_PER_TRADE   – equity (before leverage) allocated to a trade
+#   MAX_EXPOSURE_PER_TRADE – leveraged exposure allocated to a trade
+# Defaults: up to £200 equity per trade, £1000 exposure at 5x leverage.
+MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 200))
+MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 1000))
+
+# SL/TP expressed as a percentage price move from entry. With MAX_EXPOSURE_PER_TRADE
+# capped at £1000, FIXED_SL_PERC=0.01 (1%) caps the loss at £10 (5% of the £200
+# equity used) and FIXED_TP_PERC=0.08 (8%) caps the gain at £80 (40% of equity).
+FIXED_SL_PERC = float(os.getenv("FIXED_SL_PERC", 0.01))
+FIXED_TP_PERC = float(os.getenv("FIXED_TP_PERC", 0.08))
 
 # FX conversion (USD -> GBP)
 # - Keep a default so the app works without env set.
