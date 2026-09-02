@@ -17,16 +17,28 @@ import json
 import logging
 import functools
 import threading
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from flask import Flask, request, jsonify, render_template, redirect
+
+import pytz
 
 import session
 from sizing import calculate_size
 from order import place_order
 from sl_tp import FixedSLTP
 from auth import auth
-from config import API_ACCOUNTS, API_MARKET, API_BASE, DEBUG_LOGS
+from config import (
+    API_ACCOUNTS,
+    API_MARKET,
+    API_BASE,
+    DEBUG_LOGS,
+    TIMEZONE,
+    TRADE_LOCK_ENABLED,
+    TRADE_LOCK_START_HOUR,
+    TRADE_LOCK_END_HOUR,
+)
 from scheduler import start_scheduler
 from trade_log import (
     load_raw_log,
@@ -44,6 +56,24 @@ AUTH_RETRY_COUNT = 6          # attempts to obtain auth token on startup
 AUTH_RETRY_BACKOFF = 5        # seconds between startup auth retries
 BROKER_API_TIMEOUT = 30       # seconds – applied to all outbound broker requests
 ALERT_DEDUPE_WINDOW = 10      # seconds – suppress identical repeat alerts (TradingView retries)
+
+_UK_TZ = pytz.timezone(TIMEZONE)
+
+
+def _is_trade_locked_now() -> bool:
+    """
+    Return True if new trade entries should currently be blocked, per the
+    configured trade time lock window (default 14:00-15:00 UK time), which
+    covers the US cash market open and its associated volatility spike.
+    """
+    if not TRADE_LOCK_ENABLED:
+        return False
+    hour = datetime.now(_UK_TZ).hour
+    start, end = TRADE_LOCK_START_HOUR, TRADE_LOCK_END_HOUR
+    if start <= end:
+        return start <= hour < end
+    # Wrap-around window (e.g. start=23, end=1)
+    return hour >= start or hour < end
 
 # In-memory cache of recently processed TradingView alerts, keyed by a
 # signature of the alert content. Used to guard against TradingView
@@ -423,6 +453,11 @@ def webhook():
     if alert.get("blocked"):
         logger.info("[cid=%s] Alert blocked: %s", cid, alert.get("reason"))
         return _ok_response({"status": "blocked", "reason": alert.get("reason"), "cid": cid})
+
+    if _is_trade_locked_now():
+        logger.info("[cid=%s] New trade blocked by trade time lock (%02d:00-%02d:00 UK time)",
+                    cid, TRADE_LOCK_START_HOUR, TRADE_LOCK_END_HOUR)
+        return _ok_response({"status": "blocked", "reason": "trade_time_lock", "cid": cid})
 
     symbol = alert.get("symbol")
     action = alert.get("action")

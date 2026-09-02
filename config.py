@@ -85,6 +85,13 @@ DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "Killen123%")
 
 # Timezone and reporting
 TIMEZONE = os.getenv("TIMEZONE", "Europe/London")
+
+# Trade time lock: block opening new trades during a high-volatility window
+# (e.g. the US cash market open at 14:30 UK time), to reduce volatility
+# exposure and improve winrate. Hours are in 24h UK local time (TIMEZONE).
+TRADE_LOCK_ENABLED = os.getenv("TRADE_LOCK_ENABLED", "True").lower() in ("1", "true", "yes")
+TRADE_LOCK_START_HOUR = int(os.getenv("TRADE_LOCK_START_HOUR", 14))
+TRADE_LOCK_END_HOUR = int(os.getenv("TRADE_LOCK_END_HOUR", 15))
 DAILY_REPORT_ENABLED = os.getenv("DAILY_REPORT_ENABLED", "True").lower() in ("1", "true", "yes")
 DAILY_REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", 22))
 DAILY_REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", 0))
