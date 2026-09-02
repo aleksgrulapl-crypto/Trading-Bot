@@ -82,6 +82,29 @@ def _is_trade_locked_now() -> bool:
 _recent_alert_cache: Dict[str, float] = {}
 _recent_alert_lock = threading.Lock()
 
+# Per-ticker locks serializing the "check for an existing open trade -> place
+# order" critical section in webhook(). Without this, two near-simultaneous
+# requests for the same ticker (e.g. a genuine retry/duplicate delivery from
+# TradingView) can both pass the _has_open_trade_for_ticker() check before
+# either one's resulting trade has been appended to the log (that check-and
+# the eventual log append are separated by several slow network calls: epic
+# lookup, market snapshot, account/sizing lookup, and order placement).  That
+# race results in two real orders being placed at the broker for the same
+# signal, which is what shows up as a genuine duplicated/self-closed trade in
+# the log alongside the real open position.
+_ticker_order_locks: Dict[str, threading.Lock] = {}
+_ticker_order_locks_guard = threading.Lock()
+
+
+def _get_ticker_order_lock(ticker: str) -> threading.Lock:
+    key = str(ticker).strip().lower()
+    with _ticker_order_locks_guard:
+        lock = _ticker_order_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _ticker_order_locks[key] = lock
+        return lock
+
 
 def _alert_signature(symbol: Optional[str], action: Optional[str], sl_price: Optional[float],
                       tp_price: Optional[float], timeframe: Optional[str]) -> str:
@@ -482,58 +505,72 @@ def webhook():
         logger.warning("[cid=%s] Duplicate alert suppressed (repeat within %ss): %s", cid, ALERT_DEDUPE_WINDOW, alert_sig)
         return _ok_response({"status": "blocked", "reason": "duplicate_alert", "symbol": symbol, "cid": cid})
 
-    if _has_open_trade_for_ticker(epic):
-        logger.warning("[cid=%s] Duplicate order suppressed – open trade already exists for %s", cid, epic)
-        return _ok_response({"status": "blocked", "reason": "duplicate_open_position", "symbol": symbol, "epic": epic, "cid": cid})
-
-    market_resp = session.request("GET", f"{API_MARKET}/{epic}", timeout=BROKER_API_TIMEOUT)
-    if not market_resp or getattr(market_resp, "status_code", 0) != 200:
-        logger.warning("[cid=%s] Market snapshot unavailable for %s", cid, epic)
-        return _ok_response({"status": "error", "message": "market_snapshot_unavailable", "epic": epic, "cid": cid})
-
-    try:
-        snapshot = market_resp.json().get("snapshot", {}) or {}
-    except Exception:
-        logger.exception("[cid=%s] Failed to parse market snapshot JSON", cid)
-        return _ok_response({"status": "error", "message": "market_snapshot_parse_error", "cid": cid})
-
-    bid = snapshot.get("bid")
-    offer = snapshot.get("offer")
-    if bid is None or offer is None:
-        logger.warning("[cid=%s] Market prices unavailable for %s", cid, epic)
-        return _ok_response({"status": "error", "message": "price_unavailable", "epic": epic, "missing_fields": [f for f in ("bid", "offer") if snapshot.get(f) is None], "cid": cid})
-
-    entry_price = float(offer) if str(action).strip().lower() == "buy" else float(bid)
-    logger.debug("[cid=%s] Entry price (actual): %s", cid, entry_price)
-
-    # Compute SL/TP from fixed risk percentages of entry price (config.FIXED_SL_PERC /
-    # FIXED_TP_PERC), overriding whatever levels the TradingView alert supplied, so
-    # every trade risks a consistent, predictable amount regardless of the signal.
-    if str(action).strip().lower() == "buy":
-        fixed_sl, fixed_tp = FixedSLTP.long_levels(entry_price)
-    else:
-        fixed_sl, fixed_tp = FixedSLTP.short_levels(entry_price)
-
-    if fixed_sl is None or fixed_tp is None:
-        logger.warning("[cid=%s] Failed to compute fixed SL/TP for %s @ %s", cid, symbol, entry_price)
-        return _ok_response({"status": "error", "message": "sl_tp_calculation_failed", "entry": entry_price, "cid": cid})
-
-    sl_price, tp_price = fixed_sl, fixed_tp
-    logger.info("[cid=%s] Fixed SL/TP applied → sl=%s tp=%s (alert sl=%s tp=%s)", cid, sl_price, tp_price, alert.get("sl"), alert.get("tp"))
-
-    size_info = calculate_size(entry_price=entry_price, sl_price=sl_price, tp_price=tp_price, direction=action, symbol=symbol)
-    if size_info.get("blocked"):
-        logger.info("[cid=%s] Sizing blocked: %s", cid, size_info.get("reason"))
-        return _ok_response({"status": "blocked", "reason": size_info.get("reason"), "sl": sl_price, "tp": tp_price, "entry": entry_price, "cid": cid})
-
-    size = size_info.get("size")
-    logger.info("[cid=%s] Final SL=%s TP=%s SIZE=%s", cid, sl_price, tp_price, size)
+    # Serialize the "check for an existing open trade -> place order" section
+    # per ticker. Without this, two near-simultaneous requests for the same
+    # ticker can both pass _has_open_trade_for_ticker() before either one's
+    # resulting trade is appended to the log (that check and the eventual log
+    # append are separated by several slow network calls below), causing two
+    # real orders to be placed at the broker for the same signal.
+    ticker_lock = _get_ticker_order_lock(epic)
+    if not ticker_lock.acquire(blocking=False):
+        logger.warning("[cid=%s] Duplicate order suppressed – order already in flight for %s", cid, epic)
+        return _ok_response({"status": "blocked", "reason": "order_in_flight", "symbol": symbol, "epic": epic, "cid": cid})
 
     try:
-        result = place_order(epic, action, size, sl_price, tp_price, timeframe=timeframe)
-    except Exception:
-        logger.exception("[cid=%s] place_order raised an exception", cid)
-        return _ok_response({"status": "error", "message": "order_failed", "cid": cid})
+        if _has_open_trade_for_ticker(epic):
+            logger.warning("[cid=%s] Duplicate order suppressed – open trade already exists for %s", cid, epic)
+            return _ok_response({"status": "blocked", "reason": "duplicate_open_position", "symbol": symbol, "epic": epic, "cid": cid})
+
+        market_resp = session.request("GET", f"{API_MARKET}/{epic}", timeout=BROKER_API_TIMEOUT)
+        if not market_resp or getattr(market_resp, "status_code", 0) != 200:
+            logger.warning("[cid=%s] Market snapshot unavailable for %s", cid, epic)
+            return _ok_response({"status": "error", "message": "market_snapshot_unavailable", "epic": epic, "cid": cid})
+
+        try:
+            snapshot = market_resp.json().get("snapshot", {}) or {}
+        except Exception:
+            logger.exception("[cid=%s] Failed to parse market snapshot JSON", cid)
+            return _ok_response({"status": "error", "message": "market_snapshot_parse_error", "cid": cid})
+
+        bid = snapshot.get("bid")
+        offer = snapshot.get("offer")
+        if bid is None or offer is None:
+            logger.warning("[cid=%s] Market prices unavailable for %s", cid, epic)
+            return _ok_response({"status": "error", "message": "price_unavailable", "epic": epic, "missing_fields": [f for f in ("bid", "offer") if snapshot.get(f) is None], "cid": cid})
+
+        entry_price = float(offer) if str(action).strip().lower() == "buy" else float(bid)
+        logger.debug("[cid=%s] Entry price (actual): %s", cid, entry_price)
+
+        # Compute SL/TP from fixed risk percentages of entry price (config.FIXED_SL_PERC /
+        # FIXED_TP_PERC), overriding whatever levels the TradingView alert supplied, so
+        # every trade risks a consistent, predictable amount regardless of the signal.
+        if str(action).strip().lower() == "buy":
+            fixed_sl, fixed_tp = FixedSLTP.long_levels(entry_price)
+        else:
+            fixed_sl, fixed_tp = FixedSLTP.short_levels(entry_price)
+
+        if fixed_sl is None or fixed_tp is None:
+            logger.warning("[cid=%s] Failed to compute fixed SL/TP for %s @ %s", cid, symbol, entry_price)
+            return _ok_response({"status": "error", "message": "sl_tp_calculation_failed", "entry": entry_price, "cid": cid})
+
+        sl_price, tp_price = fixed_sl, fixed_tp
+        logger.info("[cid=%s] Fixed SL/TP applied → sl=%s tp=%s (alert sl=%s tp=%s)", cid, sl_price, tp_price, alert.get("sl"), alert.get("tp"))
+
+        size_info = calculate_size(entry_price=entry_price, sl_price=sl_price, tp_price=tp_price, direction=action, symbol=symbol)
+        if size_info.get("blocked"):
+            logger.info("[cid=%s] Sizing blocked: %s", cid, size_info.get("reason"))
+            return _ok_response({"status": "blocked", "reason": size_info.get("reason"), "sl": sl_price, "tp": tp_price, "entry": entry_price, "cid": cid})
+
+        size = size_info.get("size")
+        logger.info("[cid=%s] Final SL=%s TP=%s SIZE=%s", cid, sl_price, tp_price, size)
+
+        try:
+            result = place_order(epic, action, size, sl_price, tp_price, timeframe=timeframe)
+        except Exception:
+            logger.exception("[cid=%s] place_order raised an exception", cid)
+            return _ok_response({"status": "error", "message": "order_failed", "cid": cid})
+    finally:
+        ticker_lock.release()
 
     session.update_last_trade()
     return _ok_response({"status": "ok", "result": result, "cid": cid})
