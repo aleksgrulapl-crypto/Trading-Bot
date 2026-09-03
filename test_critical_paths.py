@@ -261,6 +261,97 @@ class TestCloseTradeByDealId:
         result = close_trade_by_dealId("D1", exit_price=120, path=path)
         assert result is None, "Should not re-close an already closed trade"
 
+    def test_closes_all_rows_sharing_a_duplicate_dealId(self, tmp_path):
+        """Defensive fix: if a duplicate row for the same real position ever
+        slips into the log sharing a dealId (e.g. the reconcile ticker-
+        mismatch bug), closing that dealId must close *every* OPEN row
+        carrying it instead of leaving the second one stuck OPEN forever
+        (previously guaranteed by closed_ids/_last_close_cache in
+        sync_closed_trades(), which are keyed by dealId, not by row)."""
+        from trade_log import close_trade_by_dealId, load_raw_log, save_raw_log
+        path = str(tmp_path / "log.json")
+        # Construct the duplicate-dealId scenario directly (upsert_open_trade
+        # itself would correctly match the second call to the first row by
+        # dealId, so this bypasses that to simulate a duplicate that already
+        # slipped into the log another way, e.g. the reconcile ticker bug).
+        duplicated_rows = [
+            {"dealId": "DUP", "ticker": "STX", "side": "short", "size": 1.2,
+             "entry_price": 790.25, "status": "OPEN"},
+            {"dealId": "DUP", "ticker": "Seagate Technology", "side": "short", "size": 1.2,
+             "entry_price": 790.25, "status": "OPEN"},
+        ]
+        save_raw_log(duplicated_rows, path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 2, "test setup should have created two rows sharing the same dealId"
+        assert all(t.get("status") == "OPEN" for t in trades)
+
+        close_trade_by_dealId("DUP", exit_price=791.71, pnl=-1.29, path=path)
+
+        trades = load_raw_log(path)
+        assert all(t.get("status") == "CLOSED" for t in trades), "Every row sharing the dealId must be closed, not just the first"
+
+
+class TestReconcileTickerMatching:
+    """Regression tests: reconcile_with_positions() must match a bot/TradingView
+    -opened pending trade by the broker's stable epic code, not the market's
+    human-readable display symbol, or every such trade spawns a duplicate
+    'Imported from live positions' log entry for the same real position."""
+
+    def test_enriched_position_matches_pending_trade_by_epic_not_display_symbol(self, tmp_path):
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        # order.py logs bot-opened trades with ticker=epic (e.g. "STX"), still
+        # pending a real dealId until the broker's confirms endpoint responds.
+        upsert_open_trade(
+            {"dealId": None, "dealReference": "ref123", "ticker": "STX", "side": "sell",
+             "size": 1.2, "entry_price": 790.25},
+            path=path,
+        )
+
+        # session.enrich_positions() reports the live position with BOTH a
+        # display "ticker" (market.symbol, e.g. the company name) and the
+        # stable "epic" code alongside the broker-confirmed dealId.
+        live_positions = [{
+            "dealId": "D-REAL", "dealReference": None,
+            "ticker": "Seagate Technology", "epic": "STX",
+            "side": "sell", "size": 1.2, "entry_price": 790.25,
+        }]
+        result = reconcile_with_positions(live_positions, path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1, "Must backfill the pending trade instead of creating a duplicate entry"
+        assert not result["added"]
+        assert trades[0]["dealId"] == "D-REAL"
+
+    def test_nested_broker_shape_matches_pending_trade_by_epic(self, tmp_path):
+        """Same regression, but for the raw (unenriched) {'position', 'market'}
+        broker payload shape."""
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {"dealId": None, "dealReference": "ref123", "ticker": "STX", "side": "sell",
+             "size": 1.2, "entry_price": 790.25},
+            path=path,
+        )
+
+        live_positions = [{
+            "position": {"dealId": "D-REAL", "direction": "SELL", "size": 1.2, "level": 790.25},
+            "market": {"epic": "STX", "symbol": "Seagate Technology"},
+        }]
+        result = reconcile_with_positions(live_positions, path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1, "Must backfill the pending trade instead of creating a duplicate entry"
+        assert not result["added"]
+        assert trades[0]["dealId"] == "D-REAL"
+
 
 class TestFxRateValidation:
     """Tests for _read_fx_rate range validation."""

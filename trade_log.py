@@ -584,11 +584,23 @@ def _apply_pnl(t: Dict[str, Any], broker_pnl: Any = None) -> None:
 
 def close_trade_by_dealId(dealId: Any, exit_price: Any = None, time_exited: Optional[str] = None,
                            note: Optional[str] = None, pnl: Any = None, path: str = LOG_PATH) -> Optional[Dict[str, Any]]:
-    """Mark the open trade with *dealId* as CLOSED and compute P&L.
+    """Mark the open trade(s) with *dealId* as CLOSED and compute P&L.
 
     If *pnl* (the broker-confirmed profit/loss) is supplied, it is used
     directly instead of being recomputed locally from entry/exit price and
     size, so the logged figure matches what actually happened on the broker.
+
+    Closes *every* still-OPEN entry carrying this dealId, not just the first
+    one found. Under normal operation there is only ever one such entry, but
+    if a duplicate row for the same real position ever slips into the log
+    (e.g. an older bug in reconcile_with_positions()'s ticker matching), only
+    closing the first match left the duplicate stuck OPEN forever – every
+    later poll would skip it because its dealId was already present among
+    CLOSED entries (sync_closed_trades()'s closed_ids/_last_close_cache
+    guards are dealId-keyed, not row-keyed). Closing all matches here means a
+    stray duplicate is resolved (and visually deduplicated by the dashboard,
+    which prefers CLOSED over OPEN for identical dealIds) rather than
+    lingering as a phantom open position indefinitely.
     """
     with _trade_log_lock:
         trades = load_raw_log(path)
@@ -606,8 +618,8 @@ def close_trade_by_dealId(dealId: Any, exit_price: Any = None, time_exited: Opti
                 _apply_pnl(t, broker_pnl=pnl)
                 if note:
                     t["notes"] = (t.get("notes") or "") + " | " + note
-                updated = t
-                break
+                if updated is None:
+                    updated = t
         if updated:
             save_raw_log(trades, path)
         return updated
@@ -754,7 +766,17 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                 if p.get("dealId") is not None:
                     dealId = p.get("dealId")
                     dealReference = p.get("dealReference")
-                    ticker = p.get("ticker") or p.get("epic")
+                    # Match on the broker's stable epic code first, not the
+                    # market's human-readable display symbol (e.g. "Seagate
+                    # Technology" vs epic "STX"). Trades opened via the bot
+                    # (order.py/webhook.py) are always logged with ticker=epic,
+                    # so preferring the display symbol here made every such
+                    # trade fail ticker-based matching below (_find_pending_
+                    # trade_by_ticker / _find_open_trade_by_ticker_any_dealid),
+                    # causing this loop to log a brand-new duplicate entry for
+                    # a position that already had a pending/open row in the
+                    # log instead of updating it in place.
+                    ticker = p.get("epic") or p.get("ticker")
                     entry_price = p.get("price") or p.get("entry_price") or p.get("level")
                     side = _normalize_side(p.get("side") or p.get("direction"))
                     size = p.get("size")
@@ -765,7 +787,9 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                     market = p.get("market") or {}
                     dealId = pos.get("dealId") or pos.get("dealReference")
                     dealReference = pos.get("dealReference") or p.get("dealReference")
-                    ticker = market.get("symbol") or pos.get("instrumentName") or pos.get("instrument")
+                    # Same rationale as above: prefer the epic code so this
+                    # matches the ticker convention used by order.py/webhook.py.
+                    ticker = market.get("epic") or market.get("symbol") or pos.get("instrumentName") or pos.get("instrument")
                     entry_price = pos.get("level") or pos.get("price") or pos.get("entry_price")
                     side = _normalize_side(pos.get("direction"))
                     size = pos.get("size")
