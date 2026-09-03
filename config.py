@@ -41,9 +41,15 @@ LEVERAGE = int(os.getenv("LEVERAGE", 5))
 MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 200))
 MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 1000))
 
-# SL/TP expressed as a percentage price move from entry. With MAX_EXPOSURE_PER_TRADE
-# capped at £1000, FIXED_SL_PERC=0.20 (20%) caps the loss at £200 (the £200
-# equity used) and FIXED_TP_PERC=0.40 (40%) caps the gain at £400 (200% of equity).
+# SL/TP expressed as a percentage of the EQUITY USED for the trade (not the
+# leveraged exposure/full account balance), so risk is predictable regardless
+# of leverage. E.g. with MAX_EQUITY_PER_TRADE=£200: FIXED_SL_PERC=0.20 (20%)
+# caps the loss at £40 (20% of the £200 equity used) and FIXED_TP_PERC=0.40
+# (40%) caps the gain at £80 (40% of the £200 equity used). sl_tp.FixedSLTP
+# converts these equity-based percentages into the actual price-move
+# percentage by dividing by LEVERAGE (since exposure = equity_used *
+# LEVERAGE, a price move of equity_perc/LEVERAGE yields exactly
+# equity_perc * equity_used in £ terms).
 FIXED_SL_PERC = float(os.getenv("FIXED_SL_PERC", 0.20))
 FIXED_TP_PERC = float(os.getenv("FIXED_TP_PERC", 0.40))
 
@@ -92,6 +98,22 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/London")
 TRADE_LOCK_ENABLED = os.getenv("TRADE_LOCK_ENABLED", "True").lower() in ("1", "true", "yes")
 TRADE_LOCK_START_HOUR = int(os.getenv("TRADE_LOCK_START_HOUR", 14))
 TRADE_LOCK_END_HOUR = int(os.getenv("TRADE_LOCK_END_HOUR", 15))
+
+# Guard against auto-closing a trade moments after it was opened: a
+# freshly-created broker position can transiently fail to appear in the
+# /positions list (or 404 from the single-position endpoint) for a few
+# seconds while the broker propagates it. Disappearance-based close
+# detection (history_sync.sync_closed_trades) ignores trades younger than
+# this many seconds; a genuine size==0 report is still honoured immediately.
+AUTOCLOSE_GRACE_PERIOD_SECONDS = float(os.getenv("AUTOCLOSE_GRACE_PERIOD_SECONDS", 60))
+
+# Hedging: when enabled, an incoming signal opposite to an already-open
+# position for the same ticker (e.g. a "buy" alert while a short is open) is
+# treated as a legitimate hedge and allowed through, instead of being
+# suppressed by the duplicate-open-position guard. A same-direction signal
+# for a ticker that already has an open position of that direction is still
+# suppressed as a duplicate.
+HEDGING_ENABLED = os.getenv("HEDGING_ENABLED", "True").lower() in ("1", "true", "yes")
 DAILY_REPORT_ENABLED = os.getenv("DAILY_REPORT_ENABLED", "True").lower() in ("1", "true", "yes")
 DAILY_REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", 22))
 DAILY_REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", 0))

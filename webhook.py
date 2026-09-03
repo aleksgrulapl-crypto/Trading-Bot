@@ -38,6 +38,7 @@ from config import (
     TRADE_LOCK_ENABLED,
     TRADE_LOCK_START_HOUR,
     TRADE_LOCK_END_HOUR,
+    HEDGING_ENABLED,
 )
 from scheduler import start_scheduler
 from trade_log import (
@@ -46,6 +47,7 @@ from trade_log import (
     upsert_open_trade,
     set_dealId_for_dealReference,
     close_trade_by_dealId,
+    _normalize_side,
 )
 from close_position import close_position as close_position_module
 
@@ -127,8 +129,17 @@ def _is_duplicate_alert(signature: str) -> bool:
         return False
 
 
-def _has_open_trade_for_ticker(ticker: Optional[str]) -> bool:
-    """Return True if the trade log already has an OPEN trade for this ticker/epic."""
+def _has_open_trade_for_ticker(ticker: Optional[str], action: Optional[str] = None) -> bool:
+    """Return True if the trade log already has an OPEN trade for this ticker/epic
+    that should block a new order for *action* ("buy"/"sell").
+
+    When HEDGING_ENABLED is on, an open trade on the opposite side (e.g. an
+    open short while the new signal is "buy") is a legitimate hedge and does
+    not block the new order – only an open trade on the *same* side is
+    treated as a duplicate. When hedging is disabled (or *action* isn't
+    provided), any open trade for the ticker blocks the new order, matching
+    the previous behaviour.
+    """
     if not ticker:
         return False
     try:
@@ -137,10 +148,17 @@ def _has_open_trade_for_ticker(ticker: Optional[str]) -> bool:
         logger.exception("_has_open_trade_for_ticker: failed to load trade log")
         return False
     ticker_norm = str(ticker).strip().lower()
+    new_side = _normalize_side(action) if (HEDGING_ENABLED and action) else None
     for t in trades:
         if t.get("status") == "OPEN":
             existing_ticker = t.get("ticker") or t.get("epic")
             if existing_ticker and str(existing_ticker).strip().lower() == ticker_norm:
+                if new_side is not None:
+                    existing_side = _normalize_side(t.get("side"))
+                    if existing_side and existing_side != new_side:
+                        # Opposite-direction position already open – allow the
+                        # new order through as a hedge instead of blocking it.
+                        continue
                 return True
     return False
 
@@ -517,7 +535,7 @@ def webhook():
         return _ok_response({"status": "blocked", "reason": "order_in_flight", "symbol": symbol, "epic": epic, "cid": cid})
 
     try:
-        if _has_open_trade_for_ticker(epic):
+        if _has_open_trade_for_ticker(epic, action):
             logger.warning("[cid=%s] Duplicate order suppressed – open trade already exists for %s", cid, epic)
             return _ok_response({"status": "blocked", "reason": "duplicate_open_position", "symbol": symbol, "epic": epic, "cid": cid})
 
