@@ -15,6 +15,7 @@ from trade_log import (
     close_trade_fallback,
 )
 from utils import timestamp
+from datetime import datetime
 
 logger = logging.getLogger("sync_closed_trades")
 if not logger.handlers:
@@ -37,21 +38,51 @@ def _now() -> float:
     return time.time()
 
 
-def _fetch_exit_from_history(deal_id: str) -> Tuple[Optional[float], Optional[float]]:
+def _parse_broker_timestamp(value) -> Optional[str]:
     """
-    Query Capital.com transaction history for the actual close level and P&L.
-    Returns (exit_price, pnl) — either may be None if not found.
+    Normalize a Capital.com transaction timestamp (Unix seconds/milliseconds
+    or an ISO string, with or without a trailing "Z") into the
+    "YYYY-MM-DD HH:MM:SS" string format understood by trade_log's timestamp
+    parsing (_parse_iso_like), or None if *value* is missing/unparseable.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            dt = datetime.utcfromtimestamp(value / 1000.0 if value > 1e12 else value)
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+    if isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", ""))
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+    return None
+
+
+def _fetch_exit_from_history(deal_id: str) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+    """
+    Query Capital.com transaction history for the actual close level, P&L, and
+    close time. Returns (exit_price, pnl, close_time) — any may be None if not
+    found. *close_time* is the broker's real close timestamp (parsed from the
+    transaction's closeDate/date field), which should be preferred over "now"
+    (the moment our polling loop happened to detect the close) so that
+    time_exited – and the analytics derived from it – reflect when the
+    position was actually closed rather than when we noticed.
     """
     try:
         r = session.request("GET", f"{config.API_HISTORY_TRANSACTIONS}?max=200")
         if not r or r.status_code != 200:
-            return None, None
+            return None, None, None
         transactions = (r.json() or {}).get("transactions", []) or []
         for tx in transactions:
             tx_id = tx.get("dealId") or tx.get("positionId")
             if tx_id and str(tx_id) == str(deal_id):
                 ep = tx.get("closeLevel") or tx.get("level") or tx.get("price")
                 pnl = tx.get("profitAndLoss") or tx.get("pnl") or tx.get("profit") or tx.get("profitLoss")
+                close_ts_raw = tx.get("closeDate") or tx.get("dateUtc") or tx.get("date")
                 try:
                     ep = float(ep) if ep is not None else None
                 except Exception:
@@ -60,10 +91,11 @@ def _fetch_exit_from_history(deal_id: str) -> Tuple[Optional[float], Optional[fl
                     pnl = float(pnl) if pnl is not None else None
                 except Exception:
                     pnl = None
-                return ep, pnl
+                close_time = _parse_broker_timestamp(close_ts_raw)
+                return ep, pnl, close_time
     except Exception as e:
         logger.debug("_fetch_exit_from_history error for %s: %s", deal_id, e)
-    return None, None
+    return None, None, None
 
 
 def _confirm_position_gone(deal_id: str) -> Optional[bool]:
@@ -257,8 +289,8 @@ def sync_closed_trades():
         except Exception:
             entry_price = 0.0
 
-        # Step 1: try to get actual close price from Capital.com transaction history
-        exit_price, broker_pnl = _fetch_exit_from_history(deal_id)
+        # Step 1: try to get actual close price/time from Capital.com transaction history
+        exit_price, broker_pnl, broker_close_time = _fetch_exit_from_history(deal_id)
         pnl = broker_pnl
 
         # Step 2: fall back to market snapshot if history didn't have it
@@ -280,16 +312,22 @@ def sync_closed_trades():
             else:
                 pnl = round((entry_price - exit_price) * trade_size, 2)
 
-        logger.info("sync_closed_trades: CLOSED detected → epic=%s dealId=%s exit=%s pnl=%s (broker_pnl=%s)",
-                    epic, deal_id, exit_price, pnl, broker_pnl)
+        logger.info("sync_closed_trades: CLOSED detected → epic=%s dealId=%s exit=%s pnl=%s (broker_pnl=%s) close_time=%s",
+                    epic, deal_id, exit_price, pnl, broker_pnl, broker_close_time)
+
+        # Prefer the broker's actual close time (from transaction history) over
+        # "now" (the moment this poll happened to detect the close), so that
+        # time_exited – and any analytics derived from it (e.g. duration,
+        # trades-per-hour) – reflect the true close rather than detection lag.
+        time_exited = broker_close_time or timestamp()
 
         # Prefer marking by dealId; if trade_log has no matching dealId, fallback by ticker+entry_price
         # Pass broker_pnl (not the possibly-estimated `pnl`) so trade_log only overrides its own
         # computed figure when Capital.com's transaction history actually reported one.
-        updated = close_trade_by_dealId(deal_id, exit_price=exit_price, time_exited=timestamp(), note="Closed via sync", pnl=broker_pnl)
+        updated = close_trade_by_dealId(deal_id, exit_price=exit_price, time_exited=time_exited, note="Closed via sync", pnl=broker_pnl)
         if not updated:
             # fallback: try to close by ticker + entry_price
-            fallback = close_trade_fallback(trade.get("ticker") or epic, entry_price, exit_price=exit_price, time_exited=timestamp(), note="Closed via sync (fallback)", pnl=broker_pnl)
+            fallback = close_trade_fallback(trade.get("ticker") or epic, entry_price, exit_price=exit_price, time_exited=time_exited, note="Closed via sync (fallback)", pnl=broker_pnl)
             if not fallback:
                 logger.warning("sync_closed_trades: could not close trade for dealId=%s (no matching open trade found)", deal_id)
             else:

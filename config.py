@@ -92,6 +92,14 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/London")
 TRADE_LOCK_ENABLED = os.getenv("TRADE_LOCK_ENABLED", "True").lower() in ("1", "true", "yes")
 TRADE_LOCK_START_HOUR = int(os.getenv("TRADE_LOCK_START_HOUR", 14))
 TRADE_LOCK_END_HOUR = int(os.getenv("TRADE_LOCK_END_HOUR", 15))
+
+# Hedging: when enabled, an incoming signal opposite to an already-open
+# position for the same ticker (e.g. a "buy" alert while a short is open) is
+# treated as a legitimate hedge and allowed through, instead of being
+# suppressed by the duplicate-open-position guard. A same-direction signal
+# for a ticker that already has an open position of that direction is still
+# suppressed as a duplicate.
+HEDGING_ENABLED = os.getenv("HEDGING_ENABLED", "True").lower() in ("1", "true", "yes")
 DAILY_REPORT_ENABLED = os.getenv("DAILY_REPORT_ENABLED", "True").lower() in ("1", "true", "yes")
 DAILY_REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", 22))
 DAILY_REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", 0))
