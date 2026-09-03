@@ -15,7 +15,7 @@ from trade_log import (
     close_trade_fallback,
 )
 from utils import timestamp
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger("sync_closed_trades")
 if not logger.handlers:
@@ -36,6 +36,42 @@ _absent_count: dict = {}
 
 def _now() -> float:
     return time.time()
+
+
+def _parse_entry_time_to_utc_naive(value) -> Optional[datetime]:
+    """
+    Best-effort parse of a trade's time_entered value (an ISO-8601 string,
+    possibly UK-timezone-aware, or one of trade_log's alternate human formats)
+    into a naive UTC datetime, so it can be diffed against datetime.utcnow()
+    to compute the trade's age in seconds.
+    """
+    if not value:
+        return None
+    s = str(value)
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except Exception:
+        pass
+    for fmt in ("%Y-%m-%d %H.%M.%S", "%Y-%m-%d %H:%M:%S", "%d-%m-%Y %H:%M:%S"):
+        try:
+            return datetime.strptime(s, fmt)
+        except Exception:
+            continue
+    return None
+
+
+def _trade_age_seconds(trade) -> Optional[float]:
+    """Return how many seconds ago *trade* was opened, or None if unknown."""
+    entered = _parse_entry_time_to_utc_naive(trade.get("time_entered"))
+    if entered is None:
+        return None
+    try:
+        return (datetime.utcnow() - entered).total_seconds()
+    except Exception:
+        return None
 
 
 def _parse_broker_timestamp(value) -> Optional[str]:
@@ -259,6 +295,25 @@ def sync_closed_trades():
         if not (size_zero or disappeared):
             # not a close candidate
             continue
+
+        if disappeared and not size_zero:
+            # A just-opened position can transiently fail to appear in the
+            # aggregate /positions list (or even 404 from the single-position
+            # endpoint below) for a few seconds while the broker propagates
+            # the new position, which would otherwise cause the trade to be
+            # wrongly auto-closed moments after it was opened. Give freshly
+            # opened trades a grace period before trusting disappearance-based
+            # signals; a genuine size==0 report is still honoured immediately
+            # since it comes directly from the broker for that dealId.
+            age_seconds = _trade_age_seconds(trade)
+            grace_period = float(getattr(config, "AUTOCLOSE_GRACE_PERIOD_SECONDS", 60) or 0)
+            if age_seconds is not None and age_seconds < grace_period:
+                logger.debug(
+                    "sync_closed_trades: %s opened %.0fs ago (< %.0fs grace period); ignoring disappearance likely due to broker propagation delay",
+                    deal_id, age_seconds, grace_period,
+                )
+                _absent_count.pop(deal_id, None)
+                continue
 
         if disappeared and not size_zero:
             # The aggregate /positions list is only a hint here – it can

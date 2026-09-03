@@ -25,12 +25,23 @@ class FixedSLTP:
 
     @staticmethod
     def _get_percents() -> Tuple[float, float, float]:
-        sl_perc = float(getattr(config, "FIXED_SL_PERC", 0.20))  # default 20%
-        tp_perc = float(getattr(config, "FIXED_TP_PERC", 0.40))  # default 40%
-        min_sl_perc = float(getattr(config, "MIN_SL_PERC", 0.005))  # minimum 0.5% distance
+        sl_perc_of_equity = float(getattr(config, "FIXED_SL_PERC", 0.20))  # default 20% of equity used
+        tp_perc_of_equity = float(getattr(config, "FIXED_TP_PERC", 0.40))  # default 40% of equity used
+        min_sl_perc = float(getattr(config, "MIN_SL_PERC", 0.005))  # minimum 0.5% price distance
         # If user complained SLs were too small, allow a safety multiplier
         safety_mult = float(getattr(config, "FIXED_SL_SAFETY_MULT", 1.0))
-        sl_perc = max(sl_perc * safety_mult, min_sl_perc)
+        leverage = float(getattr(config, "LEVERAGE", 1)) or 1.0
+
+        # FIXED_SL_PERC/FIXED_TP_PERC express the fraction of *equity used*
+        # to risk/target, not a raw price-move percentage. Since exposure =
+        # equity_used * leverage (sizing.calculate_size), applying a raw
+        # price move of (equity_perc / leverage) produces a £ loss/gain of
+        # exactly equity_perc * equity_used, regardless of the leverage
+        # multiplier – so SL/TP stay tied to the actual equity at risk, not
+        # the full leveraged exposure.
+        sl_perc = (sl_perc_of_equity * safety_mult) / leverage
+        tp_perc = tp_perc_of_equity / leverage
+        sl_perc = max(sl_perc, min_sl_perc)
         return sl_perc, tp_perc, min_sl_perc
 
     @staticmethod
