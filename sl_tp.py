@@ -25,8 +25,8 @@ class FixedSLTP:
 
     @staticmethod
     def _get_percents() -> Tuple[float, float, float]:
-        sl_perc = float(getattr(config, "FIXED_SL_PERC", 0.01))  # default 1%
-        tp_perc = float(getattr(config, "FIXED_TP_PERC", 0.02))  # default 2%
+        sl_perc = float(getattr(config, "FIXED_SL_PERC", 0.20))  # default 20%
+        tp_perc = float(getattr(config, "FIXED_TP_PERC", 0.40))  # default 40%
         min_sl_perc = float(getattr(config, "MIN_SL_PERC", 0.005))  # minimum 0.5% distance
         # If user complained SLs were too small, allow a safety multiplier
         safety_mult = float(getattr(config, "FIXED_SL_SAFETY_MULT", 1.0))
