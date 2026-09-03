@@ -66,6 +66,32 @@ def _fetch_exit_from_history(deal_id: str) -> Tuple[Optional[float], Optional[fl
     return None, None
 
 
+def _confirm_position_gone(deal_id: str) -> Optional[bool]:
+    """Directly query the single-position endpoint for *deal_id* to confirm it
+    is really gone from the broker, rather than trusting a momentary gap in
+    the aggregate /positions list (which can lag or drop entries transiently
+    due to pagination/rate limiting/eventual consistency).
+
+    Returns True if confirmed closed/absent, False if the broker still
+    reports it as an open position, or None if the check was inconclusive
+    (e.g. network error) — callers should treat None as "not yet confirmed"
+    and avoid closing the trade based on it.
+    """
+    try:
+        r = session.request("GET", f"{config.API_POSITIONS}/{deal_id}")
+    except Exception as e:
+        logger.debug("_confirm_position_gone: request error for %s: %s", deal_id, e)
+        return None
+    if r is None:
+        return None
+    if r.status_code == 200:
+        return False
+    if r.status_code in (400, 404):
+        return True
+    # Any other status (rate limit, auth hiccup, 5xx, ...) is inconclusive.
+    return None
+
+
 def get_snapshot(epic: str) -> Tuple[Optional[float], Optional[float]]:
     """
     Return (bid, offer) for epic. Cache for a few seconds to avoid rate limits.
@@ -202,6 +228,24 @@ def sync_closed_trades():
             # not a close candidate
             continue
 
+        if disappeared and not size_zero:
+            # The aggregate /positions list is only a hint here – it can
+            # transiently omit a genuinely-still-open position (broker-side
+            # eventual consistency, pagination, rate limiting), which would
+            # otherwise cause a real open trade to be marked CLOSED (using a
+            # stale/incorrect exit price) seconds after it was opened, while
+            # the position keeps trading live at the broker. Confirm directly
+            # against the single-position endpoint before finalizing a close
+            # based on absence alone.
+            confirmed_gone = _confirm_position_gone(deal_id)
+            if confirmed_gone is False:
+                logger.debug("sync_closed_trades: %s still reported open by broker; ignoring transient absence from positions list", deal_id)
+                _absent_count.pop(deal_id, None)
+                continue
+            if confirmed_gone is None:
+                logger.debug("sync_closed_trades: could not confirm %s is closed (inconclusive check); deferring", deal_id)
+                continue
+
         epic = trade.get("epic") or trade.get("ticker")
         direction = (trade.get("side") or "").lower()
         try:
@@ -214,7 +258,8 @@ def sync_closed_trades():
             entry_price = 0.0
 
         # Step 1: try to get actual close price from Capital.com transaction history
-        exit_price, pnl = _fetch_exit_from_history(deal_id)
+        exit_price, broker_pnl = _fetch_exit_from_history(deal_id)
+        pnl = broker_pnl
 
         # Step 2: fall back to market snapshot if history didn't have it
         if exit_price is None:
@@ -235,14 +280,16 @@ def sync_closed_trades():
             else:
                 pnl = round((entry_price - exit_price) * trade_size, 2)
 
-        logger.info("sync_closed_trades: CLOSED detected → epic=%s dealId=%s exit=%s pnl=%s",
-                    epic, deal_id, exit_price, pnl)
+        logger.info("sync_closed_trades: CLOSED detected → epic=%s dealId=%s exit=%s pnl=%s (broker_pnl=%s)",
+                    epic, deal_id, exit_price, pnl, broker_pnl)
 
         # Prefer marking by dealId; if trade_log has no matching dealId, fallback by ticker+entry_price
-        updated = close_trade_by_dealId(deal_id, exit_price=exit_price, time_exited=timestamp(), note="Closed via sync")
+        # Pass broker_pnl (not the possibly-estimated `pnl`) so trade_log only overrides its own
+        # computed figure when Capital.com's transaction history actually reported one.
+        updated = close_trade_by_dealId(deal_id, exit_price=exit_price, time_exited=timestamp(), note="Closed via sync", pnl=broker_pnl)
         if not updated:
             # fallback: try to close by ticker + entry_price
-            fallback = close_trade_fallback(trade.get("ticker") or epic, entry_price, exit_price=exit_price, time_exited=timestamp(), note="Closed via sync (fallback)")
+            fallback = close_trade_fallback(trade.get("ticker") or epic, entry_price, exit_price=exit_price, time_exited=timestamp(), note="Closed via sync (fallback)", pnl=broker_pnl)
             if not fallback:
                 logger.warning("sync_closed_trades: could not close trade for dealId=%s (no matching open trade found)", deal_id)
             else:

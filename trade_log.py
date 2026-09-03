@@ -551,9 +551,45 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
         return None
 
 
+def _apply_pnl(t: Dict[str, Any], broker_pnl: Any = None) -> None:
+    """Set t['pnl']/t['pnl_gbp'] on a just-closed trade.
+
+    Prefers *broker_pnl* (the authoritative profit/loss figure reported by
+    Capital.com's transaction history) when supplied, since it reflects the
+    actual fill/exec prices, spread, and any fees – all of which the naive
+    (exit_price - entry_price) * size estimate below ignores. That estimate
+    is used only as a fallback when the broker hasn't reported a PnL figure
+    (e.g. exit_price came from a live market snapshot rather than a
+    confirmed closing transaction).
+    """
+    if broker_pnl is not None:
+        try:
+            t["pnl"] = round(float(broker_pnl), 2)
+        except Exception:
+            t["pnl"] = None
+    elif t.get("exit_price") is not None:
+        t["pnl"] = _compute_pnl_for_trade(t)
+    else:
+        t["pnl"] = None
+
+    if t.get("pnl") not in (None, ""):
+        try:
+            fx = _read_fx_rate()
+            t["pnl_gbp"] = round(float(t["pnl"]) * fx, 2)
+        except Exception:
+            t["pnl_gbp"] = None
+    else:
+        t["pnl_gbp"] = None
+
+
 def close_trade_by_dealId(dealId: Any, exit_price: Any = None, time_exited: Optional[str] = None,
-                           note: Optional[str] = None, path: str = LOG_PATH) -> Optional[Dict[str, Any]]:
-    """Mark the open trade with *dealId* as CLOSED and compute P&L."""
+                           note: Optional[str] = None, pnl: Any = None, path: str = LOG_PATH) -> Optional[Dict[str, Any]]:
+    """Mark the open trade with *dealId* as CLOSED and compute P&L.
+
+    If *pnl* (the broker-confirmed profit/loss) is supplied, it is used
+    directly instead of being recomputed locally from entry/exit price and
+    size, so the logged figure matches what actually happened on the broker.
+    """
     with _trade_log_lock:
         trades = load_raw_log(path)
         updated = None
@@ -567,16 +603,7 @@ def close_trade_by_dealId(dealId: Any, exit_price: Any = None, time_exited: Opti
                 t["time_exited"] = time_exited or _now_iso()
                 t["time_exited_human"] = _humanize(t.get("time_exited"))
                 t["status"] = "CLOSED"
-                if t.get("exit_price") is not None:
-                    t["pnl"] = _compute_pnl_for_trade(t)
-                    try:
-                        fx = _read_fx_rate()
-                        t["pnl_gbp"] = round(float(t["pnl"]) * fx, 2) if t.get("pnl") not in (None, "") else None
-                    except Exception:
-                        t["pnl_gbp"] = None
-                else:
-                    t["pnl"] = None
-                    t["pnl_gbp"] = None
+                _apply_pnl(t, broker_pnl=pnl)
                 if note:
                     t["notes"] = (t.get("notes") or "") + " | " + note
                 updated = t
@@ -588,8 +615,11 @@ def close_trade_by_dealId(dealId: Any, exit_price: Any = None, time_exited: Opti
 
 def close_trade_fallback(ticker: Any, entry_price: Any, exit_price: Any = None,
                           time_exited: Optional[str] = None, note: Optional[str] = None,
-                          path: str = LOG_PATH) -> Optional[Dict[str, Any]]:
-    """Close the first open trade matching *ticker* + *entry_price* (fuzzy)."""
+                          pnl: Any = None, path: str = LOG_PATH) -> Optional[Dict[str, Any]]:
+    """Close the first open trade matching *ticker* + *entry_price* (fuzzy).
+
+    See close_trade_by_dealId() for the meaning of *pnl*.
+    """
     with _trade_log_lock:
         trades = load_raw_log(path)
         updated = None
@@ -610,16 +640,7 @@ def close_trade_fallback(ticker: Any, entry_price: Any, exit_price: Any = None,
         t["time_exited"] = time_exited or _now_iso()
         t["time_exited_human"] = _humanize(t.get("time_exited"))
         t["status"] = "CLOSED"
-        if t.get("exit_price") is not None:
-            t["pnl"] = _compute_pnl_for_trade(t)
-            try:
-                fx = _read_fx_rate()
-                t["pnl_gbp"] = round(float(t["pnl"]) * fx, 2) if t.get("pnl") not in (None, "") else None
-            except Exception:
-                t["pnl_gbp"] = None
-        else:
-            t["pnl"] = None
-            t["pnl_gbp"] = None
+        _apply_pnl(t, broker_pnl=pnl)
         if note:
             t["notes"] = (t.get("notes") or "") + " | " + note
         updated = t
