@@ -268,12 +268,19 @@ class TestCloseTradeByDealId:
         carrying it instead of leaving the second one stuck OPEN forever
         (previously guaranteed by closed_ids/_last_close_cache in
         sync_closed_trades(), which are keyed by dealId, not by row)."""
-        from trade_log import upsert_open_trade, close_trade_by_dealId, load_raw_log
+        from trade_log import close_trade_by_dealId, load_raw_log, save_raw_log
         path = str(tmp_path / "log.json")
-        with open(path, "w") as f:
-            json.dump([], f)
-        upsert_open_trade({"dealId": "DUP", "ticker": "STX", "size": 1.2, "entry_price": 790.25, "side": "sell"}, path=path)
-        upsert_open_trade({"dealId": "DUP", "ticker": "Seagate Technology", "size": 1.2, "entry_price": 790.25, "side": "sell"}, path=path)
+        # Construct the duplicate-dealId scenario directly (upsert_open_trade
+        # itself would correctly match the second call to the first row by
+        # dealId, so this bypasses that to simulate a duplicate that already
+        # slipped into the log another way, e.g. the reconcile ticker bug).
+        duplicated_rows = [
+            {"dealId": "DUP", "ticker": "STX", "side": "short", "size": 1.2,
+             "entry_price": 790.25, "status": "OPEN"},
+            {"dealId": "DUP", "ticker": "Seagate Technology", "side": "short", "size": 1.2,
+             "entry_price": 790.25, "status": "OPEN"},
+        ]
+        save_raw_log(duplicated_rows, path=path)
 
         trades = load_raw_log(path)
         assert len(trades) == 2, "test setup should have created two rows sharing the same dealId"
