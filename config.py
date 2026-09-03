@@ -42,10 +42,10 @@ MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 200))
 MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 1000))
 
 # SL/TP expressed as a percentage price move from entry. With MAX_EXPOSURE_PER_TRADE
-# capped at £1000, FIXED_SL_PERC=0.01 (1%) caps the loss at £10 (5% of the £200
-# equity used) and FIXED_TP_PERC=0.08 (8%) caps the gain at £80 (40% of equity).
-FIXED_SL_PERC = float(os.getenv("FIXED_SL_PERC", 0.01))
-FIXED_TP_PERC = float(os.getenv("FIXED_TP_PERC", 0.08))
+# capped at £1000, FIXED_SL_PERC=0.20 (20%) caps the loss at £200 (the £200
+# equity used) and FIXED_TP_PERC=0.40 (40%) caps the gain at £400 (200% of equity).
+FIXED_SL_PERC = float(os.getenv("FIXED_SL_PERC", 0.20))
+FIXED_TP_PERC = float(os.getenv("FIXED_TP_PERC", 0.40))
 
 # FX conversion (USD -> GBP)
 # - Keep a default so the app works without env set.

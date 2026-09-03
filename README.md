@@ -48,8 +48,8 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `EQUITY_PERCENT` | Fraction of available margin used per trade before caps (default `0.50`) | ⬜ |
 | `MAX_EQUITY_PER_TRADE` | Maximum account equity allocated to a trade before leverage, in GBP (default `200`) | ⬜ |
 | `MAX_EXPOSURE_PER_TRADE` | Maximum leveraged exposure per trade in GBP (default `1000`) | ⬜ |
-| `FIXED_SL_PERC` | Stop-loss distance as a fraction of entry price (default `0.01` = `1%`, capping loss at £10 on £1000 max exposure) | ⬜ |
-| `FIXED_TP_PERC` | Take-profit distance as a fraction of entry price (default `0.08` = `8%`, capping gain at £80 on £1000 max exposure) | ⬜ |
+| `FIXED_SL_PERC` | Stop-loss distance as a fraction of entry price (default `0.20` = `20%`, capping loss at £200 on £1000 max exposure) | ⬜ |
+| `FIXED_TP_PERC` | Take-profit distance as a fraction of entry price (default `0.40` = `40%`, capping gain at £400 on £1000 max exposure) | ⬜ |
 | `TRAIL_ACTIVATION_PERC` | Profit threshold to activate trailing SL (default `0.005` = `0.5%`) | ⬜ |
 | `TRAIL_SL_PERC` | Portion of unrealized profit locked by trailing SL (default `0.30` = `30%`) | ⬜ |
 
