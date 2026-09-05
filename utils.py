@@ -10,6 +10,13 @@ from typing import Optional
 # High precision for safe_float operations
 getcontext().prec = 12
 
+# Optional timezone support for UK-local trade timestamps.
+try:
+    import pytz  # type: ignore
+    _UK_TZ = pytz.timezone("Europe/London")
+except Exception:
+    _UK_TZ = None
+
 
 # ---------------------------------------------------------
 # TIMESTAMP (CUSTOM FORMAT)
@@ -23,6 +30,22 @@ def timestamp() -> str:
     """
     now = datetime.datetime.utcnow()
     return now.strftime("%Y-%m-%d %H.%M.%S")
+
+
+def uk_timestamp() -> str:
+    """
+    Returns the current time as an ISO-8601 string in UK local time
+    (Europe/London, correctly accounting for GMT/BST), matching the format
+    trade_log.py uses internally for time_entered/time_exited. Use this
+    (instead of timestamp(), which is UTC) whenever recording a trade's
+    entry/exit time, so every trade-log timestamp is consistently in UK time.
+    """
+    if _UK_TZ is not None:
+        try:
+            return datetime.datetime.now(_UK_TZ).isoformat()
+        except Exception:
+            pass
+    return datetime.datetime.utcnow().isoformat() + "Z"
 
 
 # ---------------------------------------------------------

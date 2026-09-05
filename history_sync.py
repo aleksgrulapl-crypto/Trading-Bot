@@ -14,7 +14,7 @@ from trade_log import (
     close_trade_by_dealId,
     close_trade_fallback,
 )
-from utils import timestamp
+from utils import uk_timestamp
 from datetime import datetime, timezone
 
 logger = logging.getLogger("sync_closed_trades")
@@ -374,7 +374,7 @@ def sync_closed_trades():
         # "now" (the moment this poll happened to detect the close), so that
         # time_exited – and any analytics derived from it (e.g. duration,
         # trades-per-hour) – reflect the true close rather than detection lag.
-        time_exited = broker_close_time or timestamp()
+        time_exited = broker_close_time or uk_timestamp()
 
         # Prefer marking by dealId; if trade_log has no matching dealId, fallback by ticker+entry_price
         # Pass broker_pnl (not the possibly-estimated `pnl`) so trade_log only overrides its own
