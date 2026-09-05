@@ -311,6 +311,9 @@ def _build_request_context():
     positions = session.enrich_positions(raw_positions)
     account = session.enrich_account(raw_account)
 
+    # Display Open Positions sorted alphabetically by ticker for easier scanning.
+    positions.sort(key=lambda p: str((p or {}).get("ticker") or "").strip().lower())
+
     # Reconcile local trade log against live positions (may update the log file)
     try:
         recon = reconcile_with_positions(positions)

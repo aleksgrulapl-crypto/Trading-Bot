@@ -18,7 +18,7 @@ from trade_log import (
     close_trade_by_dealId,
     close_trade_fallback,
 )
-from utils import timestamp
+from utils import uk_timestamp
 from config import API_POSITIONS, API_HISTORY_TRANSACTIONS, API_MARKET
 
 # Timeout (seconds) for every outbound broker API call
@@ -264,17 +264,17 @@ def close_position(position_id: str) -> dict:
 
         # Step 6 – Record closed trade in trade log
         if position_id:
-            updated = close_trade_by_dealId(position_id, exit_price=exit_price, time_exited=timestamp(), note="Closed via API")
+            updated = close_trade_by_dealId(position_id, exit_price=exit_price, time_exited=uk_timestamp(), note="Closed via API")
             if updated:
                 if updated.get("pnl") is None and pnl is not None and exit_price is not None:
-                    close_trade_by_dealId(position_id, exit_price=exit_price, time_exited=timestamp(), note="Updated pnl")
+                    close_trade_by_dealId(position_id, exit_price=exit_price, time_exited=uk_timestamp(), note="Updated pnl")
             else:
                 # No matching dealId in log – try fallback close by ticker + entry_price
                 if ticker and entry_price is not None:
                     fallback = close_trade_fallback(
                         ticker, entry_price,
                         exit_price=exit_price,
-                        time_exited=timestamp(),
+                        time_exited=uk_timestamp(),
                         note="Closed via API (fallback)",
                     )
                     if not fallback:
@@ -289,7 +289,7 @@ def close_position(position_id: str) -> dict:
                 close_trade_fallback(
                     ticker, entry_price,
                     exit_price=exit_price,
-                    time_exited=timestamp(),
+                    time_exited=uk_timestamp(),
                     note="Closed via API (no dealId)",
                 )
 

@@ -491,6 +491,22 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
             existing = _find_pending_trade_by_ticker(trades, ticker, side)
             matched_via_pending = existing is not None
 
+        if not existing and not dealId and dealReference:
+            # Last-resort fallback: this payload has a dealReference but no
+            # dealId yet (order.py's post-order log-append always logs this
+            # way until the confirms endpoint later maps the dealId in via
+            # set_dealId_for_dealReference). If a concurrent poll of
+            # reconcile_with_positions() already picked up the live broker
+            # position - with its real dealId - before this call ran, none of
+            # the matches above would find it (they all require *this*
+            # payload to already carry a dealId), causing a duplicate row to
+            # be created for the same real position. Merge into any still-open
+            # trade for the same ticker/side instead. Do not treat this as
+            # matched_via_pending: an entry found this way may already hold
+            # broker-confirmed size/entry_price values that must not be
+            # overwritten by this payload's own (possibly estimated) figures.
+            existing = _find_open_trade_by_ticker_any_dealid(trades, ticker, side, dealId)
+
         if existing:
             updated = False
             if not existing.get("dealId") and dealId:

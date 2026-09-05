@@ -10,7 +10,7 @@ import session
 from auth import auth
 import config
 from config import API_POSITIONS, API_MARKET, API_BASE
-from utils import timestamp
+from utils import uk_timestamp
 from trade_log import append_open_trade, set_dealId_for_dealReference
 
 logger = logging.getLogger("order")
@@ -112,7 +112,7 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
 
     # Log open trade (include dealReference)
     try:
-        ts = timestamp()
+        ts = uk_timestamp()
         trade_payload = {
             "dealId": None,
             "dealReference": deal_ref,
