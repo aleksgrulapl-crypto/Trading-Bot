@@ -292,6 +292,70 @@ class TestCloseTradeByDealId:
         assert all(t.get("status") == "CLOSED" for t in trades), "Every row sharing the dealId must be closed, not just the first"
 
 
+class TestOrderConfirmationLogging:
+    """Webhook orders must not create a log row before broker confirmation."""
+
+    class _Response:
+        def __init__(self, status_code, body=None):
+            self.status_code = status_code
+            self._body = body or {}
+            self.text = ""
+
+        def json(self):
+            return self._body
+
+    def test_does_not_log_order_when_confirmation_has_no_deal_id(self, monkeypatch):
+        import order
+
+        appended = []
+        monkeypatch.setattr(order.auth, "ensure_token", lambda: True)
+        monkeypatch.setattr(order.time, "sleep", lambda _: None)
+        monkeypatch.setattr(order, "append_open_trade", lambda payload: appended.append(payload))
+        monkeypatch.setattr(order.session, "update_last_trade", lambda: None)
+        monkeypatch.setattr(
+            order.session,
+            "request",
+            lambda method, url, **kwargs: (
+                self._Response(200, {"snapshot": {"bid": 397.4, "offer": 397.5}})
+                if method == "GET" and "/markets/" in url
+                else self._Response(200, {"dealReference": "REF-1"})
+                if method == "POST"
+                else self._Response(404)
+            ),
+        )
+
+        result = order.place_order("UNH", "buy", 2.05)
+
+        assert result["dealId"] is None
+        assert appended == []
+
+    def test_logs_order_with_confirmed_deal_id(self, monkeypatch):
+        import order
+
+        appended = []
+        monkeypatch.setattr(order.auth, "ensure_token", lambda: True)
+        monkeypatch.setattr(order.time, "sleep", lambda _: None)
+        monkeypatch.setattr(order, "append_open_trade", lambda payload: appended.append(payload) or payload)
+        monkeypatch.setattr(order.session, "update_last_trade", lambda: None)
+        monkeypatch.setattr(
+            order.session,
+            "request",
+            lambda method, url, **kwargs: (
+                self._Response(200, {"snapshot": {"bid": 397.4, "offer": 397.5}})
+                if method == "GET" and "/markets/" in url
+                else self._Response(200, {"dealReference": "REF-1"})
+                if method == "POST"
+                else self._Response(200, {"dealStatus": "ACCEPTED", "dealId": "DEAL-1"})
+            ),
+        )
+
+        order.place_order("UNH", "buy", 2.05)
+
+        assert len(appended) == 1
+        assert appended[0]["dealId"] == "DEAL-1"
+        assert appended[0]["dealReference"] == "REF-1"
+
+
 class TestReconcileTickerMatching:
     """Regression tests: reconcile_with_positions() must match a bot/TradingView
     -opened pending trade by the broker's stable epic code, not the market's
