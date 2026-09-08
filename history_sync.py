@@ -98,7 +98,7 @@ def _parse_broker_timestamp(value) -> Optional[str]:
     return None
 
 
-def _fetch_exit_from_history(deal_id: str) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+def _fetch_exit_from_history(deal_id: str, trade=None, prior_closed=None) -> Tuple[Optional[float], Optional[float], Optional[str]]:
     """
     Query Capital.com transaction history for the actual close level, P&L, and
     close time. Returns (exit_price, pnl, close_time) — any may be None if not
@@ -107,7 +107,32 @@ def _fetch_exit_from_history(deal_id: str) -> Tuple[Optional[float], Optional[fl
     (the moment our polling loop happened to detect the close) so that
     time_exited – and the analytics derived from it – reflect when the
     position was actually closed rather than when we noticed.
+
+    Capital.com reuses account-level dealIds across many trades (the repo's
+    own Excel export shows the same id on 13+ different positions), so a bare
+    dealId match is NOT proof that a history row is *this* trade's close.
+    Without the guards below, the first same-dealId row in the history window
+    (an old, already-closed trade's transaction) would be taken as the exit
+    for a position that is in reality still open – logging a phantom CLOSED
+    trade with a made-up exit price/PnL while the position keeps trading.
+
+    A history row is only accepted as the trade's close when it:
+      1. actually looks like a close (has a closeDate/closeLevel/closePrice,
+         not e.g. a deposit or an open/update row), and
+      2. its closeDate is not *before* the moment this position could have
+         closed – i.e. not before the trade's own entry, and not before an
+         earlier same-dealId log row (*prior_closed*) was already closed. An
+         older closeDate can only belong to a previous, same-dealId trade,
+         even if that earlier trade has since been deleted from the log.
     """
+    reference_dt = None
+    if trade:
+        reference_dt = _parse_entry_time_to_utc_naive(trade.get("time_entered"))
+    if prior_closed:
+        for key in ("time_exited", "time_entered"):
+            dt = _parse_entry_time_to_utc_naive(prior_closed.get(key))
+            if dt is not None and (reference_dt is None or dt > reference_dt):
+                reference_dt = dt
     try:
         r = session.request("GET", f"{config.API_HISTORY_TRANSACTIONS}?max=200")
         if not r or r.status_code != 200:
@@ -115,20 +140,52 @@ def _fetch_exit_from_history(deal_id: str) -> Tuple[Optional[float], Optional[fl
         transactions = (r.json() or {}).get("transactions", []) or []
         for tx in transactions:
             tx_id = tx.get("dealId") or tx.get("positionId")
-            if tx_id and str(tx_id) == str(deal_id):
-                ep = tx.get("closeLevel") or tx.get("level") or tx.get("price")
-                pnl = tx.get("profitAndLoss") or tx.get("pnl") or tx.get("profit") or tx.get("profitLoss")
-                close_ts_raw = tx.get("closeDate") or tx.get("dateUtc") or tx.get("date")
-                try:
-                    ep = float(ep) if ep is not None else None
-                except Exception:
-                    ep = None
-                try:
-                    pnl = float(pnl) if pnl is not None else None
-                except Exception:
-                    pnl = None
-                close_time = _parse_broker_timestamp(close_ts_raw)
-                return ep, pnl, close_time
+            if not (tx_id and str(tx_id) == str(deal_id)):
+                continue
+
+            close_ts_raw = tx.get("closeDate") or tx.get("dateUtc") or tx.get("date")
+            # Prefer explicit close-level fields; only fall back to the
+            # generic level/price when the row carries a closeDate (otherwise
+            # that field is the *open* level of a same-dealId position row,
+            # not an exit).
+            ep_raw = tx.get("closeLevel") or tx.get("closePrice")
+            if ep_raw is None and close_ts_raw is not None:
+                ep_raw = tx.get("level") or tx.get("price")
+            pnl = tx.get("profitAndLoss") or tx.get("pnl") or tx.get("profit") or tx.get("profitLoss")
+            try:
+                ep = float(ep_raw) if ep_raw is not None else None
+            except Exception:
+                ep = None
+            try:
+                pnl = float(pnl) if pnl is not None else None
+            except Exception:
+                pnl = None
+            close_time = _parse_broker_timestamp(close_ts_raw)
+
+            # Guard 1: must look like an actual close (a close timestamp and/or
+            # an explicit close-level field), not a same-dealId open/update or
+            # unrelated account row.
+            if close_ts_raw is None and ep is None:
+                logger.debug(
+                    "_fetch_exit_from_history: ignoring non-close history row for %s (no closeDate/close price)",
+                    deal_id,
+                )
+                continue
+
+            # Guard 2: a closeDate *before* (or exactly at the instant this
+            # position's tracking window starts – e.g. matching an earlier
+            # same-dealId trade's recorded close) can only belong to a
+            # previous trade – never to this one.
+            if reference_dt is not None and close_time is not None:
+                close_dt = _parse_entry_time_to_utc_naive(close_time)
+                if close_dt is not None and close_dt <= reference_dt:
+                    logger.info(
+                        "_fetch_exit_from_history: ignoring stale close for %s (closeDate %s not after trade window %s)",
+                        deal_id, close_time, reference_dt,
+                    )
+                    continue
+
+            return ep, pnl, close_time
     except Exception as e:
         logger.debug("_fetch_exit_from_history error for %s: %s", deal_id, e)
     return None, None, None
@@ -216,6 +273,15 @@ def sync_closed_trades():
     }
 
     open_trades = [t for t in log if t.get("status") == "OPEN"]
+
+    # Index the remaining (non-OPEN) rows by dealId so the history lookup can
+    # recognise rows that merely predate this trade (e.g. an old, same-dealId
+    # trade that was deleted from the log) instead of accepting their stale
+    # close as this trade's exit.
+    prior_closed_by_deal_id = {}
+    for t in log:
+        if t.get("status") != "OPEN" and t.get("dealId") is not None:
+            prior_closed_by_deal_id.setdefault(str(t.get("dealId")), t)
 
     if not open_trades:
         logger.debug("sync_closed_trades: no open trades to check")
@@ -344,8 +410,13 @@ def sync_closed_trades():
         except Exception:
             entry_price = 0.0
 
-        # Step 1: try to get actual close price/time from Capital.com transaction history
-        exit_price, broker_pnl, broker_close_time = _fetch_exit_from_history(deal_id)
+        # Step 1: try to get actual close price/time from Capital.com transaction history.
+        # Pass the trade (plus any earlier same-dealId log rows) so the lookup
+        # can reject a stale history row belonging to a previous, same-dealId
+        # trade (Capital.com reuses dealIds) instead of recording a phantom
+        # close for this still-open position.
+        exit_price, broker_pnl, broker_close_time = _fetch_exit_from_history(
+            deal_id, trade, prior_closed_by_deal_id.get(deal_id))
         pnl = broker_pnl
 
         # Step 2: fall back to market snapshot if history didn't have it

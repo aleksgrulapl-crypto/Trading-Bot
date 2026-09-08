@@ -706,15 +706,12 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
         reopened: List[Dict[str, Any]] = []
 
         live_ids = set()
-        live_positions_by_id = {}
         for p in live_positions or []:
             did = None
             if isinstance(p, dict):
                 did = p.get("dealId") or (p.get("position") or {}).get("dealId")
             if did is not None:
-                sdid = str(did)
-                live_ids.add(sdid)
-                live_positions_by_id[sdid] = p
+                live_ids.add(str(did))
 
         # Self-heal: if a trade was previously (and incorrectly) marked CLOSED —
         # e.g. by a webhook "close" alert whose exit_price/dealId didn't reflect an
@@ -736,32 +733,12 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                         t["notes"] = (t.get("notes") or "") + " | Reopened: broker still reports this position open"
                         reopened.append(t)
 
-        for t in trades:
-            if t.get("status") != "CLOSED":
-                did = t.get("dealId")
-                if did is not None and str(did) not in live_ids:
-                    p = live_positions_by_id.get(str(did))
-                    exit_price = None
-                    time_exited = None
-                    if isinstance(p, dict):
-                        exit_price = p.get("exit_price") or p.get("closePrice") or p.get("closedPrice") or p.get("price")
-                        time_exited = p.get("time_exited") or p.get("timeExited") or p.get("closedDate")
-                    if exit_price is None:
-                        continue
-                    try:
-                        t["exit_price"] = float(exit_price)
-                    except Exception:
-                        t["exit_price"] = exit_price
-                    t["time_exited"] = time_exited or _now_iso()
-                    t["time_exited_human"] = _humanize(t.get("time_exited"))
-                    t["status"] = "CLOSED"
-                    t["pnl"] = _compute_pnl_for_trade(t) if t.get("exit_price") is not None else None
-                    try:
-                        fx = _read_fx_rate()
-                        t["pnl_gbp"] = round(float(t["pnl"]) * fx, 2) if t.get("pnl") not in (None, "") else None
-                    except Exception:
-                        t["pnl_gbp"] = None
-                    closed.append(t)
+        # Note: a still-open trade whose dealId is missing from the live
+        # positions snapshot is *probably* closed, but the aggregate list can
+        # transiently drop a still-open position. Reconcile deliberately does
+        # NOT close trades here; the verified close (with exit price/PnL
+        # confirmed against broker transaction history) is handled by
+        # history_sync.sync_closed_trades.
 
         existing_signatures = set()
         for t in trades:
