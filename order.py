@@ -110,25 +110,6 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
         logger.exception("Exception while sending order: %s", e)
         return {"status": "error", "message": "order_request_failed"}
 
-    # Log open trade (include dealReference)
-    try:
-        ts = uk_timestamp()
-        trade_payload = {
-            "dealId": None,
-            "dealReference": deal_ref,
-            "ticker": epic,
-            "epic": epic,
-            "side": "Long" if dir_norm == "BUY" else "Short",
-            "size": float(size),
-            "entry_price": float(entry_price),
-            "time_entered": ts,
-            "notes": f"sl={sl}; tp={tp}; timeframe={timeframe}; dealReference={deal_ref}"
-        }
-        appended = append_open_trade(trade_payload)
-        logger.debug("Logged open trade (pending dealId): %s", appended)
-    except Exception as e:
-        logger.exception("Failed to log open trade: %s", e)
-
     # Map dealReference -> dealId via confirms endpoint
     real_deal_id = None
     if deal_ref:
@@ -146,6 +127,10 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
                         body = confirm.json() or {}
                     except Exception:
                         body = {}
+                    deal_status = str(body.get("dealStatus") or "").upper()
+                    if deal_status in ("REJECTED", "DECLINED"):
+                        logger.warning("Broker rejected order for dealReference=%s: %s", deal_ref, body.get("reason"))
+                        break
                     real_deal_id = body.get("dealId") or body.get("deal_id")
                     if real_deal_id:
                         break
@@ -158,15 +143,30 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
         if real_deal_id:
             logger.info("Mapped dealReference -> dealId: %s", real_deal_id)
             try:
-                updated = set_dealId_for_dealReference(deal_ref, real_deal_id)
-                if updated:
-                    logger.debug("Updated trade log entry with dealId for dealReference=%s", deal_ref)
+                ts = uk_timestamp()
+                trade_payload = {
+                    "dealId": real_deal_id,
+                    "dealReference": deal_ref,
+                    "ticker": epic,
+                    "epic": epic,
+                    "side": "Long" if dir_norm == "BUY" else "Short",
+                    "size": float(size),
+                    "entry_price": float(entry_price),
+                    "time_entered": ts,
+                    "notes": f"sl={sl}; tp={tp}; timeframe={timeframe}; dealReference={deal_ref}",
+                }
+                appended = append_open_trade(trade_payload)
+                logger.debug("Logged broker-confirmed open trade: %s", appended)
+                # Preserve compatibility with log entries created by an
+                # overlapping reconciliation poll before confirmation arrived.
+                if not appended:
+                    set_dealId_for_dealReference(deal_ref, real_deal_id)
             except Exception:
-                logger.exception("Failed to update trade log with mapped dealId")
+                logger.exception("Failed to log broker-confirmed trade")
         else:
-            logger.warning("Could not map dealReference -> dealId via confirms for dealReference=%s", deal_ref)
+            logger.warning("Could not confirm dealId for dealReference=%s; deferring trade-log entry to reconciliation", deal_ref)
     else:
-        logger.warning("No dealReference returned by order response; logged open trade without dealReference")
+        logger.warning("No dealReference returned by order response; deferring trade-log entry to reconciliation")
 
     try:
         session.update_last_trade()
