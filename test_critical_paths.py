@@ -292,7 +292,108 @@ class TestCloseTradeByDealId:
         assert all(t.get("status") == "CLOSED" for t in trades), "Every row sharing the dealId must be closed, not just the first"
 
 
-class TestOrderConfirmationLogging:
+class TestFetchExitFromHistory:
+    """history_sync._fetch_exit_from_history must not accept a stale history row
+    from a previous, same-dealId trade as the exit for a still-open trade.
+
+    Capital.com reuses account-level dealIds across many trades, so a bare
+    dealId match is not proof that a history row is *this* trade's close.
+    """
+
+    class _Resp:
+        def __init__(self, transactions):
+            self.status_code = 200
+            self._transactions = transactions
+
+        def json(self):
+            return {"transactions": self._transactions}
+
+    def _patch_history(self, monkeypatch, transactions):
+        import history_sync
+        monkeypatch.setattr(history_sync.session, "request",
+                            lambda *a, **k: self._Resp(transactions))
+
+    def test_ignores_close_row_predating_trade_entry(self, monkeypatch):
+        """A close row whose closeDate predates the trade's entry belongs to a
+        previous, same-dealId trade – not to the still-open one."""
+        import history_sync
+        self._patch_history(monkeypatch, [
+            {"dealId": "STX1", "closeLevel": 100.0, "profitAndLoss": -5.0,
+             "closeDate": "2026-09-01T10:00:00Z"},
+        ])
+        trade = {"time_entered": "2026-09-08T10:00:00Z"}
+        ep, pnl, ct = history_sync._fetch_exit_from_history("STX1", trade)
+        assert (ep, pnl, ct) == (None, None, None), \
+            "Stale close row must not be used as the exit for a trade that is still open"
+
+    def test_accepts_close_row_at_or_after_entry(self, monkeypatch):
+        import history_sync
+        self._patch_history(monkeypatch, [
+            {"dealId": "STX1", "closeLevel": 101.5, "profitAndLoss": 3.0,
+             "closeDate": "2026-09-08T12:00:00Z"},
+        ])
+        trade = {"time_entered": "2026-09-08T10:00:00Z"}
+        ep, pnl, ct = history_sync._fetch_exit_from_history("STX1", trade)
+        assert ep == 101.5 and pnl == 3.0 and ct == "2026-09-08 12:00:00"
+
+    def test_skips_non_close_rows_and_finds_real_close(self, monkeypatch):
+        """Open/update rows sharing the dealId must be skipped in favour of the
+        genuine close row that follows them."""
+        import history_sync
+        self._patch_history(monkeypatch, [
+            {"dealId": "STX1", "level": 100.0},  # open/update row, no close evidence
+            {"dealId": "STX1", "closeLevel": 101.5, "profitAndLoss": 3.0,
+             "closeDate": "2026-09-08T12:00:00Z"},
+        ])
+        trade = {"time_entered": "2026-09-08T10:00:00Z"}
+        ep, pnl, ct = history_sync._fetch_exit_from_history("STX1", trade)
+        assert ep == 101.5 and pnl == 3.0
+
+    def test_prior_closed_row_tightens_reference_time(self, monkeypatch):
+        """When an earlier same-dealId trade already closed after this trade's
+        entry, a history row matching *that* close must not be re-used."""
+        import history_sync
+        self._patch_history(monkeypatch, [
+            {"dealId": "STX1", "closeLevel": 100.0, "profitAndLoss": -5.0,
+             "closeDate": "2026-09-05T10:00:00Z"},
+        ])
+        trade = {"time_entered": "2026-09-01T10:00:00Z"}
+        prior = {"time_exited": "2026-09-05 10:00:00"}
+        ep, pnl, ct = history_sync._fetch_exit_from_history("STX1", trade, prior)
+        assert (ep, pnl, ct) == (None, None, None), \
+            "A close row matching an earlier same-dealId trade's exit must not be re-used"
+
+
+class TestReconcileDoesNotPhantomClose:
+    """reconcile_with_positions must not mark a still-open trade CLOSED just
+    because its dealId is momentarily missing from the positions snapshot."""
+
+    def test_absent_dealid_is_not_closed_by_reconcile(self, tmp_path):
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {"dealId": "STX1", "ticker": "STX", "side": "buy",
+             "size": 1.2, "entry_price": 100.0},
+            path=path,
+        )
+
+        # The live positions snapshot contains a *different* position only, so
+        # the STX trade's dealId is absent. Reconcile must not fabricate a
+        # close from the absence alone.
+        live_positions = [{
+            "dealId": "OTHER", "ticker": "NVDA", "side": "buy",
+            "size": 1.0, "entry_price": 200.0,
+        }]
+        result = reconcile_with_positions(live_positions, path=path)
+
+        trades = load_raw_log(path)
+        stx = next(t for t in trades if t.get("dealId") == "STX1")
+        assert stx.get("status") == "OPEN", \
+            "A trade whose dealId is absent from one snapshot must not be marked CLOSED"
+        assert not result["closed"]
     """Webhook orders must not create a log row before broker confirmation."""
 
     class _Response:

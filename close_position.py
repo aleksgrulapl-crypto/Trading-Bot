@@ -59,6 +59,32 @@ def _find_enriched_position(position_id: str):
     return None
 
 
+def _parse_entry_dt(value):
+    """Best-effort parse of a broker/log timestamp into a naive UTC datetime."""
+    if value is None:
+        return None
+    from datetime import datetime, timezone
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.utcfromtimestamp(value / 1000.0 if value > 1e12 else value)
+        except Exception:
+            return None
+    s = str(value)
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except Exception:
+        pass
+    for fmt in ("%Y-%m-%d %H.%M.%S", "%Y-%m-%d %H:%M:%S", "%d-%m-%Y %H:%M:%S"):
+        try:
+            return datetime.strptime(s, fmt)
+        except Exception:
+            continue
+    return None
+
+
 def _find_open_trade(deal_id: str):
     """Find the most recent OPEN trade in the local log matching *deal_id*."""
     log = load_raw_log() or []
@@ -68,8 +94,15 @@ def _find_open_trade(deal_id: str):
     return None
 
 
-def _fetch_close_details_from_history(deal_id: str) -> Tuple[Optional[float], Optional[float]]:
+def _fetch_close_details_from_history(deal_id: str, time_entered=None) -> Tuple[Optional[float], Optional[float]]:
     """Try to find close details (exit price, pnl) from transaction history.
+
+    Capital.com reuses account-level dealIds across many trades, so a bare
+    dealId match is not proof that a history row belongs to *this* close.
+    Only rows that actually look like a close (closeDate/closeLevel/closePrice)
+    and – when *time_entered* is known – whose closeDate is not before the
+    trade was opened are accepted; otherwise a stale row from a previous,
+    same-dealId trade would overwrite this trade's real exit price/PnL.
 
     Returns:
         Tuple of (exit_price, pnl) where either element may be None if not
@@ -85,20 +118,46 @@ def _fetch_close_details_from_history(deal_id: str) -> Tuple[Optional[float], Op
         data = r.json() or {}
         transactions = data.get("transactions", []) or []
 
+        entry_dt = _parse_entry_dt(time_entered)
+
         for tx in transactions:
             tx_deal_id = tx.get("dealId") or tx.get("positionId")
-            if tx_deal_id and str(tx_deal_id) == str(deal_id):
-                exit_price = tx.get("closeLevel") or tx.get("level") or tx.get("price")
-                pnl = tx.get("profitAndLoss") or tx.get("pnl") or tx.get("profit")
-                try:
-                    exit_price = float(exit_price) if exit_price is not None else None
-                except Exception:
-                    exit_price = None
-                try:
-                    pnl = float(pnl) if pnl is not None else None
-                except Exception:
-                    pnl = None
-                return exit_price, pnl
+            if not (tx_deal_id and str(tx_deal_id) == str(deal_id)):
+                continue
+
+            close_ts_raw = tx.get("closeDate") or tx.get("dateUtc") or tx.get("date")
+            # Prefer explicit close-level fields; only fall back to the
+            # generic level/price when the row carries a closeDate (otherwise
+            # that field is the *open* level of a same-dealId position row).
+            exit_price_raw = tx.get("closeLevel") or tx.get("closePrice")
+            if exit_price_raw is None and close_ts_raw is not None:
+                exit_price_raw = tx.get("level") or tx.get("price")
+            pnl = tx.get("profitAndLoss") or tx.get("pnl") or tx.get("profit")
+            try:
+                exit_price = float(exit_price_raw) if exit_price_raw is not None else None
+            except Exception:
+                exit_price = None
+            try:
+                pnl = float(pnl) if pnl is not None else None
+            except Exception:
+                pnl = None
+
+            # Must look like an actual close, not a same-dealId open/update row.
+            if close_ts_raw is None and exit_price is None:
+                continue
+
+            # A closeDate before this trade's entry can only belong to an
+            # earlier, same-dealId trade.
+            if entry_dt is not None and close_ts_raw is not None:
+                close_dt = _parse_entry_dt(close_ts_raw)
+                if close_dt is not None and close_dt <= entry_dt:
+                    logger.debug(
+                        "Ignoring stale close details for %s (closeDate %s not after entry %s)",
+                        deal_id, close_ts_raw, time_entered,
+                    )
+                    continue
+
+            return exit_price, pnl
 
         return None, None
 
@@ -245,7 +304,9 @@ def close_position(position_id: str) -> dict:
 
         # Step 4 – Fall back to history
         if exit_price is None or pnl is None:
-            hist_exit, hist_pnl = _fetch_close_details_from_history(position_id)
+            # Pass the trade's entry time so the history lookup can reject a
+            # stale close row left over from a previous, same-dealId trade.
+            hist_exit, hist_pnl = _fetch_close_details_from_history(position_id, time_entered)
             if hist_exit is not None:
                 exit_price = hist_exit
             if hist_pnl is not None:
