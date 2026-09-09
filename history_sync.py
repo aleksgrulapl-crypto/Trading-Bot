@@ -10,6 +10,7 @@ from typing import Optional, Tuple
 import session
 import config
 from trade_log import (
+    canonicalize_trade_log,
     load_raw_log,
     close_trade_by_dealId,
     close_trade_fallback,
@@ -263,6 +264,7 @@ def sync_closed_trades():
     """
     global _last_raw_1, _last_raw_2
 
+    canonicalize_trade_log()
     log = load_raw_log() or []
 
     # set of already-closed dealIds in the log

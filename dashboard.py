@@ -21,6 +21,7 @@ import session
 import config
 from close_position import close_position as close_live_position
 from trade_log import (
+    dedupe_trade_log_entries,
     load_raw_log,
     reconcile_with_positions,
     get_completed_trades,
@@ -157,21 +158,9 @@ def _signature_for_dedupe(t):
 
 def dedupe_trades(trades):
     """
-    Deduplicate trades. Prefer CLOSED records over OPEN when duplicates found.
+    Deduplicate trades using trade_log's broker-safe rules.
     """
-    seen = {}
-    unique = []
-    for t in trades or []:
-        sig = _signature_for_dedupe(t)
-        idx = seen.get(sig)
-        if idx is None:
-            seen[sig] = len(unique)
-            unique.append(t)
-        else:
-            existing = unique[idx]
-            # prefer closed over open
-            if existing.get("status") != "CLOSED" and t.get("status") == "CLOSED":
-                unique[idx] = t
+    unique, _ = dedupe_trade_log_entries(trades or [])
     return unique
 
 
