@@ -180,16 +180,31 @@ def _normalize_side(side: Any) -> Optional[str]:
     return s or None
 
 
+def _canonical_trade_source(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    source = str(value).strip().lower()
+    if source in ("tradingview", "webhook", "bot"):
+        return "tradingview"
+    if source in ("manual", "broker"):
+        return "manual"
+    if source in ("unknown",):
+        return "unknown"
+    return source or None
+
+
 def _detect_trade_origin(payload: Dict[str, Any], side: Optional[str], dealId: Any, dealReference: Any) -> str:
-    raw_origin = payload.get("origin") or payload.get("source") or payload.get("trade_source") or payload.get("tradeSource")
+    raw_origin = _canonical_trade_source(
+        payload.get("origin") or payload.get("source") or payload.get("trade_source") or payload.get("tradeSource")
+    )
     if raw_origin:
-        return str(raw_origin).strip().lower()
+        return raw_origin
     if payload.get("webhook") is True or payload.get("cid") or payload.get("alert_id"):
-        return "webhook"
+        return "tradingview"
     if payload.get("manual") is True:
         return "manual"
     if dealId is not None or dealReference is not None:
-        return "bot"
+        return "manual"
     if side in ("long", "short"):
         return "manual"
     return "unknown"

@@ -335,6 +335,41 @@ class TestCloseTradeByDealId:
         trades = load_raw_log(path)
         assert all(t.get("status") == "CLOSED" for t in trades), "Every row sharing the dealId must be closed, not just the first"
 
+    def test_webhook_source_is_normalized_to_tradingview(self, tmp_path):
+        from trade_log import upsert_open_trade
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        trade = upsert_open_trade({
+            "dealId": "TV1",
+            "ticker": "STX",
+            "size": 1.2,
+            "entry_price": 790.25,
+            "side": "buy",
+            "trade_source": "webhook",
+        }, path=path)
+
+        assert trade["trade_source"] == "tradingview"
+
+    def test_live_position_import_defaults_to_manual(self, tmp_path):
+        from trade_log import reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        reconcile_with_positions([{
+            "dealId": "MAN1",
+            "ticker": "NVDA",
+            "side": "buy",
+            "size": 1.0,
+            "entry_price": 200.0,
+        }], path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert trades[0]["trade_source"] == "manual"
+
     def test_canonicalize_trade_log_merges_duplicate_closed_rows_only_when_same_event(self, tmp_path):
         from trade_log import canonicalize_trade_log, load_raw_log, save_raw_log
         path = str(tmp_path / "log.json")
@@ -923,6 +958,64 @@ class TestDashboardDedupe:
             },
         ]
         assert len(dedupe_trades(trades)) == 2
+
+    def test_normalize_trades_maps_trade_type_labels(self):
+        from dashboard import normalize_trades
+        trades = normalize_trades([
+            {"trade_source": "webhook"},
+            {"trade_source": "bot"},
+            {"trade_source": "manual"},
+            {"notes": "Imported from webhook (legacy)"},
+            {"trade_source": "unknown"},
+        ])
+        assert [t["trade_type"] for t in trades] == [
+            "TradingView",
+            "TradingView",
+            "Manual",
+            "TradingView",
+            "Manual",
+        ]
+
+    def test_request_context_keeps_open_trades_in_trade_log(self, monkeypatch):
+        import dashboard
+
+        monkeypatch.setattr(dashboard.session, "get_positions", lambda: [])
+        monkeypatch.setattr(dashboard.session, "get_account", lambda: {})
+        monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: [])
+        monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
+        monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
+        monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
+            {
+                "dealId": "OPEN1",
+                "ticker": "STX",
+                "side": "long",
+                "size": 1.2,
+                "entry_price": 790.25,
+                "time_entered": "2026-09-09T10:00:00Z",
+                "status": "OPEN",
+                "trade_source": "manual",
+            },
+            {
+                "dealId": "CLOSED1",
+                "ticker": "NVDA",
+                "side": "short",
+                "size": 1.0,
+                "entry_price": 200.0,
+                "exit_price": 195.0,
+                "time_entered": "2026-09-08T10:00:00Z",
+                "time_exited": "2026-09-08T12:00:00Z",
+                "status": "CLOSED",
+                "pnl_gbp": 5.0,
+                "trade_source": "tradingview",
+            },
+        ])
+
+        ctx = dashboard._build_request_context()
+
+        assert len(ctx["combined_trades"]) == 2
+        assert any(t["status"] == "OPEN" and t["trade_type"] == "Manual" for t in ctx["combined_trades"])
+        assert any(t["status"] == "CLOSED" and t["trade_type"] == "TradingView" for t in ctx["combined_trades"])
+        assert ctx["analytics"]["trade_count"] == 1
 
 
 class TestComputeAnalytics:
