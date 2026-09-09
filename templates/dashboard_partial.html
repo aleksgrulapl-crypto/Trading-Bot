@@ -128,6 +128,7 @@
             <th>Entry</th>
             <th>Exit</th>
             <th>PnL (GBP)</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -160,6 +161,11 @@
             {% endif %}
             <td class="{% if display_pnl is not none and display_pnl >= 0 %}pnl-pos{% elif display_pnl is not none %}pnl-neg{% endif %}">
               {{ display_pnl if display_pnl is not none else '—' }}
+            </td>
+            <td>
+              {% if (t.status == 'CLOSED' or t.time_exited) and t._log_index is not none %}
+              <button class="button-danger" onclick="deleteTrade({{ t._log_index }})">Delete</button>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
