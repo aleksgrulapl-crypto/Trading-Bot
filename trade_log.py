@@ -392,6 +392,13 @@ def _coerce_trade_float(value: Any) -> Optional[float]:
         return None
 
 
+def _dealid_is_placeholder(deal_id: Any, deal_reference: Any) -> bool:
+    """Return True when *deal_id* is just a temporary echo of dealReference."""
+    if deal_id in (None, "") or deal_reference in (None, ""):
+        return False
+    return str(deal_id) == str(deal_reference)
+
+
 def _times_within_window(a: Optional[str], b: Optional[str],
                          window_seconds: int = DUPLICATE_TRADE_TIME_WINDOW_SECONDS) -> bool:
     dt_a = _parse_iso_like(a)
@@ -703,7 +710,11 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
 
         if existing:
             updated = False
-            if not existing.get("dealId") and dealId:
+            if dealId and (
+                not existing.get("dealId")
+                or _dealid_is_placeholder(existing.get("dealId"), existing.get("dealReference"))
+                or (dealReference not in (None, "") and str(existing.get("dealId")) == str(dealReference))
+            ):
                 existing["dealId"] = dealId; updated = True
             if not existing.get("dealReference") and dealReference:
                 existing["dealReference"] = dealReference; updated = True
@@ -883,7 +894,13 @@ def set_dealId_for_dealReference(dealReference: Any, dealId: Any, path: str = LO
         trades = load_raw_log(path)
         updated = False
         for t in trades:
-            if (t.get("dealReference") == dealReference) and (not t.get("dealId")):
+            if (
+                t.get("dealReference") == dealReference
+                and (
+                    not t.get("dealId")
+                    or _dealid_is_placeholder(t.get("dealId"), t.get("dealReference"))
+                )
+            ):
                 t["dealId"] = dealId
                 t["notes"] = (t.get("notes") or "") + f" | dealId_mapped={dealId}"
                 updated = True
@@ -977,7 +994,7 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                 else:
                     pos = p.get("position") or {}
                     market = p.get("market") or {}
-                    dealId = pos.get("dealId") or pos.get("dealReference")
+                    dealId = pos.get("dealId")
                     dealReference = pos.get("dealReference") or p.get("dealReference")
                     # Same rationale as above: prefer the epic code so this
                     # matches the ticker convention used by order.py/webhook.py.
@@ -1014,7 +1031,11 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
 
             if matched is not None:
                 changed = False
-                if not matched.get("dealId") and dealId:
+                if dealId and (
+                    not matched.get("dealId")
+                    or _dealid_is_placeholder(matched.get("dealId"), matched.get("dealReference"))
+                    or (dealReference not in (None, "") and str(matched.get("dealId")) == str(dealReference))
+                ):
                     matched["dealId"] = dealId; changed = True
                 if not matched.get("dealReference") and dealReference:
                     matched["dealReference"] = dealReference; changed = True
