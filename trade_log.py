@@ -58,6 +58,12 @@ VALID_SIDES = frozenset(("buy", "sell", "long", "short"))
 FX_RATE_MIN = 0.5
 FX_RATE_MAX = 1.5
 
+# Only collapse trades into one row when they look like the *same* logical
+# trade recorded twice within a short window (e.g. webhook + reconcile race).
+# Capital.com can reuse a dealId across unrelated historical trades, so any
+# dedupe keyed on dealId alone must still require corroborating fields/time.
+DUPLICATE_TRADE_TIME_WINDOW_SECONDS = 15 * 60
+
 # Module-level lock protecting all read-modify-write operations on the trade log file.
 # Any function that calls load_raw_log() then save_raw_log() must acquire this lock first.
 _trade_log_lock = threading.Lock()
@@ -377,6 +383,194 @@ def _find_open_trade_by_ticker_any_dealid(trades: List[Dict[str, Any]], ticker: 
     return candidates[0]
 
 
+def _coerce_trade_float(value: Any) -> Optional[float]:
+    try:
+        if value in (None, ""):
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _times_within_window(a: Optional[str], b: Optional[str],
+                         window_seconds: int = DUPLICATE_TRADE_TIME_WINDOW_SECONDS) -> bool:
+    dt_a = _parse_iso_like(a)
+    dt_b = _parse_iso_like(b)
+    if dt_a is None or dt_b is None:
+        return False
+    try:
+        return abs((dt_a - dt_b).total_seconds()) <= window_seconds
+    except Exception:
+        return False
+
+
+def _trade_merge_score(trade: Dict[str, Any]) -> int:
+    score = 0
+    if trade.get("dealReference"):
+        score += 16
+    if trade.get("dealId"):
+        score += 12
+    if trade.get("status") == "CLOSED":
+        score += 8
+    if trade.get("time_exited"):
+        score += 6
+    if trade.get("exit_price") not in (None, ""):
+        score += 5
+    if trade.get("pnl") not in (None, ""):
+        score += 4
+    if trade.get("time_entered"):
+        score += 3
+    if trade.get("ticker"):
+        score += 2
+    if trade.get("trade_source") not in (None, "", "unknown"):
+        score += 1
+    return score
+
+
+def _select_timestamp(entries: List[Dict[str, Any]], key: str, pick_latest: bool) -> Optional[str]:
+    best = None
+    for entry in entries:
+        raw = entry.get(key)
+        parsed = _parse_iso_like(raw)
+        if parsed is None:
+            continue
+        if best is None:
+            best = (parsed, raw)
+            continue
+        if (pick_latest and parsed > best[0]) or (not pick_latest and parsed < best[0]):
+            best = (parsed, raw)
+    return best[1] if best else None
+
+
+def _is_probable_duplicate_trade(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    ref_a = a.get("dealReference")
+    ref_b = b.get("dealReference")
+    if ref_a and ref_b:
+        return str(ref_a) == str(ref_b)
+
+    deal_a = a.get("dealId")
+    deal_b = b.get("dealId")
+    if not (deal_a and deal_b) or str(deal_a) != str(deal_b):
+        return False
+
+    side_a = _normalize_side(a.get("side"))
+    side_b = _normalize_side(b.get("side"))
+    if side_a and side_b and side_a != side_b:
+        return False
+
+    entry_a = _coerce_trade_float(a.get("entry_price"))
+    entry_b = _coerce_trade_float(b.get("entry_price"))
+    if entry_a is not None and entry_b is not None and not _float_equal(entry_a, entry_b):
+        return False
+
+    size_a = _coerce_trade_float(a.get("size"))
+    size_b = _coerce_trade_float(b.get("size"))
+    if size_a is not None and size_b is not None and not _float_equal(size_a, size_b):
+        return False
+
+    exit_a = _coerce_trade_float(a.get("exit_price"))
+    exit_b = _coerce_trade_float(b.get("exit_price"))
+    if exit_a is not None and exit_b is not None and not _float_equal(exit_a, exit_b):
+        return False
+
+    if _times_within_window(a.get("time_entered"), b.get("time_entered")):
+        return True
+    if _times_within_window(a.get("time_exited"), b.get("time_exited")):
+        return True
+
+    # Last-resort guard for duplicate rows created from the same close event
+    # where one side lost timestamps but the other fields still line up.
+    return (
+        entry_a is not None and entry_b is not None
+        and size_a is not None and size_b is not None
+        and exit_a is not None and exit_b is not None
+        and (
+            not a.get("time_entered") or not b.get("time_entered")
+            or not a.get("time_exited") or not b.get("time_exited")
+        )
+    )
+
+
+def _merge_trade_group(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    ranked = sorted(entries, key=_trade_merge_score, reverse=True)
+    merged = dict(ranked[0])
+
+    notes_parts: List[str] = []
+    seen_notes = set()
+    for entry in ranked:
+        note = (entry.get("notes") or "").strip()
+        if note and note not in seen_notes:
+            seen_notes.add(note)
+            notes_parts.append(note)
+
+    for entry in ranked[1:]:
+        for key in ("dealId", "dealReference", "ticker", "side", "size", "entry_price",
+                    "exit_price", "trade_source", "origin"):
+            if merged.get(key) in (None, "") and entry.get(key) not in (None, ""):
+                merged[key] = entry.get(key)
+
+    earliest_entered = _select_timestamp(ranked, "time_entered", pick_latest=False)
+    latest_exited = _select_timestamp(ranked, "time_exited", pick_latest=True)
+    if earliest_entered:
+        merged["time_entered"] = earliest_entered
+        merged["time_entered_human"] = _humanize(earliest_entered)
+    if latest_exited:
+        merged["time_exited"] = latest_exited
+        merged["time_exited_human"] = _humanize(latest_exited)
+
+    if any(entry.get("status") == "CLOSED" for entry in ranked):
+        merged["status"] = "CLOSED"
+        broker_pnl = next((entry.get("pnl") for entry in ranked if entry.get("pnl") not in (None, "")), None)
+        _apply_pnl(merged, broker_pnl=broker_pnl)
+
+    if notes_parts:
+        merged["notes"] = " | ".join(notes_parts)
+
+    return merged
+
+
+def dedupe_trade_log_entries(trades: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], bool]:
+    """Collapse obviously-duplicate trade-log rows without merging reused dealIds.
+
+    Two rows are treated as the same logical trade only when they share a
+    stable identifier (dealReference, or dealId plus matching size/price/side)
+    and their timestamps corroborate that they were recorded during the same
+    open/close event. This intentionally avoids deduping on bare dealId alone,
+    since the broker can recycle dealIds across unrelated historical trades.
+    """
+    groups: List[List[Dict[str, Any]]] = []
+    for trade in trades or []:
+        matched_group = None
+        for group in groups:
+            if any(_is_probable_duplicate_trade(existing, trade) for existing in group):
+                matched_group = group
+                break
+        if matched_group is None:
+            groups.append([trade])
+        else:
+            matched_group.append(trade)
+
+    changed = any(len(group) > 1 for group in groups)
+    if not changed:
+        return list(trades or []), False
+
+    deduped = []
+    for group in groups:
+        deduped.append(_merge_trade_group(group) if len(group) > 1 else group[0])
+    return deduped, True
+
+
+def canonicalize_trade_log(path: str = LOG_PATH) -> List[Dict[str, Any]]:
+    """Persistently collapse obvious duplicate rows in the canonical log file."""
+    with _trade_log_lock:
+        trades = load_raw_log(path)
+        deduped, changed = dedupe_trade_log_entries(trades)
+        if changed:
+            save_raw_log(deduped, path)
+            return deduped
+        return trades
+
+
 # ---------------------------------------------------------------------------
 # Core public API
 # ---------------------------------------------------------------------------
@@ -637,8 +831,12 @@ def close_trade_by_dealId(dealId: Any, exit_price: Any = None, time_exited: Opti
                 if updated is None:
                     updated = t
         if updated:
+            trades, _ = dedupe_trade_log_entries(trades)
             save_raw_log(trades, path)
-        return updated
+            for t in trades:
+                if t.get("dealId") is not None and str(t.get("dealId")) == str(dealId) and t.get("status") == "CLOSED":
+                    return t
+        return None
 
 
 def close_trade_fallback(ticker: Any, entry_price: Any, exit_price: Any = None,
@@ -697,6 +895,7 @@ def set_dealId_for_dealReference(dealReference: Any, dealId: Any, path: str = LO
 
 def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = LOG_PATH) -> Dict[str, List[Dict[str, Any]]]:
     """Reconcile local trade log against live broker positions."""
+    canonicalize_trade_log(path)
     with _trade_log_lock:
         trades = load_raw_log(path)
         closed: List[Dict[str, Any]] = []
@@ -876,7 +1075,8 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
             added.append(new_pos)
             existing_signatures.add(sig)
 
-        if closed or added or matched_updates or reopened:
+        trades, deduped = dedupe_trade_log_entries(trades)
+        if closed or added or matched_updates or reopened or deduped:
             save_raw_log(trades, path)
 
     return {"closed": closed, "added": added, "reopened": reopened}

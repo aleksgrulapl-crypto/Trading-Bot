@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # webhook.py
-# Idempotent webhook handler integrated with trade_log.upsert_open_trade and close_trade_by_dealId.
+# Idempotent webhook handler integrated with trade_log.upsert_open_trade.
 #
 # Key improvements:
 #   - Dashboard import validation: fails fast if blueprint not exported correctly
@@ -43,10 +43,7 @@ from config import (
 from scheduler import start_scheduler
 from trade_log import (
     load_raw_log,
-    save_raw_log,
     upsert_open_trade,
-    set_dealId_for_dealReference,
-    close_trade_by_dealId,
     _normalize_side,
 )
 from close_position import close_position as close_position_module
@@ -366,7 +363,7 @@ def _validate_webhook_payload(payload: Dict[str, Any]) -> Optional[str]:
 def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str, Any]:
     """Idempotent processing:
     - Upsert opens via trade_log.upsert_open_trade
-    - Close via trade_log.close_trade_by_dealId when exit present
+    - Defer closes until the broker confirms them via positions/history sync
     """
     log_prefix = f"[cid={cid}] " if cid else ""
 
@@ -380,7 +377,12 @@ def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str,
 
     dealId = pos.get("dealId") or pos.get("id") or payload.get("dealId")
     dealReference = pos.get("dealReference") or payload.get("dealReference")
-    ticker = market.get("symbol") or market.get("epic") or pos.get("instrument") or payload.get("ticker")
+    ticker = (
+        payload.get("ticker")
+        or market.get("epic")
+        or market.get("symbol")
+        or pos.get("instrument")
+    )
     side_raw = pos.get("direction") or payload.get("side")
     side = str(side_raw).strip().lower() if side_raw is not None else None
     size = pos.get("size") or pos.get("contractSize") or payload.get("size")
@@ -393,13 +395,18 @@ def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str,
     logger.debug("%sExtracted fields: dealId=%s ticker=%s side=%s size=%s entry=%s exit=%s",
                  log_prefix, dealId, ticker, side, size, entry_price, exit_price)
 
-    if dealId and exit_price not in (None, ""):
-        closed = close_trade_by_dealId(dealId, exit_price=exit_price, time_exited=time_exited, note=f"Closed via webhook ({source})")
-        if closed:
-            closed["trade_source"] = source
-            closed["origin"] = source
-            logger.info("%sClosed trade dealId=%s exit_price=%s", log_prefix, dealId, exit_price)
-            return {"action": "closed", "trade": closed}
+    if exit_price not in (None, ""):
+        logger.info(
+            "%sDeferring close-like webhook for dealId=%s ticker=%s until broker confirmation",
+            log_prefix, dealId, ticker,
+        )
+        return {
+            "action": "close_deferred",
+            "reason": "awaiting_broker_confirmation",
+            "dealId": dealId,
+            "ticker": ticker,
+            "time_exited": time_exited,
+        }
 
     upsert_payload = {
         "dealId": dealId,
@@ -416,27 +423,6 @@ def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str,
     upserted = upsert_open_trade(upsert_payload)
     if upserted:
         logger.info("%sUpserted open trade dealId=%s ticker=%s source=%s", log_prefix, dealId, ticker, source)
-        if exit_price not in (None, ""):
-            if upserted.get("dealId"):
-                closed = close_trade_by_dealId(upserted.get("dealId"), exit_price=exit_price, time_exited=time_exited, note=f"Closed via webhook ({source})")
-                if closed:
-                    closed["trade_source"] = source
-                    closed["origin"] = source
-                return {"action": "upserted_and_closed", "trade": closed or upserted}
-            else:
-                trades = load_raw_log()
-                for t in trades:
-                    if t is upserted or (t.get("ticker") == upserted.get("ticker") and t.get("entry_price") == upserted.get("entry_price") and t.get("status") != "CLOSED"):
-                        try:
-                            t["exit_price"] = float(exit_price)
-                        except Exception:
-                            t["exit_price"] = exit_price
-                        t["time_exited"] = time_exited
-                        t["status"] = "CLOSED"
-                        t["trade_source"] = source
-                        t["origin"] = source
-                        save_raw_log(trades)
-                        return {"action": "upserted_and_closed_fallback", "trade": t}
         return {"action": "upserted", "trade": upserted}
 
     logger.warning("%sUpsert rejected – likely missing/invalid entry_price or size. dealId=%s ticker=%s entry_price=%s size=%s",

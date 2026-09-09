@@ -291,6 +291,48 @@ class TestCloseTradeByDealId:
         trades = load_raw_log(path)
         assert all(t.get("status") == "CLOSED" for t in trades), "Every row sharing the dealId must be closed, not just the first"
 
+    def test_canonicalize_trade_log_merges_duplicate_closed_rows_only_when_same_event(self, tmp_path):
+        from trade_log import canonicalize_trade_log, load_raw_log, save_raw_log
+        path = str(tmp_path / "log.json")
+        duplicated_rows = [
+            {"dealId": "DUP", "ticker": "STX", "side": "short", "size": 1.2,
+             "entry_price": 790.25, "exit_price": 791.71,
+             "time_entered": "2026-09-08T10:00:00Z", "time_exited": "2026-09-08T12:00:00Z",
+             "status": "CLOSED", "notes": "Closed via sync"},
+            {"dealId": "DUP", "ticker": "Seagate Technology", "side": "short", "size": 1.2,
+             "entry_price": 790.25, "exit_price": 791.71,
+             "time_entered": "2026-09-08T10:01:00Z", "time_exited": "2026-09-08T12:00:00Z",
+             "status": "CLOSED", "notes": "Imported from live positions"},
+        ]
+        save_raw_log(duplicated_rows, path=path)
+
+        canonicalize_trade_log(path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1, "Same-event duplicate closed rows should be collapsed into one canonical record"
+        assert "Closed via sync" in (trades[0].get("notes") or "")
+        assert "Imported from live positions" in (trades[0].get("notes") or "")
+
+    def test_canonicalize_trade_log_keeps_reused_dealid_trades_separate(self, tmp_path):
+        from trade_log import canonicalize_trade_log, load_raw_log, save_raw_log
+        path = str(tmp_path / "log.json")
+        reused_dealid_rows = [
+            {"dealId": "REUSED", "ticker": "STX", "side": "short", "size": 1.2,
+             "entry_price": 790.25, "exit_price": 791.71,
+             "time_entered": "2026-09-01T10:00:00Z", "time_exited": "2026-09-01T12:00:00Z",
+             "status": "CLOSED"},
+            {"dealId": "REUSED", "ticker": "STX", "side": "short", "size": 1.2,
+             "entry_price": 790.25, "exit_price": 788.10,
+             "time_entered": "2026-09-08T10:00:00Z", "time_exited": "2026-09-08T12:00:00Z",
+             "status": "CLOSED"},
+        ]
+        save_raw_log(reused_dealid_rows, path=path)
+
+        canonicalize_trade_log(path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 2, "Distinct historical trades reusing the same dealId must not be merged"
+
 
 class TestFetchExitFromHistory:
     """history_sync._fetch_exit_from_history must not accept a stale history row
@@ -728,6 +770,55 @@ class TestWebhookPayloadValidation:
         assert result is not None
 
 
+class TestWebhookProcessing:
+    def test_close_like_payload_is_deferred_until_broker_confirmation(self, monkeypatch):
+        import webhook
+
+        upserts = []
+
+        def _fake_upsert(payload):
+            upserts.append(payload)
+            return payload
+
+        monkeypatch.setattr(webhook, "upsert_open_trade", _fake_upsert)
+
+        result = webhook.process_webhook_payload({
+            "dealId": "D-CLOSE",
+            "market": {"epic": "STX", "symbol": "Seagate Technology"},
+            "price": 791.71,
+            "closedDate": "2026-09-08T12:00:00Z",
+        })
+
+        assert result["action"] == "close_deferred"
+        assert result["dealId"] == "D-CLOSE"
+        assert upserts == [], "Webhook close hints must not mutate the trade log before broker confirmation"
+
+    def test_broker_payload_prefers_epic_for_ticker_matching(self, monkeypatch):
+        import webhook
+
+        captured = {}
+
+        def _fake_upsert(payload):
+            captured["payload"] = payload
+            return dict(payload, status="OPEN")
+
+        monkeypatch.setattr(webhook, "upsert_open_trade", _fake_upsert)
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealId": "D-OPEN",
+                "direction": "BUY",
+                "size": 1.2,
+                "level": 790.25,
+                "createdDate": "2026-09-08T10:00:00Z",
+            },
+            "market": {"epic": "STX", "symbol": "Seagate Technology"},
+        })
+
+        assert result["action"] == "upserted"
+        assert captured["payload"]["ticker"] == "STX"
+
+
 # ======================================================================== #
 #  dashboard: safe analytics defaults                                       #
 # ======================================================================== #
@@ -760,6 +851,34 @@ class TestSafeAnalytics:
         assert result["win_rate"] == 75.5
         assert result["trade_count"] == 20
         assert result["total_pl"] == 1000.0
+
+
+class TestDashboardDedupe:
+    def test_keeps_distinct_closed_trades_that_reuse_same_dealid(self):
+        from dashboard import dedupe_trades
+        trades = [
+            {
+                "dealId": "REUSED",
+                "ticker": "STX",
+                "side": "short",
+                "entry_price": 790.25,
+                "exit_price": 791.71,
+                "time_entered": "2026-09-01T10:00:00Z",
+                "time_exited": "2026-09-01T12:00:00Z",
+                "status": "CLOSED",
+            },
+            {
+                "dealId": "REUSED",
+                "ticker": "STX",
+                "side": "short",
+                "entry_price": 790.25,
+                "exit_price": 788.10,
+                "time_entered": "2026-09-08T10:00:00Z",
+                "time_exited": "2026-09-08T12:00:00Z",
+                "status": "CLOSED",
+            },
+        ]
+        assert len(dedupe_trades(trades)) == 2
 
 
 class TestComputeAnalytics:
