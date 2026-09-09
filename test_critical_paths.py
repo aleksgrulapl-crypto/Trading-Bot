@@ -1202,8 +1202,8 @@ class TestDashboardDeleteTradeEndpoint:
         monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
         monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
         monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
-            {"dealId": "OPEN1", "ticker": "AAPL", "status": "OPEN"},
-            {"dealId": "CLOSED1", "ticker": "NVDA", "status": "CLOSED", "time_exited": "2026-09-09T12:00:00Z"},
+            {"dealId": "OPEN1", "ticker": "AAPL", "status": "OPEN", "pnl_gbp": None},
+            {"dealId": "CLOSED1", "ticker": "NVDA", "status": "CLOSED", "time_exited": "2026-09-09T12:00:00Z", "pnl_gbp": 5.0},
         ])
 
         app = Flask(__name__)
