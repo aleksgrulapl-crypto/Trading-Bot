@@ -296,13 +296,20 @@ def _first_not_none(*values):
 def _normalize_source(payload: Dict[str, Any], dealId: Optional[str], dealReference: Optional[str], side: Optional[str]) -> str:
     raw_origin = payload.get("origin") or payload.get("source") or payload.get("trade_source") or payload.get("tradeSource")
     if raw_origin:
-        return str(raw_origin).strip().lower()
+        source = str(raw_origin).strip().lower()
+        if source in ("tradingview", "webhook", "bot"):
+            return "tradingview"
+        if source in ("manual", "broker"):
+            return "manual"
+        if source == "unknown":
+            return "unknown"
+        return source
     if payload.get("webhook") is True or payload.get("cid") or payload.get("alert_id"):
-        return "webhook"
+        return "tradingview"
     if payload.get("manual") is True:
         return "manual"
     if dealId is not None or dealReference is not None:
-        return "bot"
+        return "manual"
     if side in ("long", "short"):
         return "manual"
     return "unknown"

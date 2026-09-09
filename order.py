@@ -153,6 +153,8 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
                     "size": float(size),
                     "entry_price": float(entry_price),
                     "time_entered": ts,
+                    "trade_source": "tradingview",
+                    "origin": "tradingview",
                     "notes": f"sl={sl}; tp={tp}; timeframe={timeframe}; dealReference={deal_ref}",
                 }
                 appended = append_open_trade(trade_payload)

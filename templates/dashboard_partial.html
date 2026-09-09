@@ -108,20 +108,21 @@
     </div>
   </div>
 
-  <!-- Completed Trades -->
+  <!-- Trade Log -->
   <div class="grid-full" style="margin-top:16px;">
     <div class="card">
       <div class="card-header">
-        <div class="card-title">Completed Trades</div>
+        <div class="card-title">Trade Log</div>
       </div>
 
       {% if trades %}
       <table class="table">
         <thead>
           <tr>
-            <th>Entered</th>
-            <th>Exited</th>
+            <th>Time Entered</th>
+            <th>Time Exited</th>
             <th>Ticker</th>
+            <th>Type</th>
             <th>Side</th>
             <th>Size</th>
             <th>Entry</th>
@@ -135,6 +136,7 @@
             <td class="small">{{ t.time_entered_human or t.time_entered or '—' }}</td>
             <td class="small">{{ t.time_exited_human or t.time_exited or '—' }}</td>
             <td>{{ t.ticker or '—' }}</td>
+            <td><span class="pill pill-status">{{ t.trade_type or 'Manual' }}</span></td>
             <td>
               {% set side = t.side or t.direction %}
               {% if side == 'Long' %}
@@ -152,21 +154,19 @@
             <td>
               {{ t.exit_price is not none and t.exit_price or t.get('exitPrice') or '—' }}
             </td>
-            <td class="{% if t.pnl_gbp is not none and t.pnl_gbp >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
-              {%- if t.pnl_gbp is not none -%}
-                {{ t.pnl_gbp }}
-              {%- elif t.pnl is not none -%}
-                {{ (t.pnl * (config.FX_USD_GBP if config and config.FX_USD_GBP else 0.78))|round(2) }}
-              {%- else -%}
-                —
-              {%- endif -%}
+            {% set display_pnl = t.pnl_gbp %}
+            {% if display_pnl is none and t.pnl is not none %}
+              {% set display_pnl = (t.pnl * (config.FX_USD_GBP if config and config.FX_USD_GBP else 0.78))|round(2) %}
+            {% endif %}
+            <td class="{% if display_pnl is not none and display_pnl >= 0 %}pnl-pos{% elif display_pnl is not none %}pnl-neg{% endif %}">
+              {{ display_pnl if display_pnl is not none else '—' }}
             </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
       {% else %}
-      <div class="small">No completed trades.</div>
+      <div class="small">No trades recorded.</div>
       {% endif %}
     </div>
   </div>

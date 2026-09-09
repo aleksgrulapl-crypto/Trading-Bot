@@ -24,7 +24,6 @@ from trade_log import (
     dedupe_trade_log_entries,
     load_raw_log,
     reconcile_with_positions,
-    get_completed_trades,
 )
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
@@ -85,6 +84,21 @@ def _safe_str(v):
     return str(v) if v is not None else None
 
 
+def _trade_type_label(trade):
+    raw_source = trade.get("trade_type") or trade.get("trade_source") or trade.get("origin") or trade.get("source")
+    if raw_source not in (None, ""):
+        source = str(raw_source).strip().lower()
+        if source in ("tradingview", "webhook", "bot"):
+            return "TradingView"
+        if source in ("manual", "broker", "unknown"):
+            return "Manual"
+
+    notes = str(trade.get("notes") or "").lower()
+    if "webhook" in notes or "tradingview" in notes:
+        return "TradingView"
+    return "Manual"
+
+
 def normalize_trades(trades):
     """
     Normalize trade dicts for display and analytics.
@@ -137,6 +151,7 @@ def normalize_trades(trades):
         copy["time_exited"] = copy.get("time_exited")
         copy["time_entered_human"] = copy.get("time_entered_human")
         copy["time_exited_human"] = copy.get("time_exited_human")
+        copy["trade_type"] = _trade_type_label(copy)
 
         out.append(copy)
     return out
@@ -318,13 +333,12 @@ def _build_request_context():
         reverse=True,
     )
 
-    completed_trades = filter_completed(combined_trades)
-    analytics = _safe_analytics(compute_analytics(completed_trades))
+    analytics = _safe_analytics(compute_analytics(filter_completed(combined_trades)))
 
     return {
         "account": account,
         "positions": positions,
-        "combined_trades": completed_trades,
+        "combined_trades": combined_trades,
         "analytics": analytics,
     }
 
