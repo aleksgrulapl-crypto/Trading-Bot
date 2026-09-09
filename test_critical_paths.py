@@ -803,6 +803,42 @@ class TestThreadSafety:
         assert len(closed) == 10, f"Expected 10 closed trades, got {len(closed)}"
 
 
+class TestDeleteCompletedTrade:
+    def test_deletes_only_selected_completed_trade(self, tmp_path):
+        from trade_log import delete_completed_trade, load_raw_log
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([
+                {"dealId": "OPEN1", "ticker": "AAPL", "status": "OPEN"},
+                {"dealId": "CLOSED1", "ticker": "NVDA", "status": "CLOSED", "time_exited": "2026-09-09T10:00:00Z"},
+                {"dealId": "CLOSED2", "ticker": "TSLA", "status": "CLOSED", "time_exited": "2026-09-09T11:00:00Z"},
+            ], f)
+
+        ok, deleted, status = delete_completed_trade(1, path=path)
+        trades = load_raw_log(path)
+
+        assert ok is True
+        assert status == "deleted"
+        assert deleted["dealId"] == "CLOSED1"
+        assert [t["dealId"] for t in trades] == ["OPEN1", "CLOSED2"]
+
+    def test_rejects_open_trade_deletion(self, tmp_path):
+        from trade_log import delete_completed_trade, load_raw_log
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([{"dealId": "OPEN1", "ticker": "AAPL", "status": "OPEN"}], f)
+
+        ok, deleted, status = delete_completed_trade(0, path=path)
+        trades = load_raw_log(path)
+
+        assert ok is False
+        assert deleted is None
+        assert status == "not_completed"
+        assert len(trades) == 1
+
+
 # ======================================================================== #
 #  webhook: payload validation                                              #
 # ======================================================================== #
@@ -1129,6 +1165,59 @@ class TestDashboardCloseEndpoint:
 
         assert response.status_code == 502
         assert data["status"] == "error"
+
+
+class TestDashboardDeleteTradeEndpoint:
+    def test_delete_endpoint_calls_trade_log_service(self, monkeypatch):
+        from flask import Flask
+        from dashboard import dashboard
+
+        called = {}
+
+        def _fake_delete(trade_index):
+            called["trade_index"] = trade_index
+            return True, {"dealId": "D1"}, "deleted"
+
+        monkeypatch.setattr("dashboard.delete_completed_trade", _fake_delete)
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+
+        response = client.post("/dashboard/trade/4/delete")
+        data = response.get_json()
+
+        assert response.status_code == 200
+        assert data["status"] == "success"
+        assert called["trade_index"] == 4
+
+    def test_dashboard_data_renders_delete_button_only_for_completed_trades(self, monkeypatch):
+        from flask import Flask
+        import dashboard
+
+        monkeypatch.setattr(dashboard.session, "get_positions", lambda: [])
+        monkeypatch.setattr(dashboard.session, "get_account", lambda: {})
+        monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: [])
+        monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
+        monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
+        monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
+            {"dealId": "OPEN1", "ticker": "AAPL", "status": "OPEN"},
+            {"dealId": "CLOSED1", "ticker": "NVDA", "status": "CLOSED", "time_exited": "2026-09-09T12:00:00Z"},
+        ])
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard.dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+
+        response = client.get("/dashboard/data")
+        data = response.get_json()
+        html = data["html"]
+
+        assert response.status_code == 200
+        assert "deleteTrade(1)" in html
+        assert "deleteTrade(0)" not in html
 
 
 # ======================================================================== #

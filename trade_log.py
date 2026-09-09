@@ -278,6 +278,31 @@ def reset_log(path: str = LOG_PATH) -> bool:
     return save_raw_log([], path)
 
 
+def delete_completed_trade(index: int, path: str = LOG_PATH) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """Delete one completed trade row from the raw log by its zero-based index."""
+    try:
+        idx = int(index)
+    except (TypeError, ValueError):
+        return False, None, "invalid_index"
+
+    with _trade_log_lock:
+        trades = load_raw_log(path)
+        if idx < 0 or idx >= len(trades):
+            return False, None, "not_found"
+
+        trade = trades[idx] if isinstance(trades[idx], dict) else {}
+        status = str(trade.get("status") or "").strip().upper()
+        is_completed = status == "CLOSED" or trade.get("time_exited") not in (None, "")
+        if not is_completed:
+            return False, None, "not_completed"
+
+        deleted = dict(trade)
+        trades.pop(idx)
+        if not save_raw_log(trades, path):
+            return False, None, "save_failed"
+        return True, deleted, "deleted"
+
+
 # ---------------------------------------------------------------------------
 # Internal calculation helpers
 # ---------------------------------------------------------------------------

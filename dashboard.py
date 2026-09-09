@@ -21,6 +21,7 @@ import session
 import config
 from close_position import close_position as close_live_position
 from trade_log import (
+    delete_completed_trade,
     dedupe_trade_log_entries,
     load_raw_log,
     reconcile_with_positions,
@@ -326,7 +327,7 @@ def _build_request_context():
     except Exception:
         logger.exception("dashboard: reconcile_with_positions failed")
 
-    combined_raw = load_raw_log()
+    combined_raw = [dict(t, _log_index=i) for i, t in enumerate(load_raw_log())]
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
     combined_trades.sort(
         key=lambda t: (t.get("time_exited") or t.get("time_entered") or ""),
@@ -449,6 +450,39 @@ def dashboard_close_position(position_id: str):
         "status": "error",
         "message": "invalid_close_response",
     }), 502
+
+
+@dashboard.route("/dashboard/trade/<int:trade_index>/delete", methods=["POST"])
+@login_required
+def dashboard_delete_trade(trade_index: int):
+    """Delete one completed trade-log row from the dashboard."""
+    try:
+        deleted, _trade, status = delete_completed_trade(trade_index)
+    except Exception as exc:
+        logger.exception("dashboard: delete action failed for trade %s: %s", trade_index, exc)
+        return jsonify({
+            "status": "error",
+            "message": "delete_failed_internal",
+        }), 500
+
+    if deleted:
+        return jsonify({
+            "status": "success",
+            "message": "Trade deleted from the log.",
+        }), 200
+
+    if status == "invalid_index":
+        code = 400
+    elif status == "not_found":
+        code = 404
+    elif status == "not_completed":
+        code = 409
+    else:
+        code = 500
+    return jsonify({
+        "status": "error",
+        "message": status,
+    }), code
 
 
 # -----------------------------
