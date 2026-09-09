@@ -202,6 +202,50 @@ class TestReconcileWithPositions:
         assert len(trades) == 1, "Reconcile must not create a duplicate entry for the same ticker/side"
         assert not result["added"]
 
+    def test_real_dealid_replaces_dealreference_placeholder_before_false_close(self, tmp_path):
+        """Regression for the ORCL phantom close: an early raw broker payload may
+        have only dealReference, but once the real dealId arrives it must replace
+        any temporary placeholder instead of leaving the row tracked under the
+        reference string and later auto-closing it as 'missing'."""
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {"dealId": None, "ticker": "ORCL", "side": "sell",
+             "size": 3.1, "entry_price": 161.7, "time_entered": "2026-09-09T21:00:36Z"},
+            path=path,
+        )
+
+        reconcile_with_positions([{
+            "position": {
+                "dealReference": "REF123",
+                "direction": "SELL",
+                "size": 3.13,
+                "level": 161.7,
+                "createdDate": "2026-09-09T21:00:36Z",
+            },
+            "market": {"epic": "ORCL", "symbol": "Oracle"},
+        }], path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert trades[0]["dealId"] is None, "dealReference must not be promoted into dealId"
+        assert trades[0]["dealReference"] == "REF123"
+
+        upsert_open_trade(
+            {"dealId": "REAL123", "dealReference": "REF123", "ticker": "ORCL", "side": "sell",
+             "size": 3.1, "entry_price": 161.7, "time_entered": "2026-09-09T21:00:36Z"},
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1, "The real dealId must backfill the existing row, not create a duplicate"
+        assert trades[0]["dealId"] == "REAL123"
+        assert trades[0]["dealReference"] == "REF123"
+        assert trades[0]["status"] == "OPEN"
+
     def test_live_position_for_different_ticker_still_added(self, tmp_path):
         """Sanity check: the widened dedup match must not swallow genuinely
         different positions for other tickers."""
