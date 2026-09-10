@@ -421,6 +421,24 @@ def sync_closed_trades():
             deal_id, trade, prior_closed_by_deal_id.get(deal_id))
         pnl = broker_pnl
 
+        # If this close candidate came from disappearance-only signals (not an
+        # explicit broker size==0), require at least some broker-side close
+        # evidence from transaction history before finalising it. Without this,
+        # a transient absence/404 can fabricate a phantom CLOSED trade by using
+        # a live market snapshot as a made-up exit, while the real position is
+        # still open and later reappears as a duplicate "manual" import.
+        close_evidence_from_history = (
+            broker_close_time is not None
+            or broker_pnl is not None
+            or exit_price is not None
+        )
+        if disappeared and not size_zero and not close_evidence_from_history:
+            logger.debug(
+                "sync_closed_trades: %s disappearance confirmed but no close evidence in history yet; deferring close",
+                deal_id,
+            )
+            continue
+
         # Step 2: fall back to market snapshot if history didn't have it
         if exit_price is None:
             bid, offer = get_snapshot(epic)
