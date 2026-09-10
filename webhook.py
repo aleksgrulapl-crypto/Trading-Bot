@@ -324,10 +324,7 @@ def _is_broker_position_event(payload: Any) -> bool:
     pos = payload.get("position")
     if not isinstance(pos, dict):
         return False
-    return any(
-        pos.get(k) is not None
-        for k in ("dealId", "dealReference", "createdDate", "createdDateUTC")
-    )
+    return (pos.get("dealId") is not None) or (pos.get("dealReference") is not None)
 
 
 def _validate_webhook_payload(payload: Dict[str, Any]) -> Optional[str]:

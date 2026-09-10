@@ -890,7 +890,7 @@ class TestWebhookProcessing:
         import webhook
 
         assert webhook._is_broker_position_event({
-            "position": {"id": "tv-alert-123", "direction": "BUY", "size": 0.48, "level": 161.81},
+            "position": {"id": "tv-alert-123", "direction": "BUY", "size": 0.48, "level": 161.81, "createdDate": "2026-09-10T11:46:00Z"},
             "market": {"epic": "ORCL", "symbol": "Oracle Corporation"},
         }) is False
 
