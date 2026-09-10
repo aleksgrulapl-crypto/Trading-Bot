@@ -315,6 +315,18 @@ def _normalize_source(payload: Dict[str, Any], dealId: Optional[str], dealRefere
     return "unknown"
 
 
+def _is_broker_position_event(payload: Any) -> bool:
+    """Return True when payload looks like a broker position/confirm event."""
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("dealId") is not None or payload.get("dealReference") is not None:
+        return True
+    pos = payload.get("position")
+    if not isinstance(pos, dict):
+        return False
+    return (pos.get("dealId") is not None) or (pos.get("dealReference") is not None)
+
+
 def _validate_webhook_payload(payload: Dict[str, Any]) -> Optional[str]:
     """Return an error string if the payload is obviously malformed, else None.
 
@@ -382,7 +394,7 @@ def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str,
     pos = payload.get("position") or payload
     market = payload.get("market") or payload
 
-    dealId = pos.get("dealId") or pos.get("id") or payload.get("dealId")
+    dealId = pos.get("dealId") or payload.get("dealId")
     dealReference = pos.get("dealReference") or payload.get("dealReference")
     ticker = (
         payload.get("ticker")
@@ -475,7 +487,7 @@ def webhook():
         logger.warning("[cid=%s] Parser returned non-dict result", cid)
         return _ok_response({"status": "error", "message": "Parser returned invalid result", "cid": cid})
 
-    if isinstance(parsed_input, dict) and (parsed_input.get("position") or parsed_input.get("dealId") or parsed_input.get("market") or parsed_input.get("dealReference")):
+    if _is_broker_position_event(parsed_input):
         try:
             result = process_webhook_payload(parsed_input, cid=cid)
             logger.info("[cid=%s] Webhook processed idempotently: %s", cid, result.get("action"))

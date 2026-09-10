@@ -886,6 +886,14 @@ class TestWebhookPayloadValidation:
 
 
 class TestWebhookProcessing:
+    def test_is_broker_position_event_ignores_position_id_only_payload(self):
+        import webhook
+
+        assert webhook._is_broker_position_event({
+            "position": {"id": "tv-alert-123", "direction": "BUY", "size": 0.48, "level": 161.81, "createdDate": "2026-09-10T11:46:00Z"},
+            "market": {"epic": "ORCL", "symbol": "Oracle Corporation"},
+        }) is False
+
     def test_close_like_payload_is_deferred_until_broker_confirmation(self, monkeypatch):
         import webhook
 
@@ -932,6 +940,31 @@ class TestWebhookProcessing:
 
         assert result["action"] == "upserted"
         assert captured["payload"]["ticker"] == "STX"
+
+    def test_position_id_is_not_treated_as_broker_deal_id(self, monkeypatch):
+        import webhook
+
+        captured = {}
+
+        def _fake_upsert(payload):
+            captured["payload"] = payload
+            return dict(payload, status="OPEN")
+
+        monkeypatch.setattr(webhook, "upsert_open_trade", _fake_upsert)
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "id": "tv-alert-123",
+                "direction": "BUY",
+                "size": 0.48,
+                "level": 161.81,
+                "createdDate": "2026-09-10T11:46:00Z",
+            },
+            "market": {"epic": "ORCL", "symbol": "Oracle Corporation"},
+        })
+
+        assert result["action"] == "upserted"
+        assert captured["payload"]["dealId"] is None
 
 
 # ======================================================================== #
