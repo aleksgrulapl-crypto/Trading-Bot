@@ -897,8 +897,8 @@ class TestSizing:
     def test_ticker_equity_cap_uses_remaining_capacity(self, monkeypatch):
         import sizing
 
-        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
-        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 100}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 100.0})
         monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
         monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
@@ -935,6 +935,47 @@ class TestSizing:
 
         assert result["blocked"] is True
         assert result["reason"] == "max_positions_per_ticker_reached"
+
+    def test_ticker_usage_ignores_non_open_rows(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_POSITIONS_PER_TICKER", 3)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "NVDA", "status": "CLOSED", "size": 5.0, "entry_price": 100.0},
+            {"ticker": "NVDA", "status": "REJECTED", "size": 5.0, "entry_price": 100.0},
+            {"ticker": "NVDA", "status": "OPEN", "size": 5.0, "entry_price": 100.0},
+        ])
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA", ticker="NVDA")
+
+        assert result["blocked"] is False
+        assert result["open_positions"] == 1
+        assert result["equity_used_by_ticker"] == pytest.approx(100.0)
+
+    def test_ticker_argument_is_used_for_min_size_lookup_without_symbol(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 100}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 100.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"SMALL": {"min_size": 2.5}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [])
+
+        result = sizing.calculate_size(300, 270, 330, "buy", ticker="SMALL")
+
+        assert result["blocked"] is False
+        assert result["min_size"] == pytest.approx(2.5)
+        assert result["size"] == pytest.approx(2.5)
 
 
 class TestThreadSafety:

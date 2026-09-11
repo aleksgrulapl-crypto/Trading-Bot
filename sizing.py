@@ -68,7 +68,8 @@ def _open_ticker_usage(ticker: Optional[str]) -> Dict[str, float]:
         return {"open_count": 0, "equity_used": 0.0}
 
     for trade in trades or []:
-        if trade.get("status") == "CLOSED":
+        status = str(trade.get("status") or ("CLOSED" if trade.get("time_exited") else "OPEN")).strip().upper()
+        if status != "OPEN":
             continue
         trade_ticker = _normalize_ticker(trade.get("ticker") or trade.get("epic"))
         if trade_ticker != ticker_norm:
@@ -202,13 +203,13 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
     size = round(raw_size, 2)
 
     # 7) Enforce per-ticker minimum size
-    min_size_key = None
+    min_size_key = _normalize_ticker(symbol) or ticker_key
     if symbol:
         try:
             min_size_key = str(symbol).upper()
         except Exception:
             min_size_key = None
-    else:
+    elif not min_size_key:
         # fallback to last symbol in shared_state if present
         min_size_key = session.shared_state.get("last_symbol") if session.shared_state else None
         if min_size_key:
