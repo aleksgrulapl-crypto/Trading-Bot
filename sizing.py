@@ -151,7 +151,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
 
     # 4) Determine ticker-level capacity first. A ticker can have at most
     #    MAX_POSITIONS_PER_TICKER open trades, and their combined equity usage
-    #    is capped by MAX_EQUITY_PER_TRADE.
+    #    is capped by MAX_EQUITY_PER_TICKER.
     ticker_key = _normalize_ticker(ticker or symbol)
     ticker_usage = _open_ticker_usage(ticker_key)
     max_positions_per_ticker = int(getattr(config, "MAX_POSITIONS_PER_TICKER", 0) or 0)
@@ -164,9 +164,10 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
         }
 
     max_equity_per_trade = float(getattr(config, "MAX_EQUITY_PER_TRADE", 0) or 0)
+    max_equity_per_ticker = float(getattr(config, "MAX_EQUITY_PER_TICKER", max_equity_per_trade) or 0)
     remaining_ticker_equity = None
-    if max_equity_per_trade > 0:
-        remaining_ticker_equity = max(0.0, max_equity_per_trade - ticker_usage["equity_used"])
+    if max_equity_per_ticker > 0:
+        remaining_ticker_equity = max(0.0, max_equity_per_ticker - ticker_usage["equity_used"])
         if remaining_ticker_equity <= 0:
             return {
                 "blocked": True,
@@ -176,8 +177,8 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
             }
 
     # 5) Determine equity to use and exposure, capped by MAX_EQUITY_PER_TRADE /
-    #    MAX_EXPOSURE_PER_TRADE so a ticker never risks more than the remaining
-    #    allowed capital regardless of account balance.
+    #    MAX_EXPOSURE_PER_TRADE for the order itself and by remaining ticker
+    #    capacity for aggregate ticker exposure.
     equity_to_use = available * float(getattr(config, "EQUITY_PERCENT", 0.5))
     if max_equity_per_trade > 0:
         equity_to_use = min(equity_to_use, max_equity_per_trade)

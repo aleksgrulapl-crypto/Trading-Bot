@@ -846,6 +846,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
         monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 0)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 0)
         monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 0)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
         monkeypatch.setattr(sizing, "load_raw_log", lambda: [])
@@ -865,6 +866,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 0)
         monkeypatch.setattr(sizing, "load_raw_log", lambda: [])
 
         result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA")
@@ -883,6 +885,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
         monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 200)
         monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
         monkeypatch.setattr(sizing, "load_raw_log", lambda: [])
@@ -902,6 +905,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
         monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 200)
         monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
         monkeypatch.setattr(sizing, "load_raw_log", lambda: [
@@ -925,6 +929,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
         monkeypatch.setattr(sizing.config, "MAX_POSITIONS_PER_TICKER", 3)
         monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 200)
         monkeypatch.setattr(sizing, "load_raw_log", lambda: [
             {"ticker": "NVDA", "status": "OPEN", "size": 2.0, "entry_price": 100.0},
             {"ticker": "NVDA", "status": "OPEN", "size": 2.0, "entry_price": 100.0},
@@ -945,6 +950,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
         monkeypatch.setattr(sizing.config, "MAX_POSITIONS_PER_TICKER", 3)
         monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 200)
         monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
         monkeypatch.setattr(sizing, "load_raw_log", lambda: [
@@ -967,6 +973,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
         monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 200)
         monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"SMALL": {"min_size": 2.5}})
         monkeypatch.setattr(sizing, "load_raw_log", lambda: [])
@@ -985,6 +992,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
         monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 200)
         monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"SMALL": {"min_size": 1.5}})
         monkeypatch.setattr(sizing, "load_raw_log", lambda: [
@@ -1004,6 +1012,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
         monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 200)
         monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"SMALL": {"min_size": 2.5}})
         monkeypatch.setattr(sizing, "load_raw_log", lambda: [
