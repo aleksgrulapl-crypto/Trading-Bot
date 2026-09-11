@@ -31,7 +31,8 @@ _last_raw_1 = set()
 _last_raw_2 = set()
 _last_close_cache = {}
 _snapshot_cache = {}
-# tracks how many consecutive polls a dealId was absent from live positions
+# tracks how many consecutive polls a row-scoped open trade key was absent
+# from live positions
 _absent_count: dict = {}
 
 
@@ -320,10 +321,11 @@ def sync_closed_trades():
         if did is None:
             continue
         did = str(did)
+        cache_key = _close_cache_key(trade)
         if did not in raw_ids:
-            _absent_count[did] = _absent_count.get(did, 0) + 1
+            _absent_count[cache_key] = _absent_count.get(cache_key, 0) + 1
         else:
-            _absent_count.pop(did, None)
+            _absent_count.pop(cache_key, None)
 
     closed_in_run = set()
 
@@ -357,7 +359,7 @@ def sync_closed_trades():
             and (
                 deal_id in _last_raw_1
                 or deal_id in _last_raw_2
-                or _absent_count.get(deal_id, 0) >= 3
+                or _absent_count.get(cache_key, 0) >= 3
             )
         )
 
@@ -383,7 +385,7 @@ def sync_closed_trades():
                     "sync_closed_trades: %s opened %.0fs ago (< %.0fs grace period); ignoring disappearance likely due to broker propagation delay",
                     deal_id, age_seconds, grace_period,
                 )
-                _absent_count.pop(deal_id, None)
+                _absent_count.pop(cache_key, None)
                 continue
 
         if disappeared and not size_zero:
@@ -398,7 +400,7 @@ def sync_closed_trades():
             confirmed_gone = _confirm_position_gone(deal_id)
             if confirmed_gone is False:
                 logger.debug("sync_closed_trades: %s still reported open by broker; ignoring transient absence from positions list", deal_id)
-                _absent_count.pop(deal_id, None)
+                _absent_count.pop(cache_key, None)
                 continue
             if confirmed_gone is None:
                 logger.debug("sync_closed_trades: could not confirm %s is closed (inconclusive check); deferring", deal_id)
@@ -488,7 +490,7 @@ def sync_closed_trades():
 
         # mark as processed to avoid duplicate handling in same run
         _last_close_cache[cache_key] = _now()
-        _absent_count.pop(deal_id, None)
+        _absent_count.pop(cache_key, None)
 
     # rotate raw id history for disappearance detection
     _last_raw_2 = _last_raw_1
