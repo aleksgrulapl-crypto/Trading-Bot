@@ -173,10 +173,24 @@ def _is_hedge_signal(ticker: Optional[str], action: Optional[str]) -> bool:
     new_side = _normalize_side(action)
     if new_side not in ("long", "short"):
         return False
+
+    def _is_tv_origin(trade: Dict[str, Any]) -> bool:
+        raw_source = trade.get("trade_source") or trade.get("origin") or trade.get("source") or trade.get("trade_type")
+        if raw_source not in (None, ""):
+            source = str(raw_source).strip().lower()
+            if source in ("tradingview", "webhook", "bot", "hedge"):
+                return True
+            if source in ("manual", "broker", "unknown"):
+                return False
+        notes = str(trade.get("notes") or "").lower()
+        return ("webhook" in notes) or ("tradingview" in notes)
+
     for t in trades:
         if t.get("status") == "OPEN":
             existing_ticker = t.get("ticker") or t.get("epic")
             if existing_ticker and str(existing_ticker).strip().lower() == ticker_norm:
+                if not _is_tv_origin(t):
+                    continue
                 existing_side = _normalize_side(t.get("side"))
                 if existing_side in ("long", "short") and existing_side != new_side:
                     return True
