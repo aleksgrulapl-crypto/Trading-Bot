@@ -172,6 +172,82 @@ class TestUpsertOpenTrade:
         assert trades[0]["dealId"] == "D-REAL-UNH-1"
         assert trades[0]["trade_source"] == "tradingview"
 
+    def test_broker_confirmed_dealid_rebinds_tradingview_row_with_same_dealreference(self, tmp_path):
+        from trade_log import upsert_open_trade, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {
+                "dealId": "TV-LOCAL-PLTR-1",
+                "dealReference": "REF-PLTR-1",
+                "ticker": "PLTR",
+                "side": "sell",
+                "size": 0.67,
+                "entry_price": 166.7,
+                "time_entered": "2026-09-11T15:30:11Z",
+                "trade_source": "tradingview",
+            },
+            path=path,
+        )
+        upsert_open_trade(
+            {
+                "dealId": "D-REAL-PLTR-1",
+                "dealReference": "REF-PLTR-1",
+                "ticker": "PLTR",
+                "side": "sell",
+                "size": 0.6,
+                "entry_price": 166.7,
+                "time_entered": "2026-09-11T15:30:24Z",
+            },
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert trades[0]["dealId"] == "D-REAL-PLTR-1"
+        assert trades[0]["dealReference"] == "REF-PLTR-1"
+        assert trades[0]["size"] == pytest.approx(0.6)
+        assert trades[0]["trade_source"] == "tradingview"
+
+    def test_broker_confirmed_payload_refreshes_existing_tradingview_fill_details(self, tmp_path):
+        from trade_log import upsert_open_trade, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {
+                "dealId": "D-REAL-MSFT-1",
+                "dealReference": "REF-MSFT-1",
+                "ticker": "MSFT",
+                "side": "sell",
+                "size": 0.4,
+                "entry_price": 494.0,
+                "time_entered": "2026-09-11T15:45:12Z",
+                "trade_source": "tradingview",
+            },
+            path=path,
+        )
+        upsert_open_trade(
+            {
+                "dealId": "D-REAL-MSFT-1",
+                "dealReference": "REF-MSFT-1",
+                "ticker": "MSFT",
+                "side": "sell",
+                "size": 0.4,
+                "entry_price": 494.05,
+                "time_entered": "2026-09-11T15:45:14Z",
+            },
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert trades[0]["entry_price"] == pytest.approx(494.05)
+        assert trades[0]["trade_source"] == "tradingview"
+
 
 class TestReconcileWithPositions:
     """Tests for trade_log.reconcile_with_positions duplicate-prevention."""
@@ -272,6 +348,48 @@ class TestReconcileWithPositions:
         assert len(trades) == 1
         assert not result["added"]
         assert trades[0]["dealId"] == "D-REAL-SPXC-1"
+        assert trades[0]["trade_source"] == "tradingview"
+
+    def test_live_position_rebinds_tradingview_row_with_same_dealreference(self, tmp_path):
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {
+                "dealId": "TV-LOCAL-MSFT-1",
+                "dealReference": "REF-MSFT-1",
+                "ticker": "MSFT",
+                "side": "sell",
+                "size": 0.4,
+                "entry_price": 494.05,
+                "time_entered": "2026-09-11T15:45:12Z",
+                "trade_source": "tradingview",
+            },
+            path=path,
+        )
+
+        result = reconcile_with_positions(
+            [{
+                "position": {
+                    "dealId": "D-REAL-MSFT-1",
+                    "dealReference": "REF-MSFT-1",
+                    "direction": "SELL",
+                    "size": 0.4,
+                    "level": 494.05,
+                    "createdDate": "2026-09-11T15:45:14Z",
+                },
+                "market": {"epic": "MSFT", "symbol": "Microsoft"},
+            }],
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert not result["added"]
+        assert trades[0]["dealId"] == "D-REAL-MSFT-1"
+        assert trades[0]["dealReference"] == "REF-MSFT-1"
         assert trades[0]["trade_source"] == "tradingview"
 
     def test_real_dealid_replaces_dealreference_placeholder_before_false_close(self, tmp_path):
