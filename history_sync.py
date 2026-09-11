@@ -39,10 +39,13 @@ def _now() -> float:
     return time.time()
 
 
-def _close_cache_key(trade) -> str:
+def _close_cache_key(trade):
     """Return a row-scoped cache key for suppressing immediate re-processing."""
-    deal_id = trade.get("dealId")
-    return f"{deal_id}|{trade.get('time_entered') or ''}|{trade.get('entry_price') or ''}"
+    return (
+        str(trade.get("dealId")),
+        str(trade.get("time_entered") or ""),
+        str(trade.get("entry_price") or ""),
+    )
 
 
 def _parse_entry_time_to_utc_naive(value) -> Optional[datetime]:
