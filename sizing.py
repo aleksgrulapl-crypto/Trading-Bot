@@ -239,6 +239,12 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
             return {"blocked": True, "reason": "equity_recalculation_failed"}
         if max_size_for_remaining_equity > 0 and size > max_size_for_remaining_equity:
             size = max_size_for_remaining_equity
+        if size < min_size:
+            return {
+                "blocked": True,
+                "reason": "insufficient_ticker_capacity_for_min_size",
+                "ticker": ticker_key,
+            }
 
     try:
         actual_equity_used = (float(size) * entry) / leverage

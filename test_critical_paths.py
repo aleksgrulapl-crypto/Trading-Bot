@@ -986,7 +986,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
         monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
         monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
-        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"SMALL": {"min_size": 2.5}})
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"SMALL": {"min_size": 1.5}})
         monkeypatch.setattr(sizing, "load_raw_log", lambda: [
             {"ticker": "SMALL", "status": "OPEN", "size": 1.67, "entry_price": 299.4},
         ])
@@ -995,6 +995,25 @@ class TestSizing:
 
         assert result["blocked"] is False
         assert result["size"] == pytest.approx(1.66)
+
+    def test_remaining_ticker_capacity_below_min_size_blocks(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"SMALL": {"min_size": 2.5}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "SMALL", "status": "OPEN", "size": 1.67, "entry_price": 299.4},
+        ])
+
+        result = sizing.calculate_size(300, 270, 330, "buy", ticker="SMALL")
+
+        assert result["blocked"] is True
+        assert result["reason"] == "insufficient_ticker_capacity_for_min_size"
 
 
 class TestThreadSafety:
