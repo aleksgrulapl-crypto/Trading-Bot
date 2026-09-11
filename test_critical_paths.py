@@ -267,6 +267,51 @@ class TestReconcileWithPositions:
         assert len(trades) == 2
         assert result["added"]
 
+    def test_live_position_epic_symbol_alias_backfills_pending_trade(self, tmp_path):
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {
+                "dealId": None,
+                "dealReference": "REF-NVDA-1",
+                "ticker": "NVDA",
+                "side": "sell",
+                "size": 0.59,
+                "entry_price": 219.08,
+                "trade_source": "tradingview",
+            },
+            path=path,
+        )
+
+        live_positions = [{
+            "position": {
+                "dealId": "DEAL-NVDA-1",
+                "dealReference": "REF-NVDA-1",
+                "direction": "SELL",
+                "size": 0.5,
+                "level": 219.08,
+                "createdDate": "2026-09-11T13:17:17Z",
+            },
+            "market": {"epic": "US.NVDA.CASH", "symbol": "NVDA"},
+        }]
+        result = reconcile_with_positions(live_positions, path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1, "Alias ticker forms must merge into the same trade row"
+        assert not result["added"]
+        assert trades[0]["dealId"] == "DEAL-NVDA-1"
+        assert trades[0]["size"] == pytest.approx(0.5)
+        assert trades[0]["trade_source"] == "tradingview"
+
+    def test_epic_alias_extraction_supports_index_and_fx_formats(self):
+        from trade_log import _ticker_aliases
+
+        assert "dax" in _ticker_aliases("IX.D.DAX.IFD.IP", include_epic_symbol_alias=True)
+        assert "eurusd" in _ticker_aliases("CS.D.EURUSD.CFD.IP", include_epic_symbol_alias=True)
+
 
 class TestCloseTradeByDealId:
     """Tests for trade_log.close_trade_by_dealId."""
@@ -1496,8 +1541,8 @@ class TestDashboardDedupe:
             "Trader",
             "Hedge",
             "TradingView",
-            "Manual",
-            "Manual",
+            "Trader",
+            "Trader",
         ]
 
     def test_request_context_keeps_open_trades_in_trade_log(self, monkeypatch):
