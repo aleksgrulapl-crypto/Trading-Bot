@@ -96,12 +96,12 @@ def _trade_type_label(trade):
         if source in ("manual", "broker", "trader"):
             return "Trader"
         if source == "unknown":
-            return "Manual"
+            return "Trader"
 
     notes = str(trade.get("notes") or "").lower()
     if "webhook" in notes or "tradingview" in notes:
         return "TradingView"
-    return "Manual"
+    return "Trader"
 
 
 def normalize_trades(trades):

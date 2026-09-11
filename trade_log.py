@@ -10,6 +10,7 @@
 
 import json
 import os
+import re
 import tempfile
 import threading
 from datetime import datetime
@@ -357,6 +358,41 @@ def _make_signature(dealId: Any, dealReference: Any, ticker: Any, entry_price: A
     return f"{dealId or ''}|{dealReference or ''}|{ticker or ''}|{entry_norm}"
 
 
+_GENERIC_TICKER_TOKENS = frozenset({
+    "cash", "cfd", "spot", "mini", "micro", "idx", "index", "shares",
+    "share", "stock", "usd", "gbp", "eur", "jpy", "aud", "cad", "chf",
+    "d", "cs", "ix", "ip", "uk", "us", "eu", "au",
+})
+
+
+def _ticker_aliases(value: Any) -> set:
+    if value in (None, ""):
+        return set()
+    raw = str(value).strip().lower()
+    if not raw:
+        return set()
+
+    aliases = {raw}
+    compact = "".join(ch for ch in raw if ch.isalnum())
+    if compact:
+        aliases.add(compact)
+
+    tokens = [tok for tok in re.split(r"[^a-z0-9]+", raw) if tok]
+    for tok in tokens:
+        if tok not in _GENERIC_TICKER_TOKENS:
+            aliases.add(tok)
+    return aliases
+
+
+def _ticker_candidate_aliases(ticker: Any) -> set:
+    if isinstance(ticker, (list, tuple, set)):
+        aliases = set()
+        for item in ticker:
+            aliases.update(_ticker_aliases(item))
+        return aliases
+    return _ticker_aliases(ticker)
+
+
 def _find_pending_trade_by_ticker(trades: List[Dict[str, Any]], ticker: Any,
                                    side: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Find a still-open trade that has no dealId yet for *ticker* (optionally *side*).
@@ -369,13 +405,13 @@ def _find_pending_trade_by_ticker(trades: List[Dict[str, Any]], ticker: Any,
     created for the same real position, leaving the original entry (still lacking a
     dealId) stuck open forever once the real position closes.
     """
-    if not ticker:
+    ticker_aliases = _ticker_candidate_aliases(ticker)
+    if not ticker_aliases:
         return None
-    ticker_norm = str(ticker).strip().lower()
     candidates = [
         t for t in trades
         if t.get("status") != "CLOSED" and not t.get("dealId")
-        and t.get("ticker") and str(t.get("ticker")).strip().lower() == ticker_norm
+        and _ticker_aliases(t.get("ticker")).intersection(ticker_aliases)
     ]
     if side:
         side_norm = _normalize_side(side)
@@ -403,14 +439,14 @@ def _find_open_trade_by_ticker_any_dealid(trades: List[Dict[str, Any]], ticker: 
     entry for a ticker that already has a genuine open position, instead of
     being recognised as the same real trade.
     """
-    if not ticker:
+    ticker_aliases = _ticker_candidate_aliases(ticker)
+    if not ticker_aliases:
         return None
-    ticker_norm = str(ticker).strip().lower()
     dealId_norm = str(dealId) if dealId is not None else None
     candidates = [
         t for t in trades
         if t.get("status") != "CLOSED"
-        and t.get("ticker") and str(t.get("ticker")).strip().lower() == ticker_norm
+        and _ticker_aliases(t.get("ticker")).intersection(ticker_aliases)
         and (dealId_norm is None or str(t.get("dealId")) != dealId_norm)
     ]
     if side:
@@ -686,6 +722,15 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
     dealId = payload.get("dealId") or (pos.get("dealId") if isinstance(pos, dict) else None)
     dealReference = payload.get("dealReference") or (pos.get("dealReference") if isinstance(pos, dict) else None)
     ticker = payload.get("ticker") or (market.get("symbol") if isinstance(market, dict) else None) or (pos.get("instrument") if isinstance(pos, dict) else None)
+    ticker_candidates = [
+        payload.get("ticker"),
+        payload.get("epic"),
+        payload.get("symbol"),
+        (market.get("epic") if isinstance(market, dict) else None),
+        (market.get("symbol") if isinstance(market, dict) else None),
+        (pos.get("instrumentName") if isinstance(pos, dict) else None),
+        (pos.get("instrument") if isinstance(pos, dict) else None),
+    ]
     side = _normalize_side(payload.get("side") or (pos.get("direction") if isinstance(pos, dict) else None))
     size = payload.get("size") or (pos.get("size") if isinstance(pos, dict) else None) or (pos.get("contractSize") if isinstance(pos, dict) else None)
     entry_price = payload.get("entry_price") or (pos.get("level") if isinstance(pos, dict) else None) or (pos.get("entryPrice") if isinstance(pos, dict) else None)
@@ -731,7 +776,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
             # (e.g. differing entry_price/size due to slippage or fill rounding).
             # Fall back to matching a still-pending trade for the same ticker
             # instead of creating a duplicate open-position entry.
-            existing = _find_pending_trade_by_ticker(trades, ticker, side)
+            existing = _find_pending_trade_by_ticker(trades, ticker_candidates, side)
             matched_via_pending = existing is not None
 
         if not existing and not dealId and dealReference:
@@ -748,7 +793,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
             # matched_via_pending: an entry found this way may already hold
             # broker-confirmed size/entry_price values that must not be
             # overwritten by this payload's own (possibly estimated) figures.
-            existing = _find_open_trade_by_ticker_any_dealid(trades, ticker, side, dealId)
+            existing = _find_open_trade_by_ticker_any_dealid(trades, ticker_candidates, side, dealId)
 
         if existing:
             updated = False
@@ -1007,6 +1052,7 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
             dealId = None
             dealReference = None
             ticker = None
+            ticker_candidates: List[Any] = []
             entry_price = None
             side = None
             size = None
@@ -1017,6 +1063,13 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                 if p.get("dealId") is not None:
                     dealId = p.get("dealId")
                     dealReference = p.get("dealReference")
+                    ticker_candidates = [
+                        p.get("epic"),
+                        p.get("ticker"),
+                        p.get("symbol"),
+                        (p.get("market") or {}).get("epic") if isinstance(p.get("market"), dict) else None,
+                        (p.get("market") or {}).get("symbol") if isinstance(p.get("market"), dict) else None,
+                    ]
                     # Match on the broker's stable epic code first, not the
                     # market's human-readable display symbol (e.g. "Seagate
                     # Technology" vs epic "STX"). Trades opened via the bot
@@ -1027,7 +1080,7 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                     # causing this loop to log a brand-new duplicate entry for
                     # a position that already had a pending/open row in the
                     # log instead of updating it in place.
-                    ticker = p.get("epic") or p.get("ticker")
+                    ticker = next((candidate for candidate in ticker_candidates if candidate not in (None, "")), None)
                     entry_price = p.get("price") or p.get("entry_price") or p.get("level")
                     side = _normalize_side(p.get("side") or p.get("direction"))
                     size = p.get("size")
@@ -1038,9 +1091,17 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                     market = p.get("market") or {}
                     dealId = pos.get("dealId")
                     dealReference = pos.get("dealReference") or p.get("dealReference")
+                    ticker_candidates = [
+                        market.get("epic"),
+                        market.get("symbol"),
+                        p.get("ticker"),
+                        p.get("epic"),
+                        pos.get("instrumentName"),
+                        pos.get("instrument"),
+                    ]
                     # Same rationale as above: prefer the epic code so this
                     # matches the ticker convention used by order.py/webhook.py.
-                    ticker = market.get("epic") or market.get("symbol") or pos.get("instrumentName") or pos.get("instrument")
+                    ticker = next((candidate for candidate in ticker_candidates if candidate not in (None, "")), None)
                     entry_price = pos.get("level") or pos.get("price") or pos.get("entry_price")
                     side = _normalize_side(pos.get("direction"))
                     size = pos.get("size")
@@ -1063,9 +1124,9 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                         matched = t
                         break
             if matched is None and dealId:
-                matched = _find_pending_trade_by_ticker(trades, ticker, side)
+                matched = _find_pending_trade_by_ticker(trades, ticker_candidates or ticker, side)
             if matched is None and not dealId and dealReference:
-                matched = _find_pending_trade_by_ticker(trades, ticker, side)
+                matched = _find_pending_trade_by_ticker(trades, ticker_candidates or ticker, side)
 
             if matched is not None:
                 changed = False
