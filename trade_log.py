@@ -364,11 +364,7 @@ def _ticker_aliases(value: Any) -> set:
     if not raw:
         return set()
 
-    aliases = {raw}
-    compact = "".join(ch for ch in raw if ch.isalnum())
-    if compact:
-        aliases.add(compact)
-    return aliases
+    return {raw}
 
 
 def _ticker_candidate_aliases(ticker: Any) -> set:
