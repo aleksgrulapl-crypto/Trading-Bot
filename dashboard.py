@@ -93,7 +93,9 @@ def _trade_type_label(trade):
             return "TradingView"
         if source == "hedge":
             return "Hedge"
-        if source in ("manual", "broker", "unknown"):
+        if source in ("manual", "broker", "trader"):
+            return "Trader"
+        if source == "unknown":
             return "Manual"
 
     notes = str(trade.get("notes") or "").lower()

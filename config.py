@@ -33,12 +33,14 @@ RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", 0.50))
 EQUITY_PERCENT = float(os.getenv("EQUITY_PERCENT", 0.50))
 LEVERAGE = int(os.getenv("LEVERAGE", 5))
 
-# Hard caps applied on top of EQUITY_PERCENT so a single trade never risks more
-# than a fixed amount of capital, regardless of account balance:
-#   MAX_EQUITY_PER_TRADE   – equity (before leverage) allocated to a trade
-#   MAX_EXPOSURE_PER_TRADE – leveraged exposure allocated to a trade
-# Defaults: up to £200 equity per trade, £1000 exposure at 5x leverage.
+# Hard caps applied on top of EQUITY_PERCENT:
+#   MAX_EQUITY_PER_TRADE    – equity (before leverage) allocated to one trade
+#   MAX_EQUITY_PER_TICKER   – combined equity allowed across all open trades for one ticker
+#   MAX_EXPOSURE_PER_TRADE  – leveraged exposure allocated to one trade
+# Defaults: up to £200 equity per trade, up to £200 combined equity per ticker,
+# and £1000 exposure at 5x leverage.
 MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 200))
+MAX_EQUITY_PER_TICKER = float(os.getenv("MAX_EQUITY_PER_TICKER", MAX_EQUITY_PER_TRADE))
 MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 1000))
 
 # SL/TP expressed as a percentage of the EQUITY USED for the trade (not the

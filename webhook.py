@@ -153,8 +153,6 @@ def _has_open_trade_for_ticker(ticker: Optional[str], action: Optional[str] = No
                 if new_side is not None:
                     existing_side = _normalize_side(t.get("side"))
                     if existing_side and existing_side != new_side:
-                        # Opposite-direction position already open – allow the
-                        # new order through as a hedge instead of blocking it.
                         continue
                 return True
     return False
@@ -180,7 +178,7 @@ def _is_hedge_signal(ticker: Optional[str], action: Optional[str]) -> bool:
             source = str(raw_source).strip().lower()
             if source in ("tradingview", "webhook", "bot", "hedge"):
                 return True
-            if source in ("manual", "broker", "unknown"):
+            if source in ("manual", "broker", "trader", "unknown"):
                 return False
         notes = str(trade.get("notes") or "").lower()
         return ("webhook" in notes) or ("tradingview" in notes)
@@ -336,8 +334,8 @@ def _normalize_source(payload: Dict[str, Any], dealId: Optional[str], dealRefere
         source = str(raw_origin).strip().lower()
         if source in ("tradingview", "webhook", "bot"):
             return "tradingview"
-        if source in ("manual", "broker"):
-            return "manual"
+        if source in ("manual", "broker", "trader"):
+            return "trader"
         if source == "hedge":
             return "hedge"
         if source == "unknown":
@@ -346,11 +344,11 @@ def _normalize_source(payload: Dict[str, Any], dealId: Optional[str], dealRefere
     if payload.get("webhook") is True or payload.get("cid") or payload.get("alert_id"):
         return "tradingview"
     if payload.get("manual") is True:
-        return "manual"
+        return "trader"
     if dealId is not None or dealReference is not None:
-        return "manual"
+        return "trader"
     if side in ("long", "short"):
-        return "manual"
+        return "trader"
     return "unknown"
 
 
@@ -580,9 +578,6 @@ def webhook():
 
     try:
         is_hedge_signal = _is_hedge_signal(epic, action)
-        if _has_open_trade_for_ticker(epic, action) and not is_hedge_signal:
-            logger.warning("[cid=%s] Duplicate order suppressed – open trade already exists for %s", cid, epic)
-            return _ok_response({"status": "blocked", "reason": "duplicate_open_position", "symbol": symbol, "epic": epic, "cid": cid})
         trade_source = "hedge" if is_hedge_signal else "tradingview"
 
         market_resp = session.request("GET", f"{API_MARKET}/{epic}", timeout=BROKER_API_TIMEOUT)
@@ -620,7 +615,14 @@ def webhook():
         sl_price, tp_price = fixed_sl, fixed_tp
         logger.info("[cid=%s] Fixed SL/TP applied → sl=%s tp=%s (alert sl=%s tp=%s)", cid, sl_price, tp_price, alert.get("sl"), alert.get("tp"))
 
-        size_info = calculate_size(entry_price=entry_price, sl_price=sl_price, tp_price=tp_price, direction=action, symbol=symbol)
+        size_info = calculate_size(
+            entry_price=entry_price,
+            sl_price=sl_price,
+            tp_price=tp_price,
+            direction=action,
+            symbol=symbol,
+            ticker=epic,
+        )
         if size_info.get("blocked"):
             logger.info("[cid=%s] Sizing blocked: %s", cid, size_info.get("reason"))
             return _ok_response({"status": "blocked", "reason": size_info.get("reason"), "sl": sl_price, "tp": tp_price, "entry": entry_price, "cid": cid})
