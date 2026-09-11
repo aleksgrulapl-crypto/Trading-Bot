@@ -465,6 +465,82 @@ def _find_open_trade_by_ticker_any_dealid(trades: List[Dict[str, Any]], ticker: 
     return candidates[0]
 
 
+def _is_tradingview_origin_trade(trade: Dict[str, Any]) -> bool:
+    source = _canonical_trade_source(
+        trade.get("trade_source") or trade.get("origin") or trade.get("source") or trade.get("trade_type")
+    )
+    if source in ("tradingview", "hedge"):
+        return True
+    if source in ("trader", "manual", "broker"):
+        return False
+    notes = str(trade.get("notes") or "").lower()
+    return ("webhook" in notes) or ("tradingview" in notes)
+
+
+def _find_open_trade_for_dealid_rebind(
+    trades: List[Dict[str, Any]],
+    ticker: Any,
+    side: Optional[str],
+    dealId: Any,
+    entry_price: Any,
+    size: Any,
+    time_entered: Any,
+) -> Optional[Dict[str, Any]]:
+    """Find a likely TradingView row to rebind to a broker-confirmed dealId.
+
+    Guards against duplicate "Trader" imports when an existing TradingView row
+    already represents the same position but still carries a stale local ID.
+    """
+    ticker_aliases = _ticker_candidate_aliases(ticker)
+    if not ticker_aliases:
+        return None
+
+    side_norm = _normalize_side(side)
+    dealId_norm = str(dealId) if dealId is not None else None
+    entry_val = _coerce_trade_float(entry_price)
+    size_val = _coerce_trade_float(size)
+
+    candidates: List[Dict[str, Any]] = []
+    for t in trades:
+        if t.get("status") == "CLOSED":
+            continue
+        if not _ticker_aliases(t.get("ticker")).intersection(ticker_aliases):
+            continue
+        if side_norm:
+            existing_side = _normalize_side(t.get("side"))
+            if existing_side and existing_side != side_norm:
+                continue
+        if t.get("dealReference") not in (None, ""):
+            continue
+        if not _is_tradingview_origin_trade(t):
+            continue
+        if dealId_norm is not None and t.get("dealId") is not None and str(t.get("dealId")) == dealId_norm:
+            continue
+
+        existing_entry = _coerce_trade_float(t.get("entry_price"))
+        existing_size = _coerce_trade_float(t.get("size"))
+        entry_matches = (
+            entry_val is not None
+            and existing_entry is not None
+            and abs(existing_entry - entry_val) <= 0.25
+        )
+        size_matches = (
+            size_val is not None
+            and existing_size is not None
+            and abs(existing_size - size_val) <= max(0.1, 0.1 * max(abs(existing_size), abs(size_val)))
+        )
+        time_matches = bool(
+            time_entered and t.get("time_entered")
+            and _times_within_window(t.get("time_entered"), time_entered)
+        )
+        if time_matches or (entry_matches and size_matches):
+            candidates.append(t)
+
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
 def _coerce_trade_float(value: Any) -> Optional[float]:
     try:
         if value in (None, ""):
@@ -775,6 +851,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
                     break
 
         matched_via_pending = False
+        matched_via_dealid_rebind = False
         if not existing and dealId:
             # A broker-confirmed dealId didn't exactly match any existing entry
             # (e.g. differing entry_price/size due to slippage or fill rounding).
@@ -782,6 +859,12 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
             # instead of creating a duplicate open-position entry.
             existing = _find_pending_trade_by_ticker(trades, ticker_candidates, side)
             matched_via_pending = existing is not None
+
+        if not existing and dealId:
+            existing = _find_open_trade_for_dealid_rebind(
+                trades, ticker_candidates, side, dealId, entry_val, size_val, time_entered
+            )
+            matched_via_dealid_rebind = existing is not None
 
         if not existing and not dealId and dealReference:
             # Last-resort fallback: this payload has a dealReference but no
@@ -802,6 +885,8 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
         if existing:
             updated = False
             if dealId and (
+                matched_via_dealid_rebind
+                or
                 not existing.get("dealId")
                 or _dealid_is_placeholder(existing.get("dealId"), existing.get("dealReference"))
                 or (dealReference not in (None, "") and str(existing.get("dealId")) == str(dealReference))
@@ -1127,14 +1212,22 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                     if t.get("dealId") and str(t.get("dealId")) == str(dealId):
                         matched = t
                         break
+            matched_requires_dealid_rebind = False
             if matched is None and dealId:
                 matched = _find_pending_trade_by_ticker(trades, ticker_candidates or ticker, side)
             if matched is None and not dealId and dealReference:
                 matched = _find_pending_trade_by_ticker(trades, ticker_candidates or ticker, side)
+            if matched is None and dealId:
+                matched = _find_open_trade_for_dealid_rebind(
+                    trades, ticker_candidates or ticker, side, dealId, entry_price, size, time_entered
+                )
+                matched_requires_dealid_rebind = matched is not None
 
             if matched is not None:
                 changed = False
                 if dealId and (
+                    matched_requires_dealid_rebind
+                    or
                     not matched.get("dealId")
                     or _dealid_is_placeholder(matched.get("dealId"), matched.get("dealReference"))
                     or (dealReference not in (None, "") and str(matched.get("dealId")) == str(dealReference))

@@ -136,6 +136,42 @@ class TestUpsertOpenTrade:
         assert trades[0]["size"] == pytest.approx(6.83)
         assert trades[0]["entry_price"] == pytest.approx(100.02)
 
+    def test_broker_confirmed_dealid_rebinds_tradingview_row_with_stale_local_dealid(self, tmp_path):
+        from trade_log import upsert_open_trade, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {
+                "dealId": "TV-LOCAL-UNH-1",
+                "dealReference": None,
+                "ticker": "UNH",
+                "side": "sell",
+                "size": 0.1,
+                "entry_price": 386.2,
+                "time_entered": "2026-09-11T15:00:23Z",
+                "trade_source": "tradingview",
+            },
+            path=path,
+        )
+        upsert_open_trade(
+            {
+                "dealId": "D-REAL-UNH-1",
+                "ticker": "UNH",
+                "side": "sell",
+                "size": 0.1,
+                "entry_price": 386.2,
+                "time_entered": "2026-09-11T15:00:24Z",
+            },
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert trades[0]["dealId"] == "D-REAL-UNH-1"
+        assert trades[0]["trade_source"] == "tradingview"
+
 
 class TestReconcileWithPositions:
     """Tests for trade_log.reconcile_with_positions duplicate-prevention."""
@@ -198,6 +234,45 @@ class TestReconcileWithPositions:
         assert len(trades) == 2
         assert len(result["added"]) == 1
         assert {t["dealId"] for t in trades} == {"D-OLD", "D-NEW"}
+
+    def test_live_position_rebinds_tradingview_row_with_stale_local_dealid(self, tmp_path):
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {
+                "dealId": "TV-LOCAL-SPXC-1",
+                "dealReference": None,
+                "ticker": "SPXC",
+                "side": "sell",
+                "size": 0.35,
+                "entry_price": 148.01,
+                "time_entered": "2026-09-11T15:00:07Z",
+                "trade_source": "tradingview",
+            },
+            path=path,
+        )
+
+        result = reconcile_with_positions(
+            [{
+                "dealId": "D-REAL-SPXC-1",
+                "dealReference": None,
+                "ticker": "SPXC",
+                "side": "sell",
+                "size": 0.3,
+                "entry_price": 148.02,
+                "time_entered": "2026-09-11T15:00:24Z",
+            }],
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert not result["added"]
+        assert trades[0]["dealId"] == "D-REAL-SPXC-1"
+        assert trades[0]["trade_source"] == "tradingview"
 
     def test_real_dealid_replaces_dealreference_placeholder_before_false_close(self, tmp_path):
         """Regression for the ORCL phantom close: an early raw broker payload may
