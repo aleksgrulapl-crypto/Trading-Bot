@@ -659,7 +659,7 @@ class TestSyncClosedTradesDisappearanceGuard:
                 "side": "short",
                 "size": 1.5,
                 "entry_price": 101.0,
-                "time_entered": "2026-09-11T09:00:00Z",
+                "time_entered": "2026-01-01T09:00:00Z",
                 "status": "OPEN",
                 "trade_source": "tradingview",
                 "origin": "tradingview",
@@ -1100,6 +1100,7 @@ class TestWebhookProcessing:
         monkeypatch.setattr(webhook.session, "verify_epic", lambda symbol: {"epic": "INTC", "source": "mock"})
         monkeypatch.setattr(webhook, "_is_duplicate_alert", lambda *_: False)
         monkeypatch.setattr(webhook, "_is_trade_locked_now", lambda: False)
+        monkeypatch.setattr(webhook, "parse_tradingview_alert", lambda payload: {"symbol": "INTC", "action": "sell"})
         monkeypatch.setattr(webhook.session, "request", lambda *args, **kwargs: type("Resp", (), {"status_code": 200, "json": lambda self: {"snapshot": {"bid": 100.0, "offer": 100.2}}})())
         monkeypatch.setattr(webhook, "calculate_size", lambda **kwargs: {"blocked": False, "size": 1.0})
         monkeypatch.setattr(webhook.session, "update_last_trade", lambda: None)

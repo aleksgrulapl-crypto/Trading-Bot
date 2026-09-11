@@ -139,29 +139,6 @@ def _has_open_trade_for_ticker(ticker: Optional[str], action: Optional[str] = No
     """
     if not ticker:
         return False
-
-
-def _is_hedge_signal(ticker: Optional[str], action: Optional[str]) -> bool:
-        """Return True if this signal is opposite to an already-open ticker trade."""
-        if not HEDGING_ENABLED or not ticker or not action:
-            return False
-        try:
-            trades = load_raw_log()
-        except Exception:
-            logger.exception("_is_hedge_signal: failed to load trade log")
-            return False
-        ticker_norm = str(ticker).strip().lower()
-        new_side = _normalize_side(action)
-        if new_side not in ("long", "short"):
-            return False
-        for t in trades:
-            if t.get("status") == "OPEN":
-                existing_ticker = t.get("ticker") or t.get("epic")
-                if existing_ticker and str(existing_ticker).strip().lower() == ticker_norm:
-                    existing_side = _normalize_side(t.get("side"))
-                    if existing_side in ("long", "short") and existing_side != new_side:
-                        return True
-        return False
     try:
         trades = load_raw_log()
     except Exception:
@@ -180,6 +157,29 @@ def _is_hedge_signal(ticker: Optional[str], action: Optional[str]) -> bool:
                         # new order through as a hedge instead of blocking it.
                         continue
                 return True
+    return False
+
+
+def _is_hedge_signal(ticker: Optional[str], action: Optional[str]) -> bool:
+    """Return True if this signal is opposite to an already-open ticker trade."""
+    if not HEDGING_ENABLED or not ticker or not action:
+        return False
+    try:
+        trades = load_raw_log()
+    except Exception:
+        logger.exception("_is_hedge_signal: failed to load trade log")
+        return False
+    ticker_norm = str(ticker).strip().lower()
+    new_side = _normalize_side(action)
+    if new_side not in ("long", "short"):
+        return False
+    for t in trades:
+        if t.get("status") == "OPEN":
+            existing_ticker = t.get("ticker") or t.get("epic")
+            if existing_ticker and str(existing_ticker).strip().lower() == ticker_norm:
+                existing_side = _normalize_side(t.get("side"))
+                if existing_side in ("long", "short") and existing_side != new_side:
+                    return True
     return False
 
 # ---------------------------------------------------------------------------
