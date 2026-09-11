@@ -339,7 +339,7 @@ def sync_closed_trades():
         cache_key = _close_cache_key(trade)
 
         # skip if already processed recently or already closed
-        if deal_id in closed_in_run or cache_key in _last_close_cache:
+        if cache_key in closed_in_run or cache_key in _last_close_cache:
             continue
 
         # check live size for this dealId
@@ -483,10 +483,10 @@ def sync_closed_trades():
                 logger.warning("sync_closed_trades: could not close trade for dealId=%s (no matching open trade found)", deal_id)
             else:
                 logger.debug("sync_closed_trades: fallback close succeeded for dealId=%s", deal_id)
-                closed_in_run.add(deal_id)
+                closed_in_run.add(cache_key)
         else:
             logger.debug("sync_closed_trades: closed trade recorded for dealId=%s", deal_id)
-            closed_in_run.add(deal_id)
+            closed_in_run.add(cache_key)
 
         # mark as processed to avoid duplicate handling in same run
         _last_close_cache[cache_key] = _now()
