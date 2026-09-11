@@ -482,6 +482,7 @@ def _find_open_trade_for_dealid_rebind(
     ticker: Any,
     side: Optional[str],
     dealId: Any,
+    dealReference: Any,
     entry_price: Any,
     size: Any,
     time_entered: Any,
@@ -497,6 +498,7 @@ def _find_open_trade_for_dealid_rebind(
 
     side_norm = _normalize_side(side)
     dealId_norm = str(dealId) if dealId is not None else None
+    dealReference_norm = str(dealReference) if dealReference not in (None, "") else None
     entry_val = _coerce_trade_float(entry_price)
     size_val = _coerce_trade_float(size)
 
@@ -510,7 +512,11 @@ def _find_open_trade_for_dealid_rebind(
             existing_side = _normalize_side(t.get("side"))
             if existing_side and existing_side != side_norm:
                 continue
-        if t.get("dealReference") not in (None, ""):
+        existing_deal_reference = t.get("dealReference")
+        if existing_deal_reference not in (None, ""):
+            if dealReference_norm is None or str(existing_deal_reference) != dealReference_norm:
+                continue
+        elif dealReference_norm is not None:
             continue
         if not _is_tradingview_origin_trade(t):
             continue
@@ -539,6 +545,31 @@ def _find_open_trade_for_dealid_rebind(
     if len(candidates) != 1:
         return None
     return candidates[0]
+
+
+def _should_replace_existing_dealid(existing: Dict[str, Any], dealId: Any,
+                                    dealReference: Any, matched_via_dealid_rebind: bool) -> bool:
+    if dealId in (None, ""):
+        return False
+    if matched_via_dealid_rebind:
+        return True
+    existing_deal_id = existing.get("dealId")
+    if existing_deal_id in (None, ""):
+        return True
+    if _dealid_is_placeholder(existing_deal_id, existing.get("dealReference")):
+        return True
+    if dealReference not in (None, "") and str(existing_deal_id) == str(dealReference):
+        return True
+    existing_deal_reference = existing.get("dealReference")
+    if (
+        dealReference not in (None, "")
+        and existing_deal_reference not in (None, "")
+        and str(existing_deal_reference) == str(dealReference)
+        and str(existing_deal_id) != str(dealId)
+        and _is_tradingview_origin_trade(existing)
+    ):
+        return True
+    return False
 
 
 def _coerce_trade_float(value: Any) -> Optional[float]:
@@ -862,7 +893,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
 
         if not existing and dealId:
             existing = _find_open_trade_for_dealid_rebind(
-                trades, ticker_candidates, side, dealId, entry_val, size_val, time_entered
+                trades, ticker_candidates, side, dealId, dealReference, entry_val, size_val, time_entered
             )
             matched_via_dealid_rebind = existing is not None
 
@@ -884,13 +915,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
 
         if existing:
             updated = False
-            if dealId and (
-                matched_via_dealid_rebind
-                or
-                not existing.get("dealId")
-                or _dealid_is_placeholder(existing.get("dealId"), existing.get("dealReference"))
-                or (dealReference not in (None, "") and str(existing.get("dealId")) == str(dealReference))
-            ):
+            if _should_replace_existing_dealid(existing, dealId, dealReference, matched_via_dealid_rebind):
                 existing["dealId"] = dealId; updated = True
             if not existing.get("dealReference") and dealReference:
                 existing["dealReference"] = dealReference; updated = True
@@ -902,7 +927,8 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
                 existing["size"] = size_val; updated = True
             if (existing.get("entry_price") in (None, "")) and entry_val > 0:
                 existing["entry_price"] = entry_val; updated = True
-            if matched_via_pending:
+            broker_confirmed_update = bool(dealId or dealReference) and _is_tradingview_origin_trade(existing)
+            if matched_via_pending or broker_confirmed_update:
                 # The broker-confirmed values are the source of truth; correct any
                 # earlier estimate (e.g. requested size 6.8 filled as 6.83) so the
                 # log reflects the real position instead of leaving it mismatched.
@@ -1219,19 +1245,13 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                 matched = _find_pending_trade_by_ticker(trades, ticker_candidates or ticker, side)
             if matched is None and dealId:
                 matched = _find_open_trade_for_dealid_rebind(
-                    trades, ticker_candidates or ticker, side, dealId, entry_price, size, time_entered
+                    trades, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered
                 )
                 matched_requires_dealid_rebind = matched is not None
 
             if matched is not None:
                 changed = False
-                if dealId and (
-                    matched_requires_dealid_rebind
-                    or
-                    not matched.get("dealId")
-                    or _dealid_is_placeholder(matched.get("dealId"), matched.get("dealReference"))
-                    or (dealReference not in (None, "") and str(matched.get("dealId")) == str(dealReference))
-                ):
+                if _should_replace_existing_dealid(matched, dealId, dealReference, matched_requires_dealid_rebind):
                     matched["dealId"] = dealId; changed = True
                 if not matched.get("dealReference") and dealReference:
                     matched["dealReference"] = dealReference; changed = True
