@@ -635,6 +635,71 @@ class TestSyncClosedTradesDisappearanceGuard:
         assert trades[0]["status"] == "OPEN"
         assert trades[0].get("time_exited") in (None, "")
 
+    def test_reused_dealid_with_prior_closed_row_still_closes_new_open_trade(self, tmp_path, monkeypatch):
+        import history_sync
+        import trade_log
+
+        path = str(tmp_path / "log.json")
+        trade_log.save_raw_log([
+            {
+                "dealId": "REUSED-1",
+                "dealReference": "REF-OLD",
+                "ticker": "OLD",
+                "side": "long",
+                "size": 1.0,
+                "entry_price": 100.0,
+                "time_entered": "2026-09-10T09:00:00Z",
+                "time_exited": "2026-09-10T10:00:00Z",
+                "status": "CLOSED",
+            },
+            {
+                "dealId": "REUSED-1",
+                "dealReference": "REF-NEW",
+                "ticker": "INTC",
+                "side": "short",
+                "size": 1.5,
+                "entry_price": 101.0,
+                "time_entered": "2026-09-11T09:00:00Z",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+                "origin": "tradingview",
+            },
+        ], path=path)
+
+        monkeypatch.setattr(history_sync, "canonicalize_trade_log", lambda: trade_log.canonicalize_trade_log(path=path))
+        monkeypatch.setattr(history_sync, "load_raw_log", lambda: trade_log.load_raw_log(path=path))
+        monkeypatch.setattr(
+            history_sync,
+            "close_trade_by_dealId",
+            lambda deal_id, **kwargs: trade_log.close_trade_by_dealId(deal_id, path=path, **kwargs),
+        )
+        monkeypatch.setattr(
+            history_sync,
+            "close_trade_fallback",
+            lambda ticker, entry_price, **kwargs: trade_log.close_trade_fallback(ticker, entry_price, path=path, **kwargs),
+        )
+        monkeypatch.setattr(
+            history_sync.session,
+            "get_positions",
+            lambda: [{"position": {"dealId": "OTHER-1", "size": 1.0}, "market": {"epic": "US.OTHER"}}],
+        )
+        monkeypatch.setattr(history_sync, "_confirm_position_gone", lambda deal_id: True)
+        monkeypatch.setattr(history_sync, "_fetch_exit_from_history", lambda *args, **kwargs: (95.5, -8.25, "2026-09-11 09:30:00"))
+        monkeypatch.setattr(history_sync, "get_snapshot", lambda epic: (95.5, 95.6))
+
+        history_sync._last_raw_1 = {"REUSED-1"}
+        history_sync._last_raw_2 = set()
+        history_sync._last_close_cache = {}
+        history_sync._absent_count = {}
+
+        history_sync.sync_closed_trades()
+
+        trades = trade_log.load_raw_log(path)
+        new_trade = next(t for t in trades if t.get("dealReference") == "REF-NEW")
+        assert new_trade["status"] == "CLOSED"
+        assert new_trade["time_exited"] == "2026-09-11 09:30:00"
+        assert new_trade["exit_price"] == pytest.approx(95.5)
+
 
 class TestReconcileTickerMatching:
     """Regression tests: reconcile_with_positions() must match a bot/TradingView
@@ -1024,6 +1089,37 @@ class TestWebhookProcessing:
         assert result["action"] == "upserted"
         assert captured["payload"]["dealId"] is None
 
+    def test_opposite_signal_is_logged_as_hedge_source(self, monkeypatch):
+        import webhook
+
+        monkeypatch.setattr(
+            webhook,
+            "load_raw_log",
+            lambda: [{"ticker": "INTC", "side": "long", "status": "OPEN", "trade_source": "tradingview"}],
+        )
+        monkeypatch.setattr(webhook.session, "verify_epic", lambda symbol: {"epic": "INTC", "source": "mock"})
+        monkeypatch.setattr(webhook, "_is_duplicate_alert", lambda *_: False)
+        monkeypatch.setattr(webhook, "_is_trade_locked_now", lambda: False)
+        monkeypatch.setattr(webhook.session, "request", lambda *args, **kwargs: type("Resp", (), {"status_code": 200, "json": lambda self: {"snapshot": {"bid": 100.0, "offer": 100.2}}})())
+        monkeypatch.setattr(webhook, "calculate_size", lambda **kwargs: {"blocked": False, "size": 1.0})
+        monkeypatch.setattr(webhook.session, "update_last_trade", lambda: None)
+
+        captured = {}
+
+        def _fake_place_order(epic, action, size, sl, tp, timeframe=None, trade_source="tradingview"):
+            captured["trade_source"] = trade_source
+            return {"status": "ok"}
+
+        monkeypatch.setattr(webhook, "place_order", _fake_place_order)
+
+        client = webhook.app.test_client()
+        resp = client.post("/webhook", json={"symbol": "INTC", "action": "sell"})
+        body = resp.get_json() or {}
+
+        assert resp.status_code == 200
+        assert body.get("status") == "ok"
+        assert captured["trade_source"] == "hedge"
+
 
 # ======================================================================== #
 #  dashboard: safe analytics defaults                                       #
@@ -1092,6 +1188,7 @@ class TestDashboardDedupe:
             {"trade_source": "webhook"},
             {"trade_source": "bot"},
             {"trade_source": "manual"},
+            {"trade_source": "hedge"},
             {"notes": "Imported from webhook (legacy)"},
             {"trade_source": "unknown"},
         ])
@@ -1099,6 +1196,7 @@ class TestDashboardDedupe:
             "TradingView",
             "TradingView",
             "Manual",
+            "Hedge",
             "TradingView",
             "Manual",
         ]

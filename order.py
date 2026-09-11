@@ -33,7 +33,15 @@ def _normalize_direction(direction: Optional[str]) -> str:
     return direction.upper()
 
 
-def place_order(epic: str, direction: str, size: float, sl: Optional[float] = None, tp: Optional[float] = None, timeframe: Optional[str] = None) -> dict:
+def place_order(
+    epic: str,
+    direction: str,
+    size: float,
+    sl: Optional[float] = None,
+    tp: Optional[float] = None,
+    timeframe: Optional[str] = None,
+    trade_source: str = "tradingview",
+) -> dict:
     """
     Place a BUY/SELL market order and log an OPEN trade.
     Uses Capital.com's confirms endpoint to map dealReference -> dealId when available.
@@ -144,6 +152,7 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
             logger.info("Mapped dealReference -> dealId: %s", real_deal_id)
             try:
                 ts = uk_timestamp()
+                source = str(trade_source or "tradingview").strip().lower()
                 trade_payload = {
                     "dealId": real_deal_id,
                     "dealReference": deal_ref,
@@ -153,8 +162,8 @@ def place_order(epic: str, direction: str, size: float, sl: Optional[float] = No
                     "size": float(size),
                     "entry_price": float(entry_price),
                     "time_entered": ts,
-                    "trade_source": "tradingview",
-                    "origin": "tradingview",
+                    "trade_source": source,
+                    "origin": source,
                     "notes": f"sl={sl}; tp={tp}; timeframe={timeframe}; dealReference={deal_ref}",
                 }
                 appended = append_open_trade(trade_payload)

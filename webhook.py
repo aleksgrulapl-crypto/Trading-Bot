@@ -139,6 +139,29 @@ def _has_open_trade_for_ticker(ticker: Optional[str], action: Optional[str] = No
     """
     if not ticker:
         return False
+
+
+def _is_hedge_signal(ticker: Optional[str], action: Optional[str]) -> bool:
+        """Return True if this signal is opposite to an already-open ticker trade."""
+        if not HEDGING_ENABLED or not ticker or not action:
+            return False
+        try:
+            trades = load_raw_log()
+        except Exception:
+            logger.exception("_is_hedge_signal: failed to load trade log")
+            return False
+        ticker_norm = str(ticker).strip().lower()
+        new_side = _normalize_side(action)
+        if new_side not in ("long", "short"):
+            return False
+        for t in trades:
+            if t.get("status") == "OPEN":
+                existing_ticker = t.get("ticker") or t.get("epic")
+                if existing_ticker and str(existing_ticker).strip().lower() == ticker_norm:
+                    existing_side = _normalize_side(t.get("side"))
+                    if existing_side in ("long", "short") and existing_side != new_side:
+                        return True
+        return False
     try:
         trades = load_raw_log()
     except Exception:
@@ -301,6 +324,8 @@ def _normalize_source(payload: Dict[str, Any], dealId: Optional[str], dealRefere
             return "tradingview"
         if source in ("manual", "broker"):
             return "manual"
+        if source == "hedge":
+            return "hedge"
         if source == "unknown":
             return "unknown"
         return source
@@ -543,6 +568,7 @@ def webhook():
         if _has_open_trade_for_ticker(epic, action):
             logger.warning("[cid=%s] Duplicate order suppressed – open trade already exists for %s", cid, epic)
             return _ok_response({"status": "blocked", "reason": "duplicate_open_position", "symbol": symbol, "epic": epic, "cid": cid})
+        trade_source = "hedge" if _is_hedge_signal(epic, action) else "tradingview"
 
         market_resp = session.request("GET", f"{API_MARKET}/{epic}", timeout=BROKER_API_TIMEOUT)
         if not market_resp or getattr(market_resp, "status_code", 0) != 200:
@@ -588,7 +614,7 @@ def webhook():
         logger.info("[cid=%s] Final SL=%s TP=%s SIZE=%s", cid, sl_price, tp_price, size)
 
         try:
-            result = place_order(epic, action, size, sl_price, tp_price, timeframe=timeframe)
+            result = place_order(epic, action, size, sl_price, tp_price, timeframe=timeframe, trade_source=trade_source)
         except Exception:
             logger.exception("[cid=%s] place_order raised an exception", cid)
             return _ok_response({"status": "error", "message": "order_failed", "cid": cid})

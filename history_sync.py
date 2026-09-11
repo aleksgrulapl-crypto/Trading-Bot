@@ -39,6 +39,12 @@ def _now() -> float:
     return time.time()
 
 
+def _close_cache_key(trade) -> str:
+    """Return a row-scoped cache key for suppressing immediate re-processing."""
+    deal_id = trade.get("dealId")
+    return f"{deal_id}|{trade.get('time_entered') or ''}|{trade.get('entry_price') or ''}"
+
+
 def _parse_entry_time_to_utc_naive(value) -> Optional[datetime]:
     """
     Best-effort parse of a trade's time_entered value (an ISO-8601 string,
@@ -267,13 +273,6 @@ def sync_closed_trades():
     canonicalize_trade_log()
     log = load_raw_log() or []
 
-    # set of already-closed dealIds in the log
-    closed_ids = {
-        str(t.get("dealId"))
-        for t in log
-        if t.get("status") == "CLOSED" and t.get("dealId") is not None
-    }
-
     open_trades = [t for t in log if t.get("status") == "OPEN"]
 
     # Index the remaining (non-OPEN) rows by dealId so the history lookup can
@@ -318,12 +317,12 @@ def sync_closed_trades():
         if did is None:
             continue
         did = str(did)
-        if did in closed_ids:
-            _absent_count.pop(did, None)
-        elif did not in raw_ids:
+        if did not in raw_ids:
             _absent_count[did] = _absent_count.get(did, 0) + 1
         else:
             _absent_count.pop(did, None)
+
+    closed_in_run = set()
 
     # Iterate open trades and detect closes
     for trade in open_trades:
@@ -332,9 +331,10 @@ def sync_closed_trades():
             # cannot detect disappearance by dealId; skip
             continue
         deal_id = str(deal_id)
+        cache_key = _close_cache_key(trade)
 
         # skip if already processed recently or already closed
-        if deal_id in _last_close_cache or deal_id in closed_ids:
+        if deal_id in closed_in_run or cache_key in _last_close_cache:
             continue
 
         # check live size for this dealId
@@ -478,11 +478,13 @@ def sync_closed_trades():
                 logger.warning("sync_closed_trades: could not close trade for dealId=%s (no matching open trade found)", deal_id)
             else:
                 logger.debug("sync_closed_trades: fallback close succeeded for dealId=%s", deal_id)
+                closed_in_run.add(deal_id)
         else:
             logger.debug("sync_closed_trades: closed trade recorded for dealId=%s", deal_id)
+            closed_in_run.add(deal_id)
 
         # mark as processed to avoid duplicate handling in same run
-        _last_close_cache[deal_id] = _now()
+        _last_close_cache[cache_key] = _now()
         _absent_count.pop(deal_id, None)
 
     # rotate raw id history for disappearance detection

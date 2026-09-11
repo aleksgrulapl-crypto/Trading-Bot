@@ -188,6 +188,8 @@ def _canonical_trade_source(value: Any) -> Optional[str]:
         return "tradingview"
     if source in ("manual", "broker"):
         return "manual"
+    if source in ("hedge",):
+        return "hedge"
     if source in ("unknown",):
         return "unknown"
     return source or None
