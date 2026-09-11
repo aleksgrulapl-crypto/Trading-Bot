@@ -298,22 +298,23 @@ def sync_closed_trades():
         return
 
     if raw_positions == []:
-        logger.debug("sync_closed_trades: empty positions snapshot, skipping close detection")
-        return
+        logger.debug("sync_closed_trades: empty positions snapshot; continuing with disappearance checks")
 
     # Build maps from live positions
     raw_ids = set()
     raw_size_map = {}
 
     for item in raw_positions:
+        if not isinstance(item, dict):
+            continue
         pos = item.get("position") or {}
-        deal_id = pos.get("dealId")
+        deal_id = item.get("dealId") or pos.get("dealId")
         if deal_id is None:
             continue
         did = str(deal_id)
         raw_ids.add(did)
         # size may be None or non-numeric; keep raw value for later parsing
-        raw_size_map[did] = pos.get("size")
+        raw_size_map[did] = item.get("size") if item.get("size") is not None else pos.get("size")
 
     # Update consecutive-absence counter for open trades
     for trade in open_trades:
