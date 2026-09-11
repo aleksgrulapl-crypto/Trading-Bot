@@ -565,10 +565,11 @@ def webhook():
         return _ok_response({"status": "blocked", "reason": "order_in_flight", "symbol": symbol, "epic": epic, "cid": cid})
 
     try:
-        if _has_open_trade_for_ticker(epic, action):
+        is_hedge_signal = _is_hedge_signal(epic, action)
+        if _has_open_trade_for_ticker(epic, action) and not is_hedge_signal:
             logger.warning("[cid=%s] Duplicate order suppressed – open trade already exists for %s", cid, epic)
             return _ok_response({"status": "blocked", "reason": "duplicate_open_position", "symbol": symbol, "epic": epic, "cid": cid})
-        trade_source = "hedge" if _is_hedge_signal(epic, action) else "tradingview"
+        trade_source = "hedge" if is_hedge_signal else "tradingview"
 
         market_resp = session.request("GET", f"{API_MARKET}/{epic}", timeout=BROKER_API_TIMEOUT)
         if not market_resp or getattr(market_resp, "status_code", 0) != 200:
