@@ -1299,6 +1299,38 @@ class TestWebhookProcessing:
         assert body.get("status") == "ok"
         assert called["args"] == ("INTC", "buy", 1.0, "tradingview")
 
+    def test_same_ticker_signal_is_blocked_when_sizing_capacity_is_exhausted(self, monkeypatch):
+        import webhook
+
+        monkeypatch.setattr(
+            webhook,
+            "load_raw_log",
+            lambda: [{"ticker": "INTC", "side": "long", "status": "OPEN", "trade_source": "tradingview"}],
+        )
+        monkeypatch.setattr(webhook.session, "verify_epic", lambda symbol: {"epic": "INTC", "source": "mock"})
+        monkeypatch.setattr(webhook, "_is_duplicate_alert", lambda *_: False)
+        monkeypatch.setattr(webhook, "_is_trade_locked_now", lambda: False)
+        monkeypatch.setattr(webhook, "parse_tradingview_alert", lambda payload: {"symbol": "INTC", "action": "buy"})
+        monkeypatch.setattr(webhook.session, "request", lambda *args, **kwargs: type("Resp", (), {"status_code": 200, "json": lambda self: {"snapshot": {"bid": 100.0, "offer": 100.2}}})())
+        monkeypatch.setattr(webhook, "calculate_size", lambda **kwargs: {"blocked": True, "reason": "max_ticker_equity_reached"})
+
+        called = {"place_order": 0}
+
+        def _fake_place_order(*args, **kwargs):
+            called["place_order"] += 1
+            return {"status": "ok"}
+
+        monkeypatch.setattr(webhook, "place_order", _fake_place_order)
+
+        client = webhook.app.test_client()
+        resp = client.post("/webhook", json={"symbol": "INTC", "action": "buy"})
+        body = resp.get_json() or {}
+
+        assert resp.status_code == 200
+        assert body.get("status") == "blocked"
+        assert body.get("reason") == "max_ticker_equity_reached"
+        assert called["place_order"] == 0
+
     def test_opposite_signal_is_logged_as_hedge_source(self, monkeypatch):
         import webhook
 
