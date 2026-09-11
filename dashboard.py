@@ -91,6 +91,8 @@ def _trade_type_label(trade):
         source = str(raw_source).strip().lower()
         if source in ("tradingview", "webhook", "bot"):
             return "TradingView"
+        if source == "hedge":
+            return "Hedge"
         if source in ("manual", "broker", "unknown"):
             return "Manual"
 
