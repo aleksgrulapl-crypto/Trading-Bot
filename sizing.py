@@ -4,7 +4,6 @@
 # ============================
 
 import logging
-import math
 from typing import Optional, Dict, Any
 
 import session
@@ -234,7 +233,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
 
     if remaining_ticker_equity is not None:
         try:
-            max_size_for_remaining_equity = math.floor(((remaining_ticker_equity * leverage) / entry) * 100) / 100
+            max_size_for_remaining_equity = round((remaining_ticker_equity * leverage) / entry, 2)
         except Exception:
             return {"blocked": True, "reason": "equity_recalculation_failed"}
         if max_size_for_remaining_equity > 0 and size > max_size_for_remaining_equity:
@@ -250,6 +249,17 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
         actual_equity_used = (float(size) * entry) / leverage
     except Exception:
         return {"blocked": True, "reason": "equity_recalculation_failed"}
+    while remaining_ticker_equity is not None and size > 0 and actual_equity_used - remaining_ticker_equity > 1e-9:
+        size = round(size - 0.01, 2)
+        if size <= 0:
+            break
+        actual_equity_used = (float(size) * entry) / leverage
+    if remaining_ticker_equity is not None and size < min_size:
+        return {
+            "blocked": True,
+            "reason": "insufficient_ticker_capacity_for_min_size",
+            "ticker": ticker_key,
+        }
     if remaining_ticker_equity is not None and actual_equity_used - remaining_ticker_equity > 1e-9:
         return {
             "blocked": True,
