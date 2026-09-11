@@ -357,23 +357,30 @@ def _make_signature(dealId: Any, dealReference: Any, ticker: Any, entry_price: A
     return f"{dealId or ''}|{dealReference or ''}|{ticker or ''}|{entry_norm}"
 
 
-def _ticker_aliases(value: Any) -> set:
+def _ticker_aliases(value: Any, include_epic_symbol_alias: bool = False) -> set:
     if value in (None, ""):
         return set()
     raw = str(value).strip().lower()
     if not raw:
         return set()
 
-    return {raw}
+    aliases = {raw}
+    if include_epic_symbol_alias and "." in raw:
+        parts = [p for p in raw.split(".") if p]
+        if len(parts) >= 3:
+            symbol_part = str(parts[1]).strip().lower()
+            if symbol_part and symbol_part.isalnum() and len(symbol_part) <= 8:
+                aliases.add(symbol_part)
+    return aliases
 
 
 def _ticker_candidate_aliases(ticker: Any) -> set:
     if isinstance(ticker, (list, tuple, set)):
         aliases = set()
         for item in ticker:
-            aliases.update(_ticker_aliases(item))
+            aliases.update(_ticker_aliases(item, include_epic_symbol_alias=True))
         return aliases
-    return _ticker_aliases(ticker)
+    return _ticker_aliases(ticker, include_epic_symbol_alias=True)
 
 
 def _find_pending_trade_by_ticker(trades: List[Dict[str, Any]], ticker: Any,
