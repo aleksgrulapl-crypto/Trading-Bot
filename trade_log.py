@@ -513,11 +513,15 @@ def _find_open_trade_for_dealid_rebind(
             if existing_side and existing_side != side_norm:
                 continue
         existing_deal_reference = t.get("dealReference")
-        if existing_deal_reference not in (None, ""):
-            if dealReference_norm is None or str(existing_deal_reference) != dealReference_norm:
+        # Broker position snapshots can omit dealReference even when the
+        # original TradingView/open-order row has one. Requiring strict
+        # dealReference equality in that case prevented legitimate rebinds and
+        # caused reconcile/upsert to append a second phantom "Trader" row for
+        # the same live position. Keep strict matching only when the incoming
+        # payload itself carries a dealReference.
+        if dealReference_norm is not None:
+            if existing_deal_reference in (None, "") or str(existing_deal_reference) != dealReference_norm:
                 continue
-        elif dealReference_norm is not None:
-            continue
         if not _is_tradingview_origin_trade(t):
             continue
         if dealId_norm is not None and t.get("dealId") is not None and str(t.get("dealId")) == dealId_norm:
