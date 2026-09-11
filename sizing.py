@@ -252,7 +252,11 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
         actual_equity_used = (float(size) * entry) / leverage
     except Exception:
         return {"blocked": True, "reason": "equity_recalculation_failed"}
-    while remaining_ticker_equity is not None and size > 0 and actual_equity_used - remaining_ticker_equity > 1e-9:
+    while (
+        remaining_ticker_equity is not None
+        and size > 0
+        and round(actual_equity_used, 2) > round(remaining_ticker_equity, 2)
+    ):
         size = round(size - 0.01, 2)
         if size <= 0:
             break
@@ -263,7 +267,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
             "reason": "insufficient_ticker_capacity_for_min_size",
             "ticker": ticker_key,
         }
-    if remaining_ticker_equity is not None and actual_equity_used - remaining_ticker_equity > 1e-9:
+    if remaining_ticker_equity is not None and round(actual_equity_used, 2) > round(remaining_ticker_equity, 2):
         return {
             "blocked": True,
             "reason": "ticker_capacity_exhausted",
