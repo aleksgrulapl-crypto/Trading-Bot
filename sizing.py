@@ -152,7 +152,9 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
     # 4) Determine ticker-level capacity first. A ticker can have at most
     #    MAX_POSITIONS_PER_TICKER open trades, and their combined equity usage
     #    is capped by MAX_EQUITY_PER_TICKER.
-    ticker_key = _normalize_ticker(ticker or symbol)
+    ticker_key = _normalize_ticker(ticker)
+    if not ticker_key:
+        ticker_key = _normalize_ticker(symbol)
     ticker_usage = _open_ticker_usage(ticker_key)
     max_positions_per_ticker = int(getattr(config, "MAX_POSITIONS_PER_TICKER", 0) or 0)
     if max_positions_per_ticker > 0 and ticker_usage["open_count"] >= max_positions_per_ticker:

@@ -1467,6 +1467,7 @@ class TestDashboardDedupe:
             {"trade_source": "hedge"},
             {"notes": "Imported from webhook (legacy)"},
             {"trade_source": "unknown"},
+            {},
         ])
         assert [t["trade_type"] for t in trades] == [
             "TradingView",
@@ -1475,6 +1476,7 @@ class TestDashboardDedupe:
             "Trader",
             "Hedge",
             "TradingView",
+            "Manual",
             "Manual",
         ]
 

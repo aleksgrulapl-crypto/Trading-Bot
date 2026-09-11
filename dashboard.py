@@ -101,7 +101,7 @@ def _trade_type_label(trade):
     notes = str(trade.get("notes") or "").lower()
     if "webhook" in notes or "tradingview" in notes:
         return "TradingView"
-    return "Trader"
+    return "Manual"
 
 
 def normalize_trades(trades):
