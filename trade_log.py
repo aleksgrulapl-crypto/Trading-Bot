@@ -1064,6 +1064,9 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                         break
             if matched is None and dealId:
                 matched = _find_pending_trade_by_ticker(trades, ticker, side)
+            if matched is None and not dealId and dealReference:
+                matched = _find_pending_trade_by_ticker(trades, ticker, side)
+
             if matched is not None:
                 changed = False
                 if dealId and (
