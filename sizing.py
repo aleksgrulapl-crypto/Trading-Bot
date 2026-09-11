@@ -4,6 +4,7 @@
 # ============================
 
 import logging
+import math
 from typing import Optional, Dict, Any
 
 import session
@@ -201,6 +202,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
 
     # Round to 2 decimals (adjust as needed for instrument granularity)
     size = round(raw_size, 2)
+    unclamped_size = size
 
     # 7) Enforce per-ticker minimum size
     min_size_key = _normalize_ticker(symbol) or ticker_key
@@ -230,6 +232,14 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
     if size <= 0:
         return {"blocked": True, "reason": "computed_size_nonpositive"}
 
+    if remaining_ticker_equity is not None:
+        try:
+            max_size_for_remaining_equity = math.floor(((remaining_ticker_equity * leverage) / entry) * 100) / 100
+        except Exception:
+            return {"blocked": True, "reason": "equity_recalculation_failed"}
+        if max_size_for_remaining_equity > 0 and size > max_size_for_remaining_equity:
+            size = max_size_for_remaining_equity
+
     try:
         actual_equity_used = (float(size) * entry) / leverage
     except Exception:
@@ -237,7 +247,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
     if remaining_ticker_equity is not None and actual_equity_used - remaining_ticker_equity > 1e-9:
         return {
             "blocked": True,
-            "reason": "insufficient_ticker_capacity_for_min_size",
+            "reason": "ticker_capacity_exhausted",
             "ticker": ticker_key,
         }
 
