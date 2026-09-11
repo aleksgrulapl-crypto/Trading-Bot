@@ -10,7 +10,6 @@
 
 import json
 import os
-import re
 import tempfile
 import threading
 from datetime import datetime
@@ -358,13 +357,6 @@ def _make_signature(dealId: Any, dealReference: Any, ticker: Any, entry_price: A
     return f"{dealId or ''}|{dealReference or ''}|{ticker or ''}|{entry_norm}"
 
 
-_GENERIC_TICKER_TOKENS = frozenset({
-    "cash", "cfd", "spot", "mini", "micro", "idx", "index", "shares",
-    "share", "stock", "usd", "gbp", "eur", "jpy", "aud", "cad", "chf",
-    "d", "cs", "ix", "ip", "uk", "us", "eu", "au",
-})
-
-
 def _ticker_aliases(value: Any) -> set:
     if value in (None, ""):
         return set()
@@ -376,11 +368,6 @@ def _ticker_aliases(value: Any) -> set:
     compact = "".join(ch for ch in raw if ch.isalnum())
     if compact:
         aliases.add(compact)
-
-    tokens = [tok for tok in re.split(r"[^a-z0-9]+", raw) if tok]
-    for tok in tokens:
-        if tok not in _GENERIC_TICKER_TOKENS:
-            aliases.add(tok)
     return aliases
 
 
