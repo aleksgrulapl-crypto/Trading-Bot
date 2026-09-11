@@ -186,8 +186,8 @@ def _canonical_trade_source(value: Any) -> Optional[str]:
     source = str(value).strip().lower()
     if source in ("tradingview", "webhook", "bot"):
         return "tradingview"
-    if source in ("manual", "broker"):
-        return "manual"
+    if source in ("manual", "broker", "trader"):
+        return "trader"
     if source in ("hedge",):
         return "hedge"
     if source in ("unknown",):
@@ -204,11 +204,11 @@ def _detect_trade_origin(payload: Dict[str, Any], side: Optional[str], dealId: A
     if payload.get("webhook") is True or payload.get("cid") or payload.get("alert_id"):
         return "tradingview"
     if payload.get("manual") is True:
-        return "manual"
+        return "trader"
     if dealId is not None or dealReference is not None:
-        return "manual"
+        return "trader"
     if side in ("long", "short"):
-        return "manual"
+        return "trader"
     return "unknown"
 
 
@@ -1064,13 +1064,6 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                         break
             if matched is None and dealId:
                 matched = _find_pending_trade_by_ticker(trades, ticker, side)
-            if matched is None:
-                # Last resort: an already-open trade for this ticker/side exists
-                # but wasn't matched above (e.g. it already carries a different
-                # dealId). Merge into it instead of creating a duplicate entry
-                # for what is almost certainly the same real position.
-                matched = _find_open_trade_by_ticker_any_dealid(trades, ticker, side, dealId)
-
             if matched is not None:
                 changed = False
                 if dealId and (

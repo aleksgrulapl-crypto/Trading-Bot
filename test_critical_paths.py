@@ -172,13 +172,9 @@ class TestReconcileWithPositions:
         assert len(trades) == 1
         assert trades[0]["status"] == "CLOSED"
 
-    def test_live_position_with_mismatched_dealid_merges_into_existing_open_trade(self, tmp_path):
-        """A live position reported under a dealId that doesn't match any known
-        dealId or dealId-less pending trade must still be merged into the
-        existing OPEN trade for that ticker/side rather than logged as a
-        second, duplicate entry (the bug shown on the dashboard where a
-        completed 'self-closed' trade appears alongside the real open
-        position for the same ticker)."""
+    def test_live_position_with_distinct_dealid_creates_second_open_trade(self, tmp_path):
+        """Distinct broker dealIds for the same ticker/side must remain distinct
+        open trades so scale-ins do not overwrite the first row."""
         from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
         path = str(tmp_path / "log.json")
         with open(path, "w") as f:
@@ -191,7 +187,7 @@ class TestReconcileWithPositions:
             path=path,
         )
 
-        # Broker reports the same ticker/side under a different dealId.
+        # Broker reports another open position for the same ticker/side.
         live_positions = [{
             "dealId": "D-NEW", "dealReference": None, "ticker": "MRVL", "side": "sell",
             "size": 4.88, "entry_price": 204.95,
@@ -199,8 +195,9 @@ class TestReconcileWithPositions:
         result = reconcile_with_positions(live_positions, path=path)
 
         trades = load_raw_log(path)
-        assert len(trades) == 1, "Reconcile must not create a duplicate entry for the same ticker/side"
-        assert not result["added"]
+        assert len(trades) == 2
+        assert len(result["added"]) == 1
+        assert {t["dealId"] for t in trades} == {"D-OLD", "D-NEW"}
 
     def test_real_dealid_replaces_dealreference_placeholder_before_false_close(self, tmp_path):
         """Regression for the ORCL phantom close: an early raw broker payload may
@@ -352,7 +349,7 @@ class TestCloseTradeByDealId:
 
         assert trade["trade_source"] == "tradingview"
 
-    def test_live_position_import_defaults_to_manual(self, tmp_path):
+    def test_live_position_import_defaults_to_trader(self, tmp_path):
         from trade_log import reconcile_with_positions, load_raw_log
         path = str(tmp_path / "log.json")
         with open(path, "w") as f:
@@ -368,7 +365,7 @@ class TestCloseTradeByDealId:
 
         trades = load_raw_log(path)
         assert len(trades) == 1
-        assert trades[0]["trade_source"] == "manual"
+        assert trades[0]["trade_source"] == "trader"
 
     def test_canonicalize_trade_log_merges_duplicate_closed_rows_only_when_same_event(self, tmp_path):
         from trade_log import canonicalize_trade_log, load_raw_log, save_raw_log
@@ -851,6 +848,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 0)
         monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 0)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [])
 
         result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA")
 
@@ -867,6 +865,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
         monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [])
 
         result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA")
 
@@ -886,6 +885,7 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
         monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [])
 
         result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA")
 
@@ -893,6 +893,48 @@ class TestSizing:
         assert result["equity_used"] == pytest.approx(200.0)
         assert result["exposure"] == pytest.approx(1000.0)
         assert result["size"] == pytest.approx(10.0)
+
+    def test_ticker_equity_cap_uses_remaining_capacity(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "NVDA", "status": "OPEN", "size": 5.0, "entry_price": 100.0},
+        ])
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA", ticker="NVDA")
+
+        assert result["blocked"] is False
+        assert result["open_positions"] == 1
+        assert result["equity_used_by_ticker"] == pytest.approx(100.0)
+        assert result["equity_used"] == pytest.approx(100.0)
+        assert result["size"] == pytest.approx(5.0)
+
+    def test_ticker_position_limit_blocks_fourth_trade(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_POSITIONS_PER_TICKER", 3)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "NVDA", "status": "OPEN", "size": 2.0, "entry_price": 100.0},
+            {"ticker": "NVDA", "status": "OPEN", "size": 2.0, "entry_price": 100.0},
+            {"ticker": "NVDA", "status": "OPEN", "size": 2.0, "entry_price": 100.0},
+        ])
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA", ticker="NVDA")
+
+        assert result["blocked"] is True
+        assert result["reason"] == "max_positions_per_ticker_reached"
 
 
 class TestThreadSafety:
@@ -1137,6 +1179,38 @@ class TestWebhookProcessing:
         assert result["action"] == "upserted"
         assert captured["payload"]["dealId"] is None
 
+    def test_same_ticker_signal_can_scale_in_when_capacity_remains(self, monkeypatch):
+        import webhook
+
+        monkeypatch.setattr(
+            webhook,
+            "load_raw_log",
+            lambda: [{"ticker": "INTC", "side": "long", "status": "OPEN", "trade_source": "tradingview"}],
+        )
+        monkeypatch.setattr(webhook.session, "verify_epic", lambda symbol: {"epic": "INTC", "source": "mock"})
+        monkeypatch.setattr(webhook, "_is_duplicate_alert", lambda *_: False)
+        monkeypatch.setattr(webhook, "_is_trade_locked_now", lambda: False)
+        monkeypatch.setattr(webhook, "parse_tradingview_alert", lambda payload: {"symbol": "INTC", "action": "buy"})
+        monkeypatch.setattr(webhook.session, "request", lambda *args, **kwargs: type("Resp", (), {"status_code": 200, "json": lambda self: {"snapshot": {"bid": 100.0, "offer": 100.2}}})())
+        monkeypatch.setattr(webhook, "calculate_size", lambda **kwargs: {"blocked": False, "size": 1.0})
+        monkeypatch.setattr(webhook.session, "update_last_trade", lambda: None)
+
+        called = {}
+
+        def _fake_place_order(epic, action, size, sl, tp, timeframe=None, trade_source="tradingview"):
+            called["args"] = (epic, action, size, trade_source)
+            return {"status": "ok"}
+
+        monkeypatch.setattr(webhook, "place_order", _fake_place_order)
+
+        client = webhook.app.test_client()
+        resp = client.post("/webhook", json={"symbol": "INTC", "action": "buy"})
+        body = resp.get_json() or {}
+
+        assert resp.status_code == 200
+        assert body.get("status") == "ok"
+        assert called["args"] == ("INTC", "buy", 1.0, "tradingview")
+
     def test_opposite_signal_is_logged_as_hedge_source(self, monkeypatch):
         import webhook
 
@@ -1269,6 +1343,7 @@ class TestDashboardDedupe:
             {"trade_source": "webhook"},
             {"trade_source": "bot"},
             {"trade_source": "manual"},
+            {"trade_source": "trader"},
             {"trade_source": "hedge"},
             {"notes": "Imported from webhook (legacy)"},
             {"trade_source": "unknown"},
@@ -1276,7 +1351,8 @@ class TestDashboardDedupe:
         assert [t["trade_type"] for t in trades] == [
             "TradingView",
             "TradingView",
-            "Manual",
+            "Trader",
+            "Trader",
             "Hedge",
             "TradingView",
             "Manual",
@@ -1299,7 +1375,7 @@ class TestDashboardDedupe:
                 "entry_price": 790.25,
                 "time_entered": "2026-09-09T10:00:00Z",
                 "status": "OPEN",
-                "trade_source": "manual",
+                "trade_source": "trader",
             },
             {
                 "dealId": "CLOSED1",
@@ -1319,7 +1395,7 @@ class TestDashboardDedupe:
         ctx = dashboard._build_request_context()
 
         assert len(ctx["combined_trades"]) == 2
-        assert any(t["status"] == "OPEN" and t["trade_type"] == "Manual" for t in ctx["combined_trades"])
+        assert any(t["status"] == "OPEN" and t["trade_type"] == "Trader" for t in ctx["combined_trades"])
         assert any(t["status"] == "CLOSED" and t["trade_type"] == "TradingView" for t in ctx["combined_trades"])
         assert ctx["analytics"]["trade_count"] == 1
 

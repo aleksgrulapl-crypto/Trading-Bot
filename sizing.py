@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 
 import session
 import config
+from trade_log import load_raw_log
 
 logger = logging.getLogger("sizing")
 if not logger.handlers:
@@ -40,7 +41,55 @@ def _normalize_direction(direction: Optional[str]) -> Optional[str]:
     return None
 
 
-def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[str] = None) -> Dict[str, Any]:
+def _normalize_ticker(value: Optional[str]) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    try:
+        return str(value).strip().upper() or None
+    except Exception:
+        return None
+
+
+def _open_ticker_usage(ticker: Optional[str]) -> Dict[str, float]:
+    ticker_norm = _normalize_ticker(ticker)
+    if not ticker_norm:
+        return {"open_count": 0, "equity_used": 0.0}
+
+    leverage = float(getattr(config, "LEVERAGE", 1) or 1)
+    if leverage <= 0:
+        leverage = 1.0
+
+    open_count = 0
+    equity_used = 0.0
+    try:
+        trades = load_raw_log()
+    except Exception:
+        logger.exception("Failed to load trade log for ticker sizing")
+        return {"open_count": 0, "equity_used": 0.0}
+
+    for trade in trades or []:
+        if trade.get("status") == "CLOSED":
+            continue
+        trade_ticker = _normalize_ticker(trade.get("ticker") or trade.get("epic"))
+        if trade_ticker != ticker_norm:
+            continue
+        open_count += 1
+        try:
+            size = float(trade.get("size") or 0)
+            entry = float(trade.get("entry_price") or 0)
+            if size > 0 and entry > 0:
+                equity_used += (size * entry) / leverage
+        except Exception:
+            continue
+
+    return {
+        "open_count": open_count,
+        "equity_used": float(round(equity_used, 2)),
+    }
+
+
+def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[str] = None,
+                   ticker: Optional[str] = None) -> Dict[str, Any]:
     """
     Calculate position size using:
       - a fraction of AVAILABLE equity (config.EQUITY_PERCENT)
@@ -99,13 +148,40 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
     if available <= 0:
         return {"blocked": True, "reason": "no_available_margin"}
 
-    # 4) Determine equity to use and exposure, capped by MAX_EQUITY_PER_TRADE /
-    #    MAX_EXPOSURE_PER_TRADE so a single trade never risks more than a fixed
-    #    amount of capital regardless of account balance.
-    equity_to_use = available * float(getattr(config, "EQUITY_PERCENT", 0.5))
+    # 4) Determine ticker-level capacity first. A ticker can have at most
+    #    MAX_POSITIONS_PER_TICKER open trades, and their combined equity usage
+    #    is capped by MAX_EQUITY_PER_TRADE.
+    ticker_key = _normalize_ticker(ticker or symbol)
+    ticker_usage = _open_ticker_usage(ticker_key)
+    max_positions_per_ticker = int(getattr(config, "MAX_POSITIONS_PER_TICKER", 0) or 0)
+    if max_positions_per_ticker > 0 and ticker_usage["open_count"] >= max_positions_per_ticker:
+        return {
+            "blocked": True,
+            "reason": "max_positions_per_ticker_reached",
+            "open_positions": int(ticker_usage["open_count"]),
+            "ticker": ticker_key,
+        }
+
     max_equity_per_trade = float(getattr(config, "MAX_EQUITY_PER_TRADE", 0) or 0)
+    remaining_ticker_equity = None
+    if max_equity_per_trade > 0:
+        remaining_ticker_equity = max(0.0, max_equity_per_trade - ticker_usage["equity_used"])
+        if remaining_ticker_equity <= 0:
+            return {
+                "blocked": True,
+                "reason": "max_ticker_equity_reached",
+                "equity_used_by_ticker": float(round(ticker_usage["equity_used"], 2)),
+                "ticker": ticker_key,
+            }
+
+    # 5) Determine equity to use and exposure, capped by MAX_EQUITY_PER_TRADE /
+    #    MAX_EXPOSURE_PER_TRADE so a ticker never risks more than the remaining
+    #    allowed capital regardless of account balance.
+    equity_to_use = available * float(getattr(config, "EQUITY_PERCENT", 0.5))
     if max_equity_per_trade > 0:
         equity_to_use = min(equity_to_use, max_equity_per_trade)
+    if remaining_ticker_equity is not None:
+        equity_to_use = min(equity_to_use, remaining_ticker_equity)
 
     leverage = float(getattr(config, "LEVERAGE", 1))
     exposure = equity_to_use * leverage
@@ -113,7 +189,10 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
     if max_exposure_per_trade > 0:
         exposure = min(exposure, max_exposure_per_trade)
 
-    # 5) Convert exposure to raw size (units)
+    if equity_to_use <= 0 or exposure <= 0:
+        return {"blocked": True, "reason": "ticker_capacity_exhausted", "ticker": ticker_key}
+
+    # 6) Convert exposure to raw size (units)
     try:
         raw_size = exposure / entry
     except Exception:
@@ -122,23 +201,23 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
     # Round to 2 decimals (adjust as needed for instrument granularity)
     size = round(raw_size, 2)
 
-    # 6) Enforce per-ticker minimum size
-    ticker_key = None
+    # 7) Enforce per-ticker minimum size
+    min_size_key = None
     if symbol:
         try:
-            ticker_key = str(symbol).upper()
+            min_size_key = str(symbol).upper()
         except Exception:
-            ticker_key = None
+            min_size_key = None
     else:
         # fallback to last symbol in shared_state if present
-        ticker_key = session.shared_state.get("last_symbol") if session.shared_state else None
-        if ticker_key:
-            ticker_key = str(ticker_key).upper()
+        min_size_key = session.shared_state.get("last_symbol") if session.shared_state else None
+        if min_size_key:
+            min_size_key = str(min_size_key).upper()
 
     min_size = 0.1  # default minimum
     try:
-        if ticker_key:
-            ticker_settings = getattr(config, "TICKER_SETTINGS", {}).get(ticker_key, {})
+        if min_size_key:
+            ticker_settings = getattr(config, "TICKER_SETTINGS", {}).get(min_size_key, {})
             min_size = float(ticker_settings.get("min_size", min_size))
     except Exception:
         min_size = 0.1
@@ -146,15 +225,31 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
     if size < min_size:
         size = float(min_size)
 
-    # 7) Final safety checks
+    # 8) Final safety checks
     if size <= 0:
         return {"blocked": True, "reason": "computed_size_nonpositive"}
 
-    # 8) Return final sizing
+    try:
+        actual_equity_used = (float(size) * entry) / leverage
+    except Exception:
+        return {"blocked": True, "reason": "equity_recalculation_failed"}
+    if remaining_ticker_equity is not None and actual_equity_used - remaining_ticker_equity > 1e-9:
+        return {
+            "blocked": True,
+            "reason": "insufficient_ticker_capacity_for_min_size",
+            "ticker": ticker_key,
+        }
+
+    # 9) Return final sizing
     return {
         "blocked": False,
         "size": float(round(size, 2)),
-        "exposure": float(round(exposure, 2)),
-        "equity_used": float(round(equity_to_use, 2)),
-        "min_size": float(min_size)
+        "exposure": float(round(float(size) * entry, 2)),
+        "equity_used": float(round(actual_equity_used, 2)),
+        "min_size": float(min_size),
+        "open_positions": int(ticker_usage["open_count"]),
+        "equity_used_by_ticker": float(round(ticker_usage["equity_used"], 2)),
+        "remaining_ticker_equity": (
+            None if remaining_ticker_equity is None else float(round(max(0.0, remaining_ticker_equity - actual_equity_used), 2))
+        ),
     }
