@@ -18,6 +18,9 @@ if not logger.handlers:
     logger.addHandler(handler)
 logger.setLevel(logging.DEBUG if getattr(config, "DEBUG_LOGS", False) else logging.INFO)
 
+SIZE_PRECISION = 2
+SIZE_STEP = 10 ** (-SIZE_PRECISION)
+
 
 def _safe_float(v) -> Optional[float]:
     if v is None:
@@ -39,6 +42,10 @@ def _normalize_direction(direction: Optional[str]) -> Optional[str]:
     if d in ("sell", "s", "short"):
         return "sell"
     return None
+
+
+def _round_size(value: float) -> float:
+    return round(float(value), SIZE_PRECISION)
 
 
 def _normalize_ticker(value: Optional[str]) -> Optional[str]:
@@ -203,7 +210,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
         return {"blocked": True, "reason": "division_error"}
 
     # Round to 2 decimals (adjust as needed for instrument granularity)
-    size = round(raw_size, 2)
+    size = _round_size(raw_size)
     unclamped_size = size
 
     # 7) Enforce per-ticker minimum size
@@ -236,7 +243,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
 
     if remaining_ticker_equity is not None:
         try:
-            max_size_for_remaining_equity = round((remaining_ticker_equity * leverage) / entry, 2)
+            max_size_for_remaining_equity = _round_size((remaining_ticker_equity * leverage) / entry)
         except Exception:
             return {"blocked": True, "reason": "equity_recalculation_failed"}
         if max_size_for_remaining_equity > 0 and size > max_size_for_remaining_equity:
@@ -257,7 +264,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
         and size > 0
         and round(actual_equity_used, 2) > round(remaining_ticker_equity, 2)
     ):
-        size = round(size - 0.01, 2)
+        size = _round_size(size - SIZE_STEP)
         if size <= 0:
             break
         actual_equity_used = (float(size) * entry) / leverage
