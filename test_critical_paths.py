@@ -306,6 +306,12 @@ class TestReconcileWithPositions:
         assert trades[0]["size"] == pytest.approx(0.5)
         assert trades[0]["trade_source"] == "tradingview"
 
+    def test_epic_alias_extraction_supports_index_and_fx_formats(self):
+        from trade_log import _ticker_aliases
+
+        assert "dax" in _ticker_aliases("IX.D.DAX.IFD.IP", include_epic_symbol_alias=True)
+        assert "eurusd" in _ticker_aliases("CS.D.EURUSD.CFD.IP", include_epic_symbol_alias=True)
+
 
 class TestCloseTradeByDealId:
     """Tests for trade_log.close_trade_by_dealId."""

@@ -366,11 +366,25 @@ def _ticker_aliases(value: Any, include_epic_symbol_alias: bool = False) -> set:
 
     aliases = {raw}
     if include_epic_symbol_alias and "." in raw:
-        parts = [p for p in raw.split(".") if p]
-        if len(parts) >= 3:
-            symbol_part = str(parts[1]).strip().lower()
-            if symbol_part and symbol_part.isalnum() and len(symbol_part) <= 8:
-                aliases.add(symbol_part)
+        parts = [str(p).strip().lower() for p in raw.split(".") if str(p).strip()]
+        if parts:
+            prefix_tokens = {
+                "cs", "ix", "cc", "fx", "us", "uk", "eu", "au", "jp", "sg", "ca",
+                "de", "fr", "es", "it", "nl", "se", "no", "ch", "hk",
+            }
+            suffix_tokens = {
+                "cash", "cfd", "ifd", "ip", "spot", "mini", "micro", "shares", "share",
+            }
+            while parts and parts[0] in prefix_tokens:
+                parts.pop(0)
+            while parts and parts[-1] in suffix_tokens:
+                parts.pop()
+            symbol_candidates = [
+                p for p in parts
+                if p.isalnum() and len(p) >= 2 and p not in {"d", "c", "x"}
+            ]
+            if symbol_candidates:
+                aliases.add(max(symbol_candidates, key=len))
     return aliases
 
 
