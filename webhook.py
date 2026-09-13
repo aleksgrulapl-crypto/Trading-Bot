@@ -32,6 +32,7 @@ from auth import auth
 from config import (
     API_ACCOUNTS,
     API_MARKET,
+    API_POSITIONS,
     API_BASE,
     DEBUG_LOGS,
     TIMEZONE,
@@ -364,6 +365,57 @@ def _is_broker_position_event(payload: Any) -> bool:
     return (pos.get("dealId") is not None) or (pos.get("dealReference") is not None)
 
 
+def _is_position_currently_open_at_broker(deal_id: Any) -> Optional[bool]:
+    """Best-effort confirmation that deal_id is currently open at the broker."""
+    if deal_id in (None, ""):
+        return None
+    try:
+        r = session.request("GET", f"{API_POSITIONS}/{deal_id}", timeout=BROKER_API_TIMEOUT)
+    except Exception:
+        return None
+    if r is None:
+        return None
+    if r.status_code == 200:
+        try:
+            body = r.json() or {}
+        except Exception:
+            return None
+        if not isinstance(body, dict):
+            return None
+        pos = body.get("position") if isinstance(body.get("position"), dict) else {}
+        returned_deal_id = body.get("dealId") or pos.get("dealId")
+        if returned_deal_id is not None and str(returned_deal_id) == str(deal_id):
+            return True
+        return None
+    if r.status_code in (400, 404):
+        body = {}
+        try:
+            body = r.json() or {}
+        except Exception:
+            body = {}
+        text_parts = [
+            getattr(r, "text", "") or "",
+            str(body.get("errorCode") or ""),
+            str(body.get("error") or ""),
+            str(body.get("message") or ""),
+            str(body.get("details") or ""),
+        ]
+        err_text = " ".join(text_parts).strip().lower()
+        not_found_markers = (
+            "not found",
+            "unknown",
+            "does not exist",
+            "no position",
+            "position not",
+            "invalid deal",
+            "invalid position",
+        )
+        if err_text and any(marker in err_text for marker in not_found_markers):
+            return False
+        return None
+    return None
+
+
 def _validate_webhook_payload(payload: Dict[str, Any]) -> Optional[str]:
     """Return an error string if the payload is obviously malformed, else None.
 
@@ -463,6 +515,45 @@ def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str,
             "ticker": ticker,
             "time_exited": time_exited,
         }
+
+    broker_event = _is_broker_position_event(payload)
+    if broker_event:
+        # Guard against phantom webhook opens: only persist when the broker
+        # currently reports this deal as an open position.
+        if dealId in (None, ""):
+            logger.info(
+                "%sDeferring broker open-like webhook without dealId (dealReference=%s ticker=%s)",
+                log_prefix, dealReference, ticker,
+            )
+            return {
+                "action": "open_deferred",
+                "reason": "awaiting_dealid_confirmation",
+                "dealReference": dealReference,
+                "ticker": ticker,
+            }
+        broker_open = _is_position_currently_open_at_broker(dealId)
+        if broker_open is False:
+            logger.info(
+                "%sDeferring broker open-like webhook for dealId=%s (position not open at broker)",
+                log_prefix, dealId,
+            )
+            return {
+                "action": "open_deferred",
+                "reason": "position_not_open_at_broker",
+                "dealId": dealId,
+                "ticker": ticker,
+            }
+        if broker_open is None:
+            logger.info(
+                "%sDeferring broker open-like webhook for dealId=%s (position check inconclusive)",
+                log_prefix, dealId,
+            )
+            return {
+                "action": "open_deferred",
+                "reason": "broker_position_check_inconclusive",
+                "dealId": dealId,
+                "ticker": ticker,
+            }
 
     upsert_payload = {
         "dealId": dealId,

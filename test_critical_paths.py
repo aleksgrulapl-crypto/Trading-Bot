@@ -1567,6 +1567,18 @@ class TestWebhookProcessing:
             return dict(payload, status="OPEN")
 
         monkeypatch.setattr(webhook, "upsert_open_trade", _fake_upsert)
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda method, url, **kwargs: type(
+                "Resp",
+                (),
+                {
+                    "status_code": 200,
+                    "json": lambda self: {"position": {"dealId": "D-OPEN"}},
+                },
+            )(),
+        )
 
         result = webhook.process_webhook_payload({
             "position": {
@@ -1581,6 +1593,196 @@ class TestWebhookProcessing:
 
         assert result["action"] == "upserted"
         assert captured["payload"]["ticker"] == "STX"
+
+    def test_broker_open_payload_is_deferred_when_position_not_open(self, monkeypatch):
+        import webhook
+
+        upserts = []
+        monkeypatch.setattr(webhook, "upsert_open_trade", lambda payload: upserts.append(payload))
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda method, url, **kwargs: type(
+                "Resp",
+                (),
+                {
+                    "status_code": 404,
+                    "text": "position not found",
+                    "json": lambda self: {"errorCode": "position_not_found"},
+                },
+            )(),
+        )
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealId": "D-PHANTOM",
+                "direction": "BUY",
+                "size": 1.0,
+                "level": 100.5,
+            },
+            "market": {"epic": "NVDA", "symbol": "NVIDIA"},
+        })
+
+        assert result["action"] == "open_deferred"
+        assert result["reason"] == "position_not_open_at_broker"
+        assert upserts == []
+
+    def test_broker_open_payload_with_only_dealreference_is_deferred(self, monkeypatch):
+        import webhook
+
+        upserts = []
+        monkeypatch.setattr(webhook, "upsert_open_trade", lambda payload: upserts.append(payload))
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealReference": "REF-ONLY-1",
+                "direction": "BUY",
+                "size": 1.0,
+                "level": 100.5,
+            },
+            "market": {"epic": "NVDA", "symbol": "NVIDIA"},
+        })
+
+        assert result["action"] == "open_deferred"
+        assert result["reason"] == "awaiting_dealid_confirmation"
+        assert upserts == []
+
+    def test_broker_open_payload_is_deferred_when_position_check_inconclusive(self, monkeypatch):
+        import webhook
+
+        upserts = []
+        monkeypatch.setattr(webhook, "upsert_open_trade", lambda payload: upserts.append(payload))
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda method, url, **kwargs: type("Resp", (), {"status_code": 429})(),
+        )
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealId": "D-UNCLEAR",
+                "direction": "BUY",
+                "size": 1.0,
+                "level": 100.5,
+            },
+            "market": {"epic": "NVDA", "symbol": "NVIDIA"},
+        })
+
+        assert result["action"] == "open_deferred"
+        assert result["reason"] == "broker_position_check_inconclusive"
+        assert upserts == []
+
+    def test_broker_open_payload_treats_http_400_as_inconclusive(self, monkeypatch):
+        import webhook
+
+        upserts = []
+        monkeypatch.setattr(webhook, "upsert_open_trade", lambda payload: upserts.append(payload))
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda method, url, **kwargs: type("Resp", (), {"status_code": 400})(),
+        )
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealId": "D-400",
+                "direction": "BUY",
+                "size": 1.0,
+                "level": 100.5,
+            },
+            "market": {"epic": "NVDA", "symbol": "NVIDIA"},
+        })
+
+        assert result["action"] == "open_deferred"
+        assert result["reason"] == "broker_position_check_inconclusive"
+        assert upserts == []
+
+    def test_broker_open_payload_treats_404_without_not_found_body_as_inconclusive(self, monkeypatch):
+        import webhook
+
+        upserts = []
+        monkeypatch.setattr(webhook, "upsert_open_trade", lambda payload: upserts.append(payload))
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda method, url, **kwargs: type("Resp", (), {"status_code": 404, "text": "", "json": lambda self: {}})(),
+        )
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealId": "D-404-UNK",
+                "direction": "BUY",
+                "size": 1.0,
+                "level": 100.5,
+            },
+            "market": {"epic": "NVDA", "symbol": "NVIDIA"},
+        })
+
+        assert result["action"] == "open_deferred"
+        assert result["reason"] == "broker_position_check_inconclusive"
+        assert upserts == []
+
+    def test_broker_open_payload_treats_not_found_400_as_not_open(self, monkeypatch):
+        import webhook
+
+        upserts = []
+        monkeypatch.setattr(webhook, "upsert_open_trade", lambda payload: upserts.append(payload))
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda method, url, **kwargs: type(
+                "Resp",
+                (),
+                {
+                    "status_code": 400,
+                    "text": "Position not found",
+                    "json": lambda self: {"errorCode": "position_not_found"},
+                },
+            )(),
+        )
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealId": "D-404-LIKE",
+                "direction": "BUY",
+                "size": 1.0,
+                "level": 100.5,
+            },
+            "market": {"epic": "NVDA", "symbol": "NVIDIA"},
+        })
+
+        assert result["action"] == "open_deferred"
+        assert result["reason"] == "position_not_open_at_broker"
+        assert upserts == []
+
+    def test_broker_open_payload_treats_unmatched_200_body_as_inconclusive(self, monkeypatch):
+        import webhook
+
+        upserts = []
+        monkeypatch.setattr(webhook, "upsert_open_trade", lambda payload: upserts.append(payload))
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda method, url, **kwargs: type(
+                "Resp",
+                (),
+                {"status_code": 200, "json": lambda self: {"position": {"dealId": "DIFFERENT"}}},
+            )(),
+        )
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealId": "D-EXPECTED",
+                "direction": "BUY",
+                "size": 1.0,
+                "level": 100.5,
+            },
+            "market": {"epic": "NVDA", "symbol": "NVIDIA"},
+        })
+
+        assert result["action"] == "open_deferred"
+        assert result["reason"] == "broker_position_check_inconclusive"
+        assert upserts == []
 
     def test_position_id_is_not_treated_as_broker_deal_id(self, monkeypatch):
         import webhook
