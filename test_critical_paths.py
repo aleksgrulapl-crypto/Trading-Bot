@@ -1570,7 +1570,14 @@ class TestWebhookProcessing:
         monkeypatch.setattr(
             webhook.session,
             "request",
-            lambda method, url, **kwargs: type("Resp", (), {"status_code": 200})(),
+            lambda method, url, **kwargs: type(
+                "Resp",
+                (),
+                {
+                    "status_code": 200,
+                    "json": lambda self: {"position": {"dealId": "D-OPEN"}},
+                },
+            )(),
         )
 
         result = webhook.process_webhook_payload({
@@ -1671,6 +1678,35 @@ class TestWebhookProcessing:
         result = webhook.process_webhook_payload({
             "position": {
                 "dealId": "D-400",
+                "direction": "BUY",
+                "size": 1.0,
+                "level": 100.5,
+            },
+            "market": {"epic": "NVDA", "symbol": "NVIDIA"},
+        })
+
+        assert result["action"] == "open_deferred"
+        assert result["reason"] == "broker_position_check_inconclusive"
+        assert upserts == []
+
+    def test_broker_open_payload_treats_unmatched_200_body_as_inconclusive(self, monkeypatch):
+        import webhook
+
+        upserts = []
+        monkeypatch.setattr(webhook, "upsert_open_trade", lambda payload: upserts.append(payload))
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda method, url, **kwargs: type(
+                "Resp",
+                (),
+                {"status_code": 200, "json": lambda self: {"position": {"dealId": "DIFFERENT"}}},
+            )(),
+        )
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealId": "D-EXPECTED",
                 "direction": "BUY",
                 "size": 1.0,
                 "level": 100.5,

@@ -376,7 +376,17 @@ def _is_position_currently_open_at_broker(deal_id: Any) -> Optional[bool]:
     if r is None:
         return None
     if r.status_code == 200:
-        return True
+        try:
+            body = r.json() or {}
+        except Exception:
+            return None
+        if not isinstance(body, dict):
+            return None
+        pos = body.get("position") if isinstance(body.get("position"), dict) else {}
+        returned_deal_id = body.get("dealId") or pos.get("dealId")
+        if returned_deal_id is not None and str(returned_deal_id) == str(deal_id):
+            return True
+        return None
     if r.status_code == 404:
         return False
     return None
