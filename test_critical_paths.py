@@ -1567,6 +1567,11 @@ class TestWebhookProcessing:
             return dict(payload, status="OPEN")
 
         monkeypatch.setattr(webhook, "upsert_open_trade", _fake_upsert)
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda method, url, **kwargs: type("Resp", (), {"status_code": 200})(),
+        )
 
         result = webhook.process_webhook_payload({
             "position": {
@@ -1581,6 +1586,51 @@ class TestWebhookProcessing:
 
         assert result["action"] == "upserted"
         assert captured["payload"]["ticker"] == "STX"
+
+    def test_broker_open_payload_is_deferred_when_position_not_open(self, monkeypatch):
+        import webhook
+
+        upserts = []
+        monkeypatch.setattr(webhook, "upsert_open_trade", lambda payload: upserts.append(payload))
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda method, url, **kwargs: type("Resp", (), {"status_code": 404})(),
+        )
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealId": "D-PHANTOM",
+                "direction": "BUY",
+                "size": 1.0,
+                "level": 100.5,
+            },
+            "market": {"epic": "NVDA", "symbol": "NVIDIA"},
+        })
+
+        assert result["action"] == "open_deferred"
+        assert result["reason"] == "position_not_open_at_broker"
+        assert upserts == []
+
+    def test_broker_open_payload_with_only_dealreference_is_deferred(self, monkeypatch):
+        import webhook
+
+        upserts = []
+        monkeypatch.setattr(webhook, "upsert_open_trade", lambda payload: upserts.append(payload))
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealReference": "REF-ONLY-1",
+                "direction": "BUY",
+                "size": 1.0,
+                "level": 100.5,
+            },
+            "market": {"epic": "NVDA", "symbol": "NVIDIA"},
+        })
+
+        assert result["action"] == "open_deferred"
+        assert result["reason"] == "awaiting_dealid_confirmation"
+        assert upserts == []
 
     def test_position_id_is_not_treated_as_broker_deal_id(self, monkeypatch):
         import webhook
