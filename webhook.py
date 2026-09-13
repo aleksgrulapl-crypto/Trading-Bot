@@ -387,9 +387,7 @@ def _is_position_currently_open_at_broker(deal_id: Any) -> Optional[bool]:
         if returned_deal_id is not None and str(returned_deal_id) == str(deal_id):
             return True
         return None
-    if r.status_code == 404:
-        return False
-    if r.status_code == 400:
+    if r.status_code in (400, 404):
         body = {}
         try:
             body = r.json() or {}
