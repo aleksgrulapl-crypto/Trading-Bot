@@ -377,7 +377,7 @@ def _is_position_currently_open_at_broker(deal_id: Any) -> Optional[bool]:
         return None
     if r.status_code == 200:
         return True
-    if r.status_code in (400, 404):
+    if r.status_code == 404:
         return False
     return None
 
