@@ -389,6 +389,32 @@ def _is_position_currently_open_at_broker(deal_id: Any) -> Optional[bool]:
         return None
     if r.status_code == 404:
         return False
+    if r.status_code == 400:
+        body = {}
+        try:
+            body = r.json() or {}
+        except Exception:
+            body = {}
+        text_parts = [
+            getattr(r, "text", "") or "",
+            str(body.get("errorCode") or ""),
+            str(body.get("error") or ""),
+            str(body.get("message") or ""),
+            str(body.get("details") or ""),
+        ]
+        err_text = " ".join(text_parts).strip().lower()
+        not_found_markers = (
+            "not found",
+            "unknown",
+            "does not exist",
+            "no position",
+            "position not",
+            "invalid deal",
+            "invalid position",
+        )
+        if err_text and any(marker in err_text for marker in not_found_markers):
+            return False
+        return None
     return None
 
 

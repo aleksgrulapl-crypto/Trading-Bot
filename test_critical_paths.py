@@ -1689,6 +1689,39 @@ class TestWebhookProcessing:
         assert result["reason"] == "broker_position_check_inconclusive"
         assert upserts == []
 
+    def test_broker_open_payload_treats_not_found_400_as_not_open(self, monkeypatch):
+        import webhook
+
+        upserts = []
+        monkeypatch.setattr(webhook, "upsert_open_trade", lambda payload: upserts.append(payload))
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda method, url, **kwargs: type(
+                "Resp",
+                (),
+                {
+                    "status_code": 400,
+                    "text": "Position not found",
+                    "json": lambda self: {"errorCode": "position_not_found"},
+                },
+            )(),
+        )
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealId": "D-404-LIKE",
+                "direction": "BUY",
+                "size": 1.0,
+                "level": 100.5,
+            },
+            "market": {"epic": "NVDA", "symbol": "NVIDIA"},
+        })
+
+        assert result["action"] == "open_deferred"
+        assert result["reason"] == "position_not_open_at_broker"
+        assert upserts == []
+
     def test_broker_open_payload_treats_unmatched_200_body_as_inconclusive(self, monkeypatch):
         import webhook
 
