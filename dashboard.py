@@ -86,7 +86,9 @@ def _safe_str(v):
     return str(v) if v is not None else None
 
 
-def _live_position_deal_ids(positions):
+def _live_position_deal_ids(raw_positions, positions):
+    if raw_positions is None:
+        return None
     live_ids = set()
     for p in positions or []:
         if not isinstance(p, dict):
@@ -335,10 +337,10 @@ def _build_request_context():
     except Exception:
         logger.debug("session cache not initialized")
 
-    raw_positions = session.get_positions() or []
+    raw_positions = session.get_positions()
     raw_account = session.get_account() or {}
 
-    positions = session.enrich_positions(raw_positions)
+    positions = session.enrich_positions(raw_positions or [])
     account = session.enrich_account(raw_account)
 
     # Display Open Positions sorted alphabetically by ticker for easier scanning.
@@ -354,7 +356,7 @@ def _build_request_context():
 
     combined_raw = [dict(t, _log_index=i) for i, t in enumerate(load_raw_log())]
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
-    combined_trades = _mark_delete_candidates(combined_trades, _live_position_deal_ids(positions))
+    combined_trades = _mark_delete_candidates(combined_trades, _live_position_deal_ids(raw_positions, positions))
     combined_trades.sort(
         key=lambda t: (t.get("time_exited") or t.get("time_entered") or ""),
         reverse=True,

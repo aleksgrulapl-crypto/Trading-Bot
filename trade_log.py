@@ -317,7 +317,9 @@ def is_trade_delete_candidate(trade: Dict[str, Any], live_deal_ids: Optional[set
     deal_id = trade.get("dealId")
     if deal_id in (None, ""):
         return False
-    if live_deal_ids and str(deal_id) in live_deal_ids:
+    if live_deal_ids is None:
+        return False
+    if str(deal_id) in live_deal_ids:
         return False
     return True
 
