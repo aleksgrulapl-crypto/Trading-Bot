@@ -614,7 +614,7 @@ def _collapse_lingering_tradingview_duplicate(
     time_entered: Any,
 ) -> bool:
     """Remove a leftover TradingView OPEN row once a broker row already exists."""
-    if dealId in (None, "") or not canonical:
+    if not canonical:
         return False
 
     duplicate = _find_open_trade_for_dealid_rebind(
