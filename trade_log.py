@@ -663,6 +663,7 @@ def _find_open_trade_for_dealid_rebind(
     size_val = _coerce_trade_float(size)
 
     candidates: List[Dict[str, Any]] = []
+    relaxed_candidates: List[Dict[str, Any]] = []
     for t in trades:
         if t.get("status") == "CLOSED":
             continue
@@ -705,10 +706,22 @@ def _find_open_trade_for_dealid_rebind(
         )
         if time_matches or (entry_matches and size_matches):
             candidates.append(t)
+            continue
+        if (
+            dealReference_norm is None
+            and entry_matches
+            and existing_deal_reference not in (None, "")
+            and _has_trusted_tradingview_provenance(t)
+        ):
+            relaxed_candidates.append(t)
 
-    if len(candidates) != 1:
+    if len(candidates) == 1:
+        return candidates[0]
+    if candidates:
         return None
-    return candidates[0]
+    if len(relaxed_candidates) == 1:
+        return relaxed_candidates[0]
+    return None
 
 
 def _merge_lingering_open_duplicate(
@@ -730,6 +743,9 @@ def _merge_lingering_open_duplicate(
     if canonical.get("time_entered") in (None, "") and duplicate.get("time_entered") not in (None, ""):
         canonical["time_entered"] = duplicate.get("time_entered")
         canonical["time_entered_human"] = _humanize(duplicate.get("time_entered"))
+        changed = True
+
+    if _promote_trusted_duplicate_provenance(canonical, duplicate):
         changed = True
 
     notes_parts: List[str] = []
@@ -853,6 +869,40 @@ def _trade_merge_score(trade: Dict[str, Any]) -> int:
     return score
 
 
+def _promote_trusted_duplicate_provenance(canonical: Dict[str, Any], duplicate: Dict[str, Any]) -> bool:
+    """Preserve trusted TradingView/Hedge provenance when collapsing broker imports."""
+    duplicate_source = _canonical_trade_source(
+        duplicate.get("trade_source") or duplicate.get("origin") or duplicate.get("source") or duplicate.get("trade_type")
+    )
+    if duplicate_source not in ("tradingview", "hedge"):
+        return False
+    if duplicate_source == "tradingview" and not _has_trusted_tradingview_provenance(duplicate):
+        return False
+
+    canonical_source = _canonical_trade_source(
+        canonical.get("trade_source") or canonical.get("origin") or canonical.get("source") or canonical.get("trade_type")
+    )
+    canonical_notes = str(canonical.get("notes") or "").lower()
+    canonical_is_live_import = "imported from live positions" in canonical_notes
+
+    if canonical_source == "manual" and not canonical_is_live_import:
+        return False
+    if canonical_source not in (None, "unknown", "trader", "broker", "manual", "tradingview", "hedge") and not canonical_is_live_import:
+        return False
+
+    changed = False
+    if canonical.get("trade_source") != duplicate_source:
+        canonical["trade_source"] = duplicate_source
+        changed = True
+    if canonical.get("origin") != duplicate_source:
+        canonical["origin"] = duplicate_source
+        changed = True
+    if _has_trusted_tradingview_provenance(duplicate) and canonical.get("trusted_origin") != "tradingview":
+        canonical["trusted_origin"] = "tradingview"
+        changed = True
+    return changed
+
+
 def _select_timestamp(entries: List[Dict[str, Any]], key: str, pick_latest: bool) -> Optional[str]:
     best = None
     for entry in entries:
@@ -934,6 +984,7 @@ def _merge_trade_group(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
                     "exit_price", "trade_source", "origin"):
             if merged.get(key) in (None, "") and entry.get(key) not in (None, ""):
                 merged[key] = entry.get(key)
+        _promote_trusted_duplicate_provenance(merged, entry)
 
     earliest_entered = _select_timestamp(ranked, "time_entered", pick_latest=False)
     latest_exited = _select_timestamp(ranked, "time_exited", pick_latest=True)
