@@ -1587,6 +1587,130 @@ class TestDeleteCompletedTrade:
         assert len(trades) == 1
 
 
+class TestDeleteTradeLogEntry:
+    def test_deletes_open_tradingview_trade_when_broker_confirms_missing(self, tmp_path, monkeypatch):
+        from trade_log import delete_trade_log_entry, load_raw_log
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([{
+                "dealId": "PHANTOM1",
+                "dealReference": "REF-PHANTOM1",
+                "ticker": "AMZN",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+                "notes": "sl=1; tp=2; timeframe=1h; dealReference=REF-PHANTOM1",
+            }], f)
+
+        class _Resp:
+            status_code = 404
+            text = ""
+
+            def json(self):
+                return {}
+
+        monkeypatch.setattr("session.request", lambda *_args, **_kwargs: _Resp())
+
+        ok, deleted, status = delete_trade_log_entry(0, path=path)
+        trades = load_raw_log(path)
+
+        assert ok is True
+        assert status == "deleted"
+        assert deleted["dealId"] == "PHANTOM1"
+        assert trades == []
+
+    def test_rejects_open_trade_deletion_when_broker_still_reports_position(self, tmp_path, monkeypatch):
+        from trade_log import delete_trade_log_entry, load_raw_log
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([{
+                "dealId": "LIVE1",
+                "dealReference": "REF-LIVE1",
+                "ticker": "AMZN",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+                "notes": "sl=1; tp=2; timeframe=1h; dealReference=REF-LIVE1",
+            }], f)
+
+        class _Resp:
+            status_code = 200
+
+            def json(self):
+                return {"dealId": "LIVE1"}
+
+        monkeypatch.setattr("session.request", lambda *_args, **_kwargs: _Resp())
+
+        ok, deleted, status = delete_trade_log_entry(0, path=path)
+        trades = load_raw_log(path)
+
+        assert ok is False
+        assert deleted is None
+        assert status == "broker_still_open"
+        assert len(trades) == 1
+
+    def test_deletes_open_tradingview_trade_when_broker_returns_400_not_found(self, tmp_path, monkeypatch):
+        from trade_log import delete_trade_log_entry, load_raw_log
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([{
+                "dealId": "PHANTOM400",
+                "dealReference": "REF-PHANTOM400",
+                "ticker": "MSFT",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+                "notes": "sl=1; tp=2; timeframe=1h; dealReference=REF-PHANTOM400",
+            }], f)
+
+        class _Resp:
+            status_code = 400
+            text = "position not found"
+
+            def json(self):
+                return {"errorCode": "position_not_found"}
+
+        monkeypatch.setattr("session.request", lambda *_args, **_kwargs: _Resp())
+
+        ok, deleted, status = delete_trade_log_entry(0, path=path)
+        trades = load_raw_log(path)
+
+        assert ok is True
+        assert status == "deleted"
+        assert deleted["dealId"] == "PHANTOM400"
+        assert trades == []
+
+    def test_deletes_open_tradingview_trade_with_trusted_origin_marker(self, tmp_path, monkeypatch):
+        from trade_log import delete_trade_log_entry, load_raw_log
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([{
+                "dealId": "PHANTOM-TRUSTED",
+                "ticker": "META",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+                "trusted_origin": "tradingview",
+            }], f)
+
+        class _Resp:
+            status_code = 404
+            text = ""
+
+            def json(self):
+                return {}
+
+        monkeypatch.setattr("session.request", lambda *_args, **_kwargs: _Resp())
+
+        ok, deleted, status = delete_trade_log_entry(0, path=path)
+        trades = load_raw_log(path)
+
+        assert ok is True
+        assert status == "deleted"
+        assert deleted["dealId"] == "PHANTOM-TRUSTED"
+        assert trades == []
+
+
 # ======================================================================== #
 #  webhook: payload validation                                              #
 # ======================================================================== #
@@ -2295,7 +2419,7 @@ class TestDashboardDeleteTradeEndpoint:
             called["trade_index"] = trade_index
             return True, {"dealId": "D1"}, "deleted"
 
-        monkeypatch.setattr("dashboard.delete_completed_trade", _fake_delete)
+        monkeypatch.setattr("dashboard.delete_trade_log_entry", _fake_delete)
 
         app = Flask(__name__)
         app.register_blueprint(dashboard)
@@ -2313,13 +2437,25 @@ class TestDashboardDeleteTradeEndpoint:
         from flask import Flask
         import dashboard
 
-        monkeypatch.setattr(dashboard.session, "get_positions", lambda: [])
+        live_positions = [{
+            "dealId": "LIVE2",
+            "ticker": "NVDA",
+            "direction": "Long",
+            "size": 1.0,
+            "entry_price": 100.0,
+            "current_price": 101.0,
+            "stopLevel": None,
+            "limitLevel": None,
+            "profit": 1.0,
+        }]
+        monkeypatch.setattr(dashboard.session, "get_positions", lambda: live_positions)
         monkeypatch.setattr(dashboard.session, "get_account", lambda: {})
-        monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: [])
+        monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: live_positions)
         monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
         monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
         monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
-            {"dealId": "OPEN1", "ticker": "AAPL", "status": "OPEN", "pnl_gbp": None},
+            {"dealId": "OPEN1", "ticker": "AAPL", "status": "OPEN", "trade_source": "trader", "pnl_gbp": None},
+            {"dealId": "PHANTOM1", "dealReference": "REF-PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "notes": "sl=1; tp=2; timeframe=1h; dealReference=REF-PHANTOM1", "pnl_gbp": None},
             {"dealId": "CLOSED1", "ticker": "NVDA", "status": "CLOSED", "time_exited": "2026-09-09T12:00:00Z", "pnl_gbp": 5.0},
         ])
 
@@ -2333,7 +2469,67 @@ class TestDashboardDeleteTradeEndpoint:
         html = data["html"]
 
         assert response.status_code == 200
+        assert "deleteTrade(2)" in html
         assert "deleteTrade(1)" in html
+        assert "deleteTrade(0)" not in html
+
+    def test_dashboard_data_hides_open_delete_when_live_snapshot_unavailable(self, monkeypatch):
+        from flask import Flask
+        import dashboard
+
+        monkeypatch.setattr(dashboard.session, "get_positions", lambda: None)
+        monkeypatch.setattr(dashboard.session, "get_account", lambda: {})
+        monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: [])
+        monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
+        monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
+        monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
+            {"dealId": "PHANTOM1", "dealReference": "REF-PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "notes": "sl=1; tp=2; timeframe=1h; dealReference=REF-PHANTOM1", "pnl_gbp": None},
+        ])
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard.dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+
+        response = client.get("/dashboard/data")
+        data = response.get_json()
+        html = data["html"]
+
+        assert response.status_code == 200
+        assert "deleteTrade(0)" not in html
+
+    def test_dashboard_data_hides_open_delete_when_snapshot_has_no_extractable_deal_ids(self, monkeypatch):
+        from flask import Flask
+        import dashboard
+
+        monkeypatch.setattr(dashboard.session, "get_positions", lambda: [{"market": {"symbol": "MSFT"}}])
+        monkeypatch.setattr(dashboard.session, "get_account", lambda: {})
+        monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: [{
+            "ticker": "MSFT",
+            "direction": "Long",
+            "size": 1.0,
+            "entry_price": 100.0,
+            "current_price": 101.0,
+            "stopLevel": None,
+            "limitLevel": None,
+            "profit": 1.0,
+        }])
+        monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
+        monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
+        monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
+            {"dealId": "PHANTOM1", "dealReference": "REF-PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "notes": "sl=1; tp=2; timeframe=1h; dealReference=REF-PHANTOM1", "pnl_gbp": None},
+        ])
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard.dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+
+        response = client.get("/dashboard/data")
+        data = response.get_json()
+        html = data["html"]
+
+        assert response.status_code == 200
         assert "deleteTrade(0)" not in html
 
 

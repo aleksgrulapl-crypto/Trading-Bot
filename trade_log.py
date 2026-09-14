@@ -15,6 +15,7 @@ import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 import logging
+from urllib.parse import quote
 
 # Try to import config and, if present, ensure FX_USD_GBP is available in the environment.
 try:
@@ -212,6 +213,46 @@ def _detect_trade_origin(payload: Dict[str, Any], side: Optional[str], dealId: A
     return "unknown"
 
 
+def _trusted_trade_origin(payload: Dict[str, Any], origin: Optional[str], dealReference: Any) -> Optional[str]:
+    """Return a durable trusted provenance marker for TradingView-origin rows."""
+    if origin not in ("tradingview", "hedge"):
+        return None
+    trusted = _canonical_trade_source(payload.get("trusted_origin") or payload.get("trustedOrigin"))
+    if trusted in ("tradingview", "hedge"):
+        return "tradingview"
+    if payload.get("webhook") is True or payload.get("cid") or payload.get("alert_id"):
+        return "tradingview"
+    if dealReference not in (None, ""):
+        return "tradingview"
+    return None
+
+
+def _derive_trusted_origin_from_trade(trade: Dict[str, Any]) -> Optional[str]:
+    """Best-effort backfill of trusted TradingView provenance for existing rows."""
+    trusted = _canonical_trade_source(trade.get("trusted_origin") or trade.get("trustedOrigin"))
+    if trusted in ("tradingview", "hedge"):
+        return "tradingview"
+    if not _is_tradingview_origin_trade(trade):
+        return None
+    notes = str(trade.get("notes") or "")
+    notes_lower = notes.lower()
+    deal_reference = trade.get("dealReference")
+    if (
+        deal_reference not in (None, "")
+        and f"dealreference={deal_reference}".lower() in notes_lower
+        and "timeframe=" in notes_lower
+    ):
+        return "tradingview"
+    if notes.startswith("Imported from webhook"):
+        return "tradingview"
+    return None
+
+
+def _has_trusted_tradingview_provenance(trade: Dict[str, Any]) -> bool:
+    """Return True when a row is structurally tied to the trusted TradingView path."""
+    return _derive_trusted_origin_from_trade(trade) == "tradingview"
+
+
 # ---------------------------------------------------------------------------
 # Public I/O helpers
 # ---------------------------------------------------------------------------
@@ -299,8 +340,107 @@ def delete_completed_trade(index: int, path: str = LOG_PATH) -> Tuple[bool, Opti
             return False, None, "not_completed"
 
         deleted = dict(trade)
-        trades.pop(idx)
-        if not save_raw_log(trades, path):
+        remaining = trades[:idx] + trades[idx + 1:]
+        if not save_raw_log(remaining, path):
+            return False, None, "save_failed"
+        return True, deleted, "deleted"
+
+
+def is_trade_delete_candidate(
+    trade: Dict[str, Any],
+    live_deal_ids: Optional[set] = None,
+    require_live_match_check: bool = False,
+) -> bool:
+    """Return True when *trade* is safe to show a dashboard Delete action for."""
+    if not isinstance(trade, dict):
+        return False
+    status = str(trade.get("status") or "").strip().upper()
+    if status == "CLOSED" or trade.get("time_exited") not in (None, ""):
+        return True
+    if not _is_tradingview_origin_trade(trade):
+        return False
+    if not _has_trusted_tradingview_provenance(trade):
+        return False
+    deal_id = trade.get("dealId")
+    if deal_id in (None, ""):
+        return False
+    if live_deal_ids is None:
+        return not require_live_match_check
+    if str(deal_id) in live_deal_ids:
+        return False
+    return True
+
+
+def _confirm_trade_missing_from_broker(trade: Dict[str, Any]) -> bool:
+    """Return True when the broker confirms this open trade no longer exists."""
+    if not isinstance(trade, dict):
+        return False
+    deal_id = trade.get("dealId")
+    if deal_id in (None, ""):
+        return False
+    try:
+        import session  # type: ignore
+    except Exception:
+        logger.exception("trade_log: failed to import session for delete check")
+        return False
+    try:
+        response = session.request("GET", f"{config.API_POSITIONS}/{quote(str(deal_id), safe='')}")
+    except Exception:
+        logger.exception("trade_log: broker delete check failed for %s", deal_id)
+        return False
+    if response is None:
+        return False
+    if response.status_code == 200:
+        return False
+    if response.status_code == 404:
+        return True
+    if response.status_code != 400:
+        return False
+    body = {}
+    try:
+        body = response.json() or {}
+    except Exception:
+        body = {}
+    error_code = str(body.get("errorCode") or "").strip().lower()
+    if error_code == "position_not_found":
+        return True
+    text_parts = [
+        getattr(response, "text", "") or "",
+        str(body.get("message") or ""),
+        str(body.get("details") or ""),
+    ]
+    err_text = " ".join(text_parts).strip().lower()
+    not_found_markers = (
+        "position not found",
+        "no position found",
+    )
+    return bool(err_text and any(marker in err_text for marker in not_found_markers))
+
+
+def delete_trade_log_entry(index: int, path: str = LOG_PATH) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """Delete a completed trade, or a phantom TradingView open trade confirmed missing."""
+    try:
+        idx = int(index)
+    except (TypeError, ValueError):
+        return False, None, "invalid_index"
+
+    with _trade_log_lock:
+        trades = load_raw_log(path)
+        if idx < 0 or idx >= len(trades):
+            return False, None, "not_found"
+
+        trade = trades[idx] if isinstance(trades[idx], dict) else {}
+        if not is_trade_delete_candidate(trade):
+            return False, None, "not_deletable"
+
+        status = str(trade.get("status") or "").strip().upper()
+        is_completed = status == "CLOSED" or trade.get("time_exited") not in (None, "")
+        if not is_completed and not _confirm_trade_missing_from_broker(trade):
+            return False, None, "broker_still_open"
+
+        deleted = dict(trade)
+        remaining = trades[:idx] + trades[idx + 1:]
+        if not save_raw_log(remaining, path):
             return False, None, "save_failed"
         return True, deleted, "deleted"
 
@@ -850,8 +990,14 @@ def canonicalize_trade_log(path: str = LOG_PATH) -> List[Dict[str, Any]]:
     """Persistently collapse obvious duplicate rows in the canonical log file."""
     with _trade_log_lock:
         trades = load_raw_log(path)
-        deduped, changed = dedupe_trade_log_entries(trades)
-        if changed:
+        trusted_changed = False
+        for trade in trades:
+            trusted_origin = _derive_trusted_origin_from_trade(trade)
+            if trusted_origin and trade.get("trusted_origin") != trusted_origin:
+                trade["trusted_origin"] = trusted_origin
+                trusted_changed = True
+        deduped, dedupe_changed = dedupe_trade_log_entries(trades)
+        if trusted_changed or dedupe_changed:
             save_raw_log(deduped, path)
             return deduped
         return trades
@@ -937,6 +1083,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
     entry_price = payload.get("entry_price") or (pos.get("level") if isinstance(pos, dict) else None) or (pos.get("entryPrice") if isinstance(pos, dict) else None)
     time_entered = payload.get("time_entered") or (pos.get("createdDate") if isinstance(pos, dict) else None) or (pos.get("createdDateUTC") if isinstance(pos, dict) else None)
     origin = _detect_trade_origin(payload, side, dealId, dealReference)
+    trusted_origin = _trusted_trade_origin(payload, origin, dealReference)
 
     valid, reason = validate_trade_payload({**payload, "side": side})
     if not valid:
@@ -1031,6 +1178,9 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
             elif origin and not existing.get("origin"):
                 existing["origin"] = origin
                 updated = True
+            if trusted_origin and existing.get("trusted_origin") != trusted_origin:
+                existing["trusted_origin"] = trusted_origin
+                updated = True
             if _collapse_lingering_tradingview_duplicate(
                 trades, existing, ticker_candidates, side, dealId, dealReference, entry_val, size_val, time_entered
             ):
@@ -1057,6 +1207,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
             "status": "OPEN",
             "trade_source": origin,
             "origin": origin,
+            "trusted_origin": trusted_origin,
             "notes": payload.get("notes") or "Imported"
         }
         trades.append(new_trade)

@@ -163,7 +163,7 @@
               {{ display_pnl if display_pnl is not none else '—' }}
             </td>
             <td>
-              {% if (t.status == 'CLOSED' or t.time_exited) and t._log_index is not none %}
+              {% if t.can_delete and t._log_index is not none %}
               <button class="button-danger" onclick="deleteTrade({{ t._log_index }})">Delete</button>
               {% endif %}
             </td>

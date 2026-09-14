@@ -21,8 +21,9 @@ import session
 import config
 from close_position import close_position as close_live_position
 from trade_log import (
-    delete_completed_trade,
+    delete_trade_log_entry,
     dedupe_trade_log_entries,
+    is_trade_delete_candidate,
     load_raw_log,
     reconcile_with_positions,
 )
@@ -83,6 +84,28 @@ def login_required(view):
 # -----------------------------
 def _safe_str(v):
     return str(v) if v is not None else None
+
+
+def _live_position_deal_ids(raw_positions, positions):
+    if raw_positions is None:
+        return None
+
+    def _collect_ids(rows):
+        ids = set()
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            deal_id = row.get("dealId") or ((row.get("position") or {}).get("dealId") if isinstance(row.get("position"), dict) else None)
+            if deal_id not in (None, ""):
+                ids.add(str(deal_id))
+        return ids
+
+    live_ids = _collect_ids(raw_positions)
+    live_ids.update(_collect_ids(positions))
+    if not live_ids:
+        return None
+
+    return live_ids
 
 
 def _trade_type_label(trade):
@@ -160,6 +183,19 @@ def normalize_trades(trades):
 
         out.append(copy)
     return out
+
+
+def _mark_delete_candidates(trades, live_deal_ids):
+    marked = []
+    for trade in trades or []:
+        copy = dict(trade) if isinstance(trade, dict) else {}
+        copy["can_delete"] = is_trade_delete_candidate(
+            copy,
+            live_deal_ids=live_deal_ids,
+            require_live_match_check=True,
+        )
+        marked.append(copy)
+    return marked
 
 
 def _signature_for_dedupe(t):
@@ -314,10 +350,10 @@ def _build_request_context():
     except Exception:
         logger.debug("session cache not initialized")
 
-    raw_positions = session.get_positions() or []
+    raw_positions = session.get_positions()
     raw_account = session.get_account() or {}
 
-    positions = session.enrich_positions(raw_positions)
+    positions = session.enrich_positions(raw_positions or [])
     account = session.enrich_account(raw_account)
 
     # Display Open Positions sorted alphabetically by ticker for easier scanning.
@@ -333,6 +369,7 @@ def _build_request_context():
 
     combined_raw = [dict(t, _log_index=i) for i, t in enumerate(load_raw_log())]
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
+    combined_trades = _mark_delete_candidates(combined_trades, _live_position_deal_ids(raw_positions, positions))
     combined_trades.sort(
         key=lambda t: (t.get("time_exited") or t.get("time_entered") or ""),
         reverse=True,
@@ -459,9 +496,9 @@ def dashboard_close_position(position_id: str):
 @dashboard.route("/dashboard/trade/<int:trade_index>/delete", methods=["POST"])
 @login_required
 def dashboard_delete_trade(trade_index: int):
-    """Delete one completed trade-log row from the dashboard."""
+    """Delete one completed or broker-missing phantom trade-log row from the dashboard."""
     try:
-        deleted, _trade, status = delete_completed_trade(trade_index)
+        deleted, _trade, status = delete_trade_log_entry(trade_index)
     except Exception as exc:
         logger.exception("dashboard: delete action failed for trade %s: %s", trade_index, exc)
         return jsonify({
@@ -479,7 +516,7 @@ def dashboard_delete_trade(trade_index: int):
         code = 400
     elif status == "not_found":
         code = 404
-    elif status == "not_completed":
+    elif status in ("not_completed", "not_deletable", "broker_still_open"):
         code = 409
     else:
         code = 500
