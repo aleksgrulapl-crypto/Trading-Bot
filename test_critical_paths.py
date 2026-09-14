@@ -1595,6 +1595,7 @@ class TestDeleteTradeLogEntry:
         with open(path, "w") as f:
             json.dump([{
                 "dealId": "PHANTOM1",
+                "dealReference": "REF-PHANTOM1",
                 "ticker": "AMZN",
                 "status": "OPEN",
                 "trade_source": "tradingview",
@@ -1624,6 +1625,7 @@ class TestDeleteTradeLogEntry:
         with open(path, "w") as f:
             json.dump([{
                 "dealId": "LIVE1",
+                "dealReference": "REF-LIVE1",
                 "ticker": "AMZN",
                 "status": "OPEN",
                 "trade_source": "tradingview",
@@ -1652,6 +1654,7 @@ class TestDeleteTradeLogEntry:
         with open(path, "w") as f:
             json.dump([{
                 "dealId": "PHANTOM400",
+                "dealReference": "REF-PHANTOM400",
                 "ticker": "MSFT",
                 "status": "OPEN",
                 "trade_source": "tradingview",
@@ -2401,14 +2404,25 @@ class TestDashboardDeleteTradeEndpoint:
         from flask import Flask
         import dashboard
 
-        monkeypatch.setattr(dashboard.session, "get_positions", lambda: [])
+        live_positions = [{
+            "dealId": "LIVE2",
+            "ticker": "NVDA",
+            "direction": "Long",
+            "size": 1.0,
+            "entry_price": 100.0,
+            "current_price": 101.0,
+            "stopLevel": None,
+            "limitLevel": None,
+            "profit": 1.0,
+        }]
+        monkeypatch.setattr(dashboard.session, "get_positions", lambda: live_positions)
         monkeypatch.setattr(dashboard.session, "get_account", lambda: {})
-        monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: [])
+        monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: live_positions)
         monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
         monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
         monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
             {"dealId": "OPEN1", "ticker": "AAPL", "status": "OPEN", "trade_source": "trader", "pnl_gbp": None},
-            {"dealId": "PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "pnl_gbp": None},
+            {"dealId": "PHANTOM1", "dealReference": "REF-PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "pnl_gbp": None},
             {"dealId": "CLOSED1", "ticker": "NVDA", "status": "CLOSED", "time_exited": "2026-09-09T12:00:00Z", "pnl_gbp": 5.0},
         ])
 
@@ -2436,7 +2450,7 @@ class TestDashboardDeleteTradeEndpoint:
         monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
         monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
         monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
-            {"dealId": "PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "pnl_gbp": None},
+            {"dealId": "PHANTOM1", "dealReference": "REF-PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "pnl_gbp": None},
         ])
 
         app = Flask(__name__)
@@ -2457,11 +2471,20 @@ class TestDashboardDeleteTradeEndpoint:
 
         monkeypatch.setattr(dashboard.session, "get_positions", lambda: [{"market": {"symbol": "MSFT"}}])
         monkeypatch.setattr(dashboard.session, "get_account", lambda: {})
-        monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: [{"ticker": "MSFT"}])
+        monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: [{
+            "ticker": "MSFT",
+            "direction": "Long",
+            "size": 1.0,
+            "entry_price": 100.0,
+            "current_price": 101.0,
+            "stopLevel": None,
+            "limitLevel": None,
+            "profit": 1.0,
+        }])
         monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
         monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
         monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
-            {"dealId": "PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "pnl_gbp": None},
+            {"dealId": "PHANTOM1", "dealReference": "REF-PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "pnl_gbp": None},
         ])
 
         app = Flask(__name__)

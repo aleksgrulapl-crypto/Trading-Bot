@@ -213,6 +213,20 @@ def _detect_trade_origin(payload: Dict[str, Any], side: Optional[str], dealId: A
     return "unknown"
 
 
+def _trusted_trade_origin(payload: Dict[str, Any], origin: Optional[str], dealReference: Any) -> Optional[str]:
+    """Return a durable trusted provenance marker for TradingView-origin rows."""
+    if origin not in ("tradingview", "hedge"):
+        return None
+    trusted = _canonical_trade_source(payload.get("trusted_origin") or payload.get("trustedOrigin"))
+    if trusted in ("tradingview", "hedge"):
+        return "tradingview"
+    if payload.get("webhook") is True or payload.get("cid") or payload.get("alert_id"):
+        return "tradingview"
+    if dealReference not in (None, ""):
+        return "tradingview"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Public I/O helpers
 # ---------------------------------------------------------------------------
@@ -318,6 +332,8 @@ def is_trade_delete_candidate(
     if status == "CLOSED" or trade.get("time_exited") not in (None, ""):
         return True
     if not _is_tradingview_origin_trade(trade):
+        return False
+    if trade.get("trusted_origin") != "tradingview" and trade.get("dealReference") in (None, ""):
         return False
     deal_id = trade.get("dealId")
     if deal_id in (None, ""):
@@ -1039,6 +1055,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
     entry_price = payload.get("entry_price") or (pos.get("level") if isinstance(pos, dict) else None) or (pos.get("entryPrice") if isinstance(pos, dict) else None)
     time_entered = payload.get("time_entered") or (pos.get("createdDate") if isinstance(pos, dict) else None) or (pos.get("createdDateUTC") if isinstance(pos, dict) else None)
     origin = _detect_trade_origin(payload, side, dealId, dealReference)
+    trusted_origin = _trusted_trade_origin(payload, origin, dealReference)
 
     valid, reason = validate_trade_payload({**payload, "side": side})
     if not valid:
@@ -1133,6 +1150,9 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
             elif origin and not existing.get("origin"):
                 existing["origin"] = origin
                 updated = True
+            if trusted_origin and existing.get("trusted_origin") != trusted_origin:
+                existing["trusted_origin"] = trusted_origin
+                updated = True
             if _collapse_lingering_tradingview_duplicate(
                 trades, existing, ticker_candidates, side, dealId, dealReference, entry_val, size_val, time_entered
             ):
@@ -1159,6 +1179,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
             "status": "OPEN",
             "trade_source": origin,
             "origin": origin,
+            "trusted_origin": trusted_origin,
             "notes": payload.get("notes") or "Imported"
         }
         trades.append(new_trade)
