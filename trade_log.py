@@ -1321,6 +1321,14 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                     if exact is not None and _collapse_lingering_tradingview_duplicate(
                         trades, exact, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered
                     ):
+                        existing_signatures.add(
+                            _make_signature(
+                                exact.get("dealId"),
+                                exact.get("dealReference"),
+                                exact.get("ticker"),
+                                exact.get("entry_price"),
+                            )
+                        )
                         matched_updates.append(exact)
                 continue
 
