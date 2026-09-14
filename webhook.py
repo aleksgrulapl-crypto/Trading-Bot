@@ -713,6 +713,7 @@ def webhook():
             direction=action,
             symbol=symbol,
             ticker=epic,
+            ignore_opposite_side_for_ticker_limits=is_hedge_signal,
         )
         if size_info.get("blocked"):
             logger.info("[cid=%s] Sizing blocked: %s", cid, size_info.get("reason"))
