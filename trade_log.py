@@ -587,10 +587,9 @@ def _merge_lingering_open_duplicate(
             canonical[key] = duplicate.get(key)
             changed = True
 
-    earliest_entered = _select_timestamp([canonical, duplicate], "time_entered", pick_latest=False)
-    if earliest_entered and canonical.get("time_entered") != earliest_entered:
-        canonical["time_entered"] = earliest_entered
-        canonical["time_entered_human"] = _humanize(earliest_entered)
+    if canonical.get("time_entered") in (None, "") and duplicate.get("time_entered") not in (None, ""):
+        canonical["time_entered"] = duplicate.get("time_entered")
+        canonical["time_entered_human"] = _humanize(duplicate.get("time_entered"))
         changed = True
 
     notes_parts: List[str] = []

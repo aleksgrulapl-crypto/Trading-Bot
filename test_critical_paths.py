@@ -524,7 +524,7 @@ class TestReconcileWithPositions:
         assert not result["added"]
         assert trades[0]["dealId"] == "D-REAL-UNH-2"
         assert trades[0]["trade_source"] == "trader"
-        assert trades[0]["time_entered"] == "2026-09-14T12:15:45Z"
+        assert trades[0]["time_entered"] == "2026-09-14T12:21:15Z"
         assert "Imported from live positions" in (trades[0].get("notes") or "")
         assert "Imported from webhook (tradingview)" in (trades[0].get("notes") or "")
 
@@ -577,7 +577,7 @@ class TestReconcileWithPositions:
         assert len(trades) == 1
         assert trades[0]["dealId"] == "D-REAL-AMZN-2"
         assert trades[0]["trade_source"] == "trader"
-        assert trades[0]["time_entered"] == "2026-09-14T12:15:20Z"
+        assert trades[0]["time_entered"] == "2026-09-14T12:21:15Z"
         assert "Imported from live positions" in (trades[0].get("notes") or "")
         assert "Imported from webhook (tradingview)" in (trades[0].get("notes") or "")
 
