@@ -2451,6 +2451,31 @@ class TestDashboardDeleteTradeEndpoint:
         assert response.status_code == 200
         assert "deleteTrade(0)" not in html
 
+    def test_dashboard_data_hides_open_delete_when_snapshot_has_no_extractable_deal_ids(self, monkeypatch):
+        from flask import Flask
+        import dashboard
+
+        monkeypatch.setattr(dashboard.session, "get_positions", lambda: [{"market": {"symbol": "MSFT"}}])
+        monkeypatch.setattr(dashboard.session, "get_account", lambda: {})
+        monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: [{"ticker": "MSFT"}])
+        monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
+        monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
+        monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
+            {"dealId": "PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "pnl_gbp": None},
+        ])
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard.dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+
+        response = client.get("/dashboard/data")
+        data = response.get_json()
+        html = data["html"]
+
+        assert response.status_code == 200
+        assert "deleteTrade(0)" not in html
+
 
 # ======================================================================== #
 #  webhook: per-ticker order lock (prevents duplicate real broker orders)  #

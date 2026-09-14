@@ -89,13 +89,22 @@ def _safe_str(v):
 def _live_position_deal_ids(raw_positions, positions):
     if raw_positions is None:
         return None
-    live_ids = set()
-    for p in positions or []:
-        if not isinstance(p, dict):
-            continue
-        deal_id = p.get("dealId") or ((p.get("position") or {}).get("dealId") if isinstance(p.get("position"), dict) else None)
-        if deal_id not in (None, ""):
-            live_ids.add(str(deal_id))
+
+    def _collect_ids(rows):
+        ids = set()
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            deal_id = row.get("dealId") or ((row.get("position") or {}).get("dealId") if isinstance(row.get("position"), dict) else None)
+            if deal_id not in (None, ""):
+                ids.add(str(deal_id))
+        return ids
+
+    live_ids = _collect_ids(raw_positions)
+    live_ids.update(_collect_ids(positions))
+    if not live_ids:
+        return None
+
     return live_ids
 
 

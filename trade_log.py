@@ -15,6 +15,7 @@ import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 import logging
+from urllib.parse import quote
 
 # Try to import config and, if present, ensure FX_USD_GBP is available in the environment.
 try:
@@ -341,7 +342,7 @@ def _confirm_trade_missing_from_broker(trade: Dict[str, Any]) -> bool:
         logger.exception("trade_log: failed to import session for delete check")
         return False
     try:
-        response = session.request("GET", f"{config.API_POSITIONS}/{deal_id}")
+        response = session.request("GET", f"{config.API_POSITIONS}/{quote(str(deal_id), safe='')}")
     except Exception:
         logger.exception("trade_log: broker delete check failed for %s", deal_id)
         return False
