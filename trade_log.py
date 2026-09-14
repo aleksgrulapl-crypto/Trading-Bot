@@ -573,13 +573,6 @@ def _merge_lingering_open_duplicate(
         canonical["time_entered_human"] = _humanize(earliest_entered)
         changed = True
 
-    if canonical.get("trade_source") in (None, "", "unknown") and duplicate.get("trade_source") not in (None, "", "unknown"):
-        canonical["trade_source"] = duplicate.get("trade_source")
-        changed = True
-    if canonical.get("origin") in (None, "", "unknown") and duplicate.get("origin") not in (None, "", "unknown"):
-        canonical["origin"] = duplicate.get("origin")
-        changed = True
-
     notes_parts: List[str] = []
     seen_notes = set()
     for entry in (canonical, duplicate):
