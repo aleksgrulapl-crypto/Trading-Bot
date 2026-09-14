@@ -530,6 +530,61 @@ class TestReconcileWithPositions:
         assert "Imported from live positions" in (trades[0].get("notes") or "")
         assert "Imported from webhook (tradingview)" in (trades[0].get("notes") or "")
 
+    def test_reconcile_removes_same_dealid_tradingview_duplicate_with_fill_mismatch(self, tmp_path):
+        from trade_log import reconcile_with_positions, load_raw_log, save_raw_log
+        path = str(tmp_path / "log.json")
+        save_raw_log([
+            {
+                "dealId": "D-REAL-INTC-OPEN",
+                "dealReference": None,
+                "ticker": "INTC",
+                "side": "long",
+                "size": 10.0,
+                "entry_price": 96.36,
+                "time_entered": "2026-09-14T15:45:05Z",
+                "status": "OPEN",
+                "trade_source": "trader",
+                "origin": "trader",
+                "notes": "Imported from live positions",
+            },
+            {
+                "dealId": "D-REAL-INTC-OPEN",
+                "dealReference": None,
+                "ticker": "INTC",
+                "side": "long",
+                "size": 10.37,
+                "entry_price": 96.36,
+                "time_entered": "2026-09-14T15:45:03Z",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+                "origin": "tradingview",
+                "trusted_origin": "tradingview",
+                "notes": "Imported from webhook (tradingview)",
+            },
+        ], path=path)
+
+        result = reconcile_with_positions(
+            [{
+                "dealId": "D-REAL-INTC-OPEN",
+                "dealReference": None,
+                "ticker": "INTC",
+                "side": "buy",
+                "size": 10.0,
+                "entry_price": 96.36,
+                "time_entered": "2026-09-14T15:45:05Z",
+            }],
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert not result["added"]
+        assert trades[0]["dealId"] == "D-REAL-INTC-OPEN"
+        assert trades[0]["trade_source"] == "tradingview"
+        assert trades[0]["origin"] == "tradingview"
+        assert trades[0]["trusted_origin"] == "tradingview"
+        assert trades[0]["size"] == pytest.approx(10.0)
+
     def test_broker_upsert_removes_lingering_tradingview_duplicate_when_broker_row_already_exists(self, tmp_path):
         from trade_log import upsert_open_trade, load_raw_log, save_raw_log
         path = str(tmp_path / "log.json")
@@ -906,6 +961,30 @@ class TestCloseTradeByDealId:
         assert len(trades) == 1, "Same-event duplicate closed rows should be collapsed into one canonical record"
         assert "Closed via sync" in (trades[0].get("notes") or "")
         assert "Imported from live positions" in (trades[0].get("notes") or "")
+
+    def test_close_trade_by_dealid_collapses_same_event_duplicates_with_fill_mismatch(self, tmp_path):
+        from trade_log import close_trade_by_dealId, load_raw_log, save_raw_log
+        path = str(tmp_path / "log.json")
+        save_raw_log([
+            {"dealId": "DUP-INTC", "ticker": "INTC", "side": "long", "size": 10.0,
+             "entry_price": 96.36, "time_entered": "2026-09-14T15:45:05Z",
+             "status": "OPEN", "trade_source": "trader", "origin": "trader",
+             "notes": "Imported from live positions"},
+            {"dealId": "DUP-INTC", "ticker": "INTC", "side": "long", "size": 10.37,
+             "entry_price": 96.36, "time_entered": "2026-09-14T15:45:03Z",
+             "status": "OPEN", "trade_source": "tradingview", "origin": "tradingview",
+             "trusted_origin": "tradingview", "notes": "Imported from webhook (tradingview)"},
+        ], path=path)
+
+        closed = close_trade_by_dealId("DUP-INTC", exit_price=97.11, time_exited="2026-09-14T16:00:00Z", path=path)
+
+        trades = load_raw_log(path)
+        assert closed is not None
+        assert len(trades) == 1
+        assert trades[0]["status"] == "CLOSED"
+        assert trades[0]["trade_source"] == "tradingview"
+        assert trades[0]["origin"] == "tradingview"
+        assert trades[0]["trusted_origin"] == "tradingview"
 
     def test_canonicalize_trade_log_keeps_reused_dealid_trades_separate(self, tmp_path):
         from trade_log import canonicalize_trade_log, load_raw_log, save_raw_log
@@ -1437,6 +1516,38 @@ class TestSizing:
         assert result["equity_used_by_ticker"] == pytest.approx(100.0)
         assert result["equity_used"] == pytest.approx(100.0)
         assert result["size"] == pytest.approx(5.0)
+
+    def test_hedge_sizing_ignores_opposite_side_ticker_usage(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_POSITIONS_PER_TICKER", 3)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "NVDA", "side": "buy", "status": "OPEN", "size": 10.0, "entry_price": 100.0},
+        ])
+
+        result = sizing.calculate_size(
+            100,
+            105,
+            90,
+            "sell",
+            symbol="NVDA",
+            ticker="NVDA",
+            ignore_opposite_side_for_ticker_limits=True,
+        )
+
+        assert result["blocked"] is False
+        assert result["open_positions"] == 0
+        assert result["equity_used_by_ticker"] == pytest.approx(0.0)
+        assert result["equity_used"] == pytest.approx(200.0)
+        assert result["size"] == pytest.approx(10.0)
 
     def test_ticker_position_limit_blocks_fourth_trade(self, monkeypatch):
         import sizing
@@ -2225,6 +2336,43 @@ class TestWebhookProcessing:
 
         assert resp.status_code == 200
         assert body.get("status") == "ok"
+        assert captured["trade_source"] == "hedge"
+
+    def test_hedge_signal_ignores_opposite_side_ticker_capacity(self, monkeypatch):
+        import webhook
+
+        monkeypatch.setattr(
+            webhook,
+            "load_raw_log",
+            lambda: [{"ticker": "INTC", "side": "long", "status": "OPEN", "trade_source": "tradingview"}],
+        )
+        monkeypatch.setattr(webhook.session, "verify_epic", lambda symbol: {"epic": "INTC", "source": "mock"})
+        monkeypatch.setattr(webhook, "_is_duplicate_alert", lambda *_: False)
+        monkeypatch.setattr(webhook, "_is_trade_locked_now", lambda: False)
+        monkeypatch.setattr(webhook, "parse_tradingview_alert", lambda payload: {"symbol": "INTC", "action": "sell"})
+        monkeypatch.setattr(webhook.session, "request", lambda *args, **kwargs: type("Resp", (), {"status_code": 200, "json": lambda self: {"snapshot": {"bid": 100.0, "offer": 100.2}}})())
+        monkeypatch.setattr(webhook.session, "update_last_trade", lambda: None)
+
+        captured = {}
+
+        def _fake_calculate_size(**kwargs):
+            captured["ignore_opposite_side_for_ticker_limits"] = kwargs.get("ignore_opposite_side_for_ticker_limits")
+            return {"blocked": False, "size": 1.0}
+
+        def _fake_place_order(epic, action, size, sl, tp, timeframe=None, trade_source="tradingview"):
+            captured["trade_source"] = trade_source
+            return {"status": "ok"}
+
+        monkeypatch.setattr(webhook, "calculate_size", _fake_calculate_size)
+        monkeypatch.setattr(webhook, "place_order", _fake_place_order)
+
+        client = webhook.app.test_client()
+        resp = client.post("/webhook", json={"symbol": "INTC", "action": "sell"})
+        body = resp.get_json() or {}
+
+        assert resp.status_code == 200
+        assert body.get("status") == "ok"
+        assert captured["ignore_opposite_side_for_ticker_limits"] is True
         assert captured["trade_source"] == "hedge"
 
     def test_opposite_signal_against_manual_open_trade_is_not_marked_hedge(self, monkeypatch):

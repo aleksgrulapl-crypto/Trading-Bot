@@ -57,10 +57,11 @@ def _normalize_ticker(value: Optional[str]) -> Optional[str]:
         return None
 
 
-def _open_ticker_usage(ticker: Optional[str]) -> Dict[str, float]:
+def _open_ticker_usage(ticker: Optional[str], side: Optional[str] = None) -> Dict[str, float]:
     ticker_norm = _normalize_ticker(ticker)
     if not ticker_norm:
         return {"open_count": 0, "equity_used": 0.0}
+    side_norm = _normalize_direction(side)
 
     leverage = float(getattr(config, "LEVERAGE", 1) or 1)
     if leverage <= 0:
@@ -81,6 +82,10 @@ def _open_ticker_usage(ticker: Optional[str]) -> Dict[str, float]:
         trade_ticker = _normalize_ticker(trade.get("ticker") or trade.get("epic"))
         if trade_ticker != ticker_norm:
             continue
+        if side_norm:
+            trade_side = _normalize_direction(trade.get("side"))
+            if trade_side and trade_side != side_norm:
+                continue
         open_count += 1
         try:
             size = float(trade.get("size") or 0)
@@ -97,7 +102,8 @@ def _open_ticker_usage(ticker: Optional[str]) -> Dict[str, float]:
 
 
 def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[str] = None,
-                   ticker: Optional[str] = None) -> Dict[str, Any]:
+                   ticker: Optional[str] = None,
+                   ignore_opposite_side_for_ticker_limits: bool = False) -> Dict[str, Any]:
     """
     Calculate position size using:
       - a fraction of AVAILABLE equity (config.EQUITY_PERCENT)
@@ -162,7 +168,8 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
     ticker_key = _normalize_ticker(ticker)
     if not ticker_key:
         ticker_key = _normalize_ticker(symbol)
-    ticker_usage = _open_ticker_usage(ticker_key)
+    ticker_usage_side = direction if ignore_opposite_side_for_ticker_limits else None
+    ticker_usage = _open_ticker_usage(ticker_key, side=ticker_usage_side)
     max_positions_per_ticker = int(getattr(config, "MAX_POSITIONS_PER_TICKER", 0) or 0)
     if max_positions_per_ticker > 0 and ticker_usage["open_count"] >= max_positions_per_ticker:
         return {
