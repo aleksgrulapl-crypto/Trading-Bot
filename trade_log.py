@@ -305,6 +305,101 @@ def delete_completed_trade(index: int, path: str = LOG_PATH) -> Tuple[bool, Opti
         return True, deleted, "deleted"
 
 
+def is_trade_delete_candidate(trade: Dict[str, Any], live_deal_ids: Optional[set] = None) -> bool:
+    """Return True when *trade* is safe to show a dashboard Delete action for."""
+    if not isinstance(trade, dict):
+        return False
+    status = str(trade.get("status") or "").strip().upper()
+    if status == "CLOSED" or trade.get("time_exited") not in (None, ""):
+        return True
+    if not _is_tradingview_origin_trade(trade):
+        return False
+    deal_id = trade.get("dealId")
+    if deal_id in (None, ""):
+        return False
+    if live_deal_ids and str(deal_id) in live_deal_ids:
+        return False
+    return True
+
+
+def _confirm_trade_missing_from_broker(trade: Dict[str, Any]) -> bool:
+    """Return True when the broker confirms this open trade no longer exists."""
+    if not isinstance(trade, dict):
+        return False
+    deal_id = trade.get("dealId")
+    if deal_id in (None, ""):
+        return False
+    try:
+        import session  # type: ignore
+    except Exception:
+        logger.exception("trade_log: failed to import session for delete check")
+        return False
+    try:
+        response = session.request("GET", f"{config.API_POSITIONS}/{deal_id}")
+    except Exception:
+        logger.exception("trade_log: broker delete check failed for %s", deal_id)
+        return False
+    if response is None:
+        return False
+    if response.status_code == 200:
+        return False
+    if response.status_code == 404:
+        return True
+    if response.status_code != 400:
+        return False
+    body = {}
+    try:
+        body = response.json() or {}
+    except Exception:
+        body = {}
+    text_parts = [
+        getattr(response, "text", "") or "",
+        str(body.get("errorCode") or ""),
+        str(body.get("error") or ""),
+        str(body.get("message") or ""),
+        str(body.get("details") or ""),
+    ]
+    err_text = " ".join(text_parts).strip().lower()
+    not_found_markers = (
+        "not found",
+        "unknown",
+        "does not exist",
+        "no position",
+        "position not",
+        "invalid deal",
+        "invalid position",
+    )
+    return bool(err_text and any(marker in err_text for marker in not_found_markers))
+
+
+def delete_trade_log_entry(index: int, path: str = LOG_PATH) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """Delete a completed trade, or a phantom TradingView open trade confirmed missing."""
+    try:
+        idx = int(index)
+    except (TypeError, ValueError):
+        return False, None, "invalid_index"
+
+    with _trade_log_lock:
+        trades = load_raw_log(path)
+        if idx < 0 or idx >= len(trades):
+            return False, None, "not_found"
+
+        trade = trades[idx] if isinstance(trades[idx], dict) else {}
+        if not is_trade_delete_candidate(trade):
+            return False, None, "not_deletable"
+
+        status = str(trade.get("status") or "").strip().upper()
+        is_completed = status == "CLOSED" or trade.get("time_exited") not in (None, "")
+        if not is_completed and not _confirm_trade_missing_from_broker(trade):
+            return False, None, "broker_still_open"
+
+        deleted = dict(trade)
+        trades.pop(idx)
+        if not save_raw_log(trades, path):
+            return False, None, "save_failed"
+        return True, deleted, "deleted"
+
+
 # ---------------------------------------------------------------------------
 # Internal calculation helpers
 # ---------------------------------------------------------------------------

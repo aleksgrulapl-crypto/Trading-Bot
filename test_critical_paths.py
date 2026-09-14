@@ -1587,6 +1587,65 @@ class TestDeleteCompletedTrade:
         assert len(trades) == 1
 
 
+class TestDeleteTradeLogEntry:
+    def test_deletes_open_tradingview_trade_when_broker_confirms_missing(self, tmp_path, monkeypatch):
+        from trade_log import delete_trade_log_entry, load_raw_log
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([{
+                "dealId": "PHANTOM1",
+                "ticker": "AMZN",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+            }], f)
+
+        class _Resp:
+            status_code = 404
+            text = ""
+
+            def json(self):
+                return {}
+
+        monkeypatch.setattr("session.request", lambda *_args, **_kwargs: _Resp())
+
+        ok, deleted, status = delete_trade_log_entry(0, path=path)
+        trades = load_raw_log(path)
+
+        assert ok is True
+        assert status == "deleted"
+        assert deleted["dealId"] == "PHANTOM1"
+        assert trades == []
+
+    def test_rejects_open_trade_deletion_when_broker_still_reports_position(self, tmp_path, monkeypatch):
+        from trade_log import delete_trade_log_entry, load_raw_log
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([{
+                "dealId": "LIVE1",
+                "ticker": "AMZN",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+            }], f)
+
+        class _Resp:
+            status_code = 200
+
+            def json(self):
+                return {"dealId": "LIVE1"}
+
+        monkeypatch.setattr("session.request", lambda *_args, **_kwargs: _Resp())
+
+        ok, deleted, status = delete_trade_log_entry(0, path=path)
+        trades = load_raw_log(path)
+
+        assert ok is False
+        assert deleted is None
+        assert status == "broker_still_open"
+        assert len(trades) == 1
+
+
 # ======================================================================== #
 #  webhook: payload validation                                              #
 # ======================================================================== #
@@ -2295,7 +2354,7 @@ class TestDashboardDeleteTradeEndpoint:
             called["trade_index"] = trade_index
             return True, {"dealId": "D1"}, "deleted"
 
-        monkeypatch.setattr("dashboard.delete_completed_trade", _fake_delete)
+        monkeypatch.setattr("dashboard.delete_trade_log_entry", _fake_delete)
 
         app = Flask(__name__)
         app.register_blueprint(dashboard)
@@ -2319,7 +2378,8 @@ class TestDashboardDeleteTradeEndpoint:
         monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
         monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
         monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
-            {"dealId": "OPEN1", "ticker": "AAPL", "status": "OPEN", "pnl_gbp": None},
+            {"dealId": "OPEN1", "ticker": "AAPL", "status": "OPEN", "trade_source": "trader", "pnl_gbp": None},
+            {"dealId": "PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "pnl_gbp": None},
             {"dealId": "CLOSED1", "ticker": "NVDA", "status": "CLOSED", "time_exited": "2026-09-09T12:00:00Z", "pnl_gbp": 5.0},
         ])
 
@@ -2333,6 +2393,7 @@ class TestDashboardDeleteTradeEndpoint:
         html = data["html"]
 
         assert response.status_code == 200
+        assert "deleteTrade(2)" in html
         assert "deleteTrade(1)" in html
         assert "deleteTrade(0)" not in html
 
