@@ -523,7 +523,9 @@ class TestReconcileWithPositions:
         assert len(trades) == 1
         assert not result["added"]
         assert trades[0]["dealId"] == "D-REAL-UNH-2"
-        assert trades[0]["trade_source"] == "trader"
+        assert trades[0]["trade_source"] == "tradingview"
+        assert trades[0]["origin"] == "tradingview"
+        assert trades[0]["trusted_origin"] == "tradingview"
         assert trades[0]["time_entered"] == "2026-09-14T12:21:15Z"
         assert "Imported from live positions" in (trades[0].get("notes") or "")
         assert "Imported from webhook (tradingview)" in (trades[0].get("notes") or "")
@@ -576,10 +578,55 @@ class TestReconcileWithPositions:
         trades = load_raw_log(path)
         assert len(trades) == 1
         assert trades[0]["dealId"] == "D-REAL-AMZN-2"
-        assert trades[0]["trade_source"] == "trader"
+        assert trades[0]["trade_source"] == "tradingview"
+        assert trades[0]["origin"] == "tradingview"
+        assert trades[0]["trusted_origin"] == "tradingview"
         assert trades[0]["time_entered"] == "2026-09-14T12:21:15Z"
         assert "Imported from live positions" in (trades[0].get("notes") or "")
         assert "Imported from webhook (tradingview)" in (trades[0].get("notes") or "")
+
+    def test_live_position_rebinds_single_trusted_tradingview_row_even_with_large_size_mismatch(self, tmp_path):
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {
+                "dealId": "TV-LOCAL-AMZN-3",
+                "dealReference": "REF-AMZN-3",
+                "ticker": "AMZN",
+                "side": "sell",
+                "size": 2.65,
+                "entry_price": 251.8,
+                "time_entered": "2026-09-14T15:30:15Z",
+                "trade_source": "tradingview",
+                "origin": "tradingview",
+                "trusted_origin": "tradingview",
+                "notes": "Imported from webhook (tradingview)",
+            },
+            path=path,
+        )
+
+        result = reconcile_with_positions(
+            [{
+                "dealId": "D-REAL-AMZN-3",
+                "dealReference": None,
+                "ticker": "AMZN",
+                "side": "sell",
+                "size": 2.0,
+                "entry_price": 251.8,
+            }],
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert not result["added"]
+        assert trades[0]["dealId"] == "D-REAL-AMZN-3"
+        assert trades[0]["dealReference"] == "REF-AMZN-3"
+        assert trades[0]["trade_source"] == "tradingview"
+        assert trades[0]["origin"] == "tradingview"
 
     def test_real_dealid_replaces_dealreference_placeholder_before_false_close(self, tmp_path):
         """Regression for the ORCL phantom close: an early raw broker payload may
