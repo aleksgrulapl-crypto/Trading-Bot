@@ -429,6 +429,26 @@ def _find_pending_trade_by_ticker(trades: List[Dict[str, Any]], ticker: Any,
     return candidates[0]
 
 
+def _find_open_trade_by_dealid(trades: List[Dict[str, Any]], dealId: Any) -> Optional[Dict[str, Any]]:
+    if dealId in (None, ""):
+        return None
+    candidates = [
+        t for t in trades
+        if t.get("status") != "CLOSED"
+        and t.get("dealId") is not None
+        and str(t.get("dealId")) == str(dealId)
+    ]
+    if not candidates:
+        return None
+    broker_candidates = [t for t in candidates if not _is_tradingview_origin_trade(t)]
+    ranked = sorted(
+        broker_candidates or candidates,
+        key=lambda t: (_trade_merge_score(t), str(t.get("time_entered") or "")),
+        reverse=True,
+    )
+    return ranked[0]
+
+
 def _find_open_trade_by_ticker_any_dealid(trades: List[Dict[str, Any]], ticker: Any,
                                            side: Optional[str], dealId: Any) -> Optional[Dict[str, Any]]:
     """Find any still-open trade for *ticker* (+ *side*) other than one already
@@ -549,6 +569,72 @@ def _find_open_trade_for_dealid_rebind(
     if len(candidates) != 1:
         return None
     return candidates[0]
+
+
+def _merge_lingering_open_duplicate(
+    trades: List[Dict[str, Any]],
+    canonical: Dict[str, Any],
+    duplicate: Dict[str, Any],
+) -> bool:
+    """Merge a stray duplicate OPEN row into the canonical broker row."""
+    if not canonical or not duplicate or canonical is duplicate:
+        return False
+
+    changed = False
+
+    for key in ("dealReference", "ticker", "side"):
+        if canonical.get(key) in (None, "") and duplicate.get(key) not in (None, ""):
+            canonical[key] = duplicate.get(key)
+            changed = True
+
+    if canonical.get("time_entered") in (None, "") and duplicate.get("time_entered") not in (None, ""):
+        canonical["time_entered"] = duplicate.get("time_entered")
+        canonical["time_entered_human"] = _humanize(duplicate.get("time_entered"))
+        changed = True
+
+    notes_parts: List[str] = []
+    seen_notes = set()
+    for entry in (canonical, duplicate):
+        note = str(entry.get("notes") or "").strip()
+        if note and note not in seen_notes:
+            seen_notes.add(note)
+            notes_parts.append(note)
+    if notes_parts:
+        merged_notes = " | ".join(notes_parts)
+        if canonical.get("notes") != merged_notes:
+            canonical["notes"] = merged_notes
+            changed = True
+
+    try:
+        trades.remove(duplicate)
+        changed = True
+    except ValueError:
+        pass
+
+    return changed
+
+
+def _collapse_lingering_tradingview_duplicate(
+    trades: List[Dict[str, Any]],
+    canonical: Dict[str, Any],
+    ticker: Any,
+    side: Optional[str],
+    dealId: Any,
+    dealReference: Any,
+    entry_price: Any,
+    size: Any,
+    time_entered: Any,
+) -> bool:
+    """Remove a leftover TradingView OPEN row once a broker row already exists."""
+    if not canonical:
+        return False
+
+    duplicate = _find_open_trade_for_dealid_rebind(
+        trades, ticker, side, dealId, dealReference, entry_price, size, time_entered
+    )
+    if duplicate is None or not _is_tradingview_origin_trade(duplicate):
+        return False
+    return _merge_lingering_open_duplicate(trades, canonical, duplicate)
 
 
 def _should_replace_existing_dealid(existing: Dict[str, Any], dealId: Any,
@@ -869,10 +955,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
         trades = load_raw_log(path)
         existing = None
         if dealId:
-            for t in trades:
-                if t.get("dealId") and str(t.get("dealId")) == str(dealId):
-                    existing = t
-                    break
+            existing = _find_open_trade_by_dealid(trades, dealId)
         if not existing and dealReference:
             for t in trades:
                 if t.get("dealReference") and str(t.get("dealReference")) == str(dealReference):
@@ -947,6 +1030,10 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
                 updated = True
             elif origin and not existing.get("origin"):
                 existing["origin"] = origin
+                updated = True
+            if _collapse_lingering_tradingview_duplicate(
+                trades, existing, ticker_candidates, side, dealId, dealReference, entry_val, size_val, time_entered
+            ):
                 updated = True
             if updated:
                 existing["time_entered_human"] = _humanize(existing.get("time_entered"))
@@ -1229,6 +1316,20 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
 
             sig = _make_signature(dealId, dealReference, ticker, entry_price)
             if sig in existing_signatures:
+                if dealId:
+                    exact = _find_open_trade_by_dealid(trades, dealId)
+                    if exact is not None and _collapse_lingering_tradingview_duplicate(
+                        trades, exact, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered
+                    ):
+                        existing_signatures.add(
+                            _make_signature(
+                                exact.get("dealId"),
+                                exact.get("dealReference"),
+                                exact.get("ticker"),
+                                exact.get("entry_price"),
+                            )
+                        )
+                        matched_updates.append(exact)
                 continue
 
             # Try to match an existing entry by dealId alone (ignoring entry_price
@@ -1238,10 +1339,7 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
             # duplicate open-position entry that would never get closed.
             matched = None
             if dealId:
-                for t in trades:
-                    if t.get("dealId") and str(t.get("dealId")) == str(dealId):
-                        matched = t
-                        break
+                matched = _find_open_trade_by_dealid(trades, dealId)
             matched_requires_dealid_rebind = False
             if matched is None and dealId:
                 matched = _find_pending_trade_by_ticker(trades, ticker_candidates or ticker, side)
@@ -1269,6 +1367,10 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                         matched["entry_price"] = float(entry_price); changed = True
                 except Exception:
                     pass
+                if _collapse_lingering_tradingview_duplicate(
+                    trades, matched, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered
+                ):
+                    changed = True
                 if changed:
                     existing_signatures.add(_make_signature(matched.get("dealId"), matched.get("dealReference"), matched.get("ticker"), matched.get("entry_price")))
                     matched_updates.append(matched)

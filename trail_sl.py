@@ -65,6 +65,26 @@ def _round_stop(stop: float, position: dict) -> float:
     return round(float(stop), decimals)
 
 
+def _effective_trail_percent(profit_perc: float, activation_perc: float, base_trail_perc: float) -> float:
+    """
+    Tighten the trailing stop as profit extends further beyond activation.
+    """
+    try:
+        profit_perc_f = float(profit_perc)
+        activation_perc_f = float(activation_perc)
+        base_trail_perc_f = float(base_trail_perc)
+    except Exception:
+        return float(base_trail_perc)
+
+    if activation_perc_f <= 0:
+        return base_trail_perc_f
+
+    profit_multiple = profit_perc_f / activation_perc_f
+    tighten_steps = min(max(profit_multiple - 1.0, 0.0), 3.0)
+    max_trail_perc = max(base_trail_perc_f, 0.90)
+    return min(max_trail_perc, base_trail_perc_f + (0.10 * tighten_steps))
+
+
 def _update_stop_level(deal_id: str, new_sl: float) -> bool:
     """
     Update stopLevel for a single position on Capital.com.
@@ -151,6 +171,7 @@ def run_trailing_sl() -> None:
         trail_sl = None
         try:
             trail_perc = _normalize_percent(getattr(config, "TRAIL_SL_PERC", TRAIL_SL_PERC), TRAIL_SL_PERC)
+            trail_perc = _effective_trail_percent(profit_perc, activation_perc, trail_perc)
             if side == "long":
                 trail_sl = entry_price_f + profit * trail_perc
             else:
