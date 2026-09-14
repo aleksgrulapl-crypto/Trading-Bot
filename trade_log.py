@@ -1307,6 +1307,20 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
 
             sig = _make_signature(dealId, dealReference, ticker, entry_price)
             if sig in existing_signatures:
+                if dealId:
+                    exact = next(
+                        (
+                            t for t in trades
+                            if t.get("status") != "CLOSED"
+                            and t.get("dealId") is not None
+                            and str(t.get("dealId")) == str(dealId)
+                        ),
+                        None,
+                    )
+                    if exact is not None and _collapse_lingering_tradingview_duplicate(
+                        trades, exact, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered
+                    ):
+                        matched_updates.append(exact)
                 continue
 
             # Try to match an existing entry by dealId alone (ignoring entry_price
