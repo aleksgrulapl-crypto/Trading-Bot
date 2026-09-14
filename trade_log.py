@@ -632,7 +632,7 @@ def _collapse_lingering_tradingview_duplicate(
     duplicate = _find_open_trade_for_dealid_rebind(
         trades, ticker, side, dealId, dealReference, entry_price, size, time_entered
     )
-    if duplicate is None:
+    if duplicate is None or not _is_tradingview_origin_trade(duplicate):
         return False
     return _merge_lingering_open_duplicate(trades, canonical, duplicate)
 
