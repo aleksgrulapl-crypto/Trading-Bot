@@ -530,6 +530,61 @@ class TestReconcileWithPositions:
         assert "Imported from live positions" in (trades[0].get("notes") or "")
         assert "Imported from webhook (tradingview)" in (trades[0].get("notes") or "")
 
+    def test_reconcile_removes_same_dealid_tradingview_duplicate_with_fill_mismatch(self, tmp_path):
+        from trade_log import reconcile_with_positions, load_raw_log, save_raw_log
+        path = str(tmp_path / "log.json")
+        save_raw_log([
+            {
+                "dealId": "D-REAL-INTC-OPEN",
+                "dealReference": None,
+                "ticker": "INTC",
+                "side": "long",
+                "size": 10.0,
+                "entry_price": 96.36,
+                "time_entered": "2026-09-14T15:45:05Z",
+                "status": "OPEN",
+                "trade_source": "trader",
+                "origin": "trader",
+                "notes": "Imported from live positions",
+            },
+            {
+                "dealId": "D-REAL-INTC-OPEN",
+                "dealReference": None,
+                "ticker": "INTC",
+                "side": "long",
+                "size": 10.37,
+                "entry_price": 96.36,
+                "time_entered": "2026-09-14T15:45:03Z",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+                "origin": "tradingview",
+                "trusted_origin": "tradingview",
+                "notes": "Imported from webhook (tradingview)",
+            },
+        ], path=path)
+
+        result = reconcile_with_positions(
+            [{
+                "dealId": "D-REAL-INTC-OPEN",
+                "dealReference": None,
+                "ticker": "INTC",
+                "side": "buy",
+                "size": 10.0,
+                "entry_price": 96.36,
+                "time_entered": "2026-09-14T15:45:05Z",
+            }],
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert not result["added"]
+        assert trades[0]["dealId"] == "D-REAL-INTC-OPEN"
+        assert trades[0]["trade_source"] == "tradingview"
+        assert trades[0]["origin"] == "tradingview"
+        assert trades[0]["trusted_origin"] == "tradingview"
+        assert trades[0]["size"] == pytest.approx(10.0)
+
     def test_broker_upsert_removes_lingering_tradingview_duplicate_when_broker_row_already_exists(self, tmp_path):
         from trade_log import upsert_open_trade, load_raw_log, save_raw_log
         path = str(tmp_path / "log.json")
@@ -906,6 +961,30 @@ class TestCloseTradeByDealId:
         assert len(trades) == 1, "Same-event duplicate closed rows should be collapsed into one canonical record"
         assert "Closed via sync" in (trades[0].get("notes") or "")
         assert "Imported from live positions" in (trades[0].get("notes") or "")
+
+    def test_close_trade_by_dealid_collapses_same_event_duplicates_with_fill_mismatch(self, tmp_path):
+        from trade_log import close_trade_by_dealId, load_raw_log, save_raw_log
+        path = str(tmp_path / "log.json")
+        save_raw_log([
+            {"dealId": "DUP-INTC", "ticker": "INTC", "side": "long", "size": 10.0,
+             "entry_price": 96.36, "time_entered": "2026-09-14T15:45:05Z",
+             "status": "OPEN", "trade_source": "trader", "origin": "trader",
+             "notes": "Imported from live positions"},
+            {"dealId": "DUP-INTC", "ticker": "INTC", "side": "long", "size": 10.37,
+             "entry_price": 96.36, "time_entered": "2026-09-14T15:45:03Z",
+             "status": "OPEN", "trade_source": "tradingview", "origin": "tradingview",
+             "trusted_origin": "tradingview", "notes": "Imported from webhook (tradingview)"},
+        ], path=path)
+
+        closed = close_trade_by_dealId("DUP-INTC", exit_price=97.11, time_exited="2026-09-14T16:00:00Z", path=path)
+
+        trades = load_raw_log(path)
+        assert closed is not None
+        assert len(trades) == 1
+        assert trades[0]["status"] == "CLOSED"
+        assert trades[0]["trade_source"] == "tradingview"
+        assert trades[0]["origin"] == "tradingview"
+        assert trades[0]["trusted_origin"] == "tradingview"
 
     def test_canonicalize_trade_log_keeps_reused_dealid_trades_separate(self, tmp_path):
         from trade_log import canonicalize_trade_log, load_raw_log, save_raw_log

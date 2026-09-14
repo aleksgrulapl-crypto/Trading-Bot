@@ -37,17 +37,17 @@ LEVERAGE = int(os.getenv("LEVERAGE", 5))
 #   MAX_EQUITY_PER_TRADE    – equity (before leverage) allocated to one trade
 #   MAX_EQUITY_PER_TICKER   – combined equity allowed across all open trades for one ticker
 #   MAX_EXPOSURE_PER_TRADE  – leveraged exposure allocated to one trade
-# Defaults: up to £200 equity per trade, up to £200 combined equity per ticker,
-# and £1000 exposure at 5x leverage.
-MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 200))
+# Defaults: up to £250 equity per trade, up to £250 combined equity per ticker,
+# and £1250 exposure at 5x leverage.
+MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 250))
 MAX_EQUITY_PER_TICKER = float(os.getenv("MAX_EQUITY_PER_TICKER", MAX_EQUITY_PER_TRADE))
-MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 1000))
+MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 1250))
 
 # SL/TP expressed as a percentage of the EQUITY USED for the trade (not the
 # leveraged exposure/full account balance), so risk is predictable regardless
-# of leverage. E.g. with MAX_EQUITY_PER_TRADE=£200: FIXED_SL_PERC=0.20 (20%)
-# caps the loss at £40 (20% of the £200 equity used) and FIXED_TP_PERC=0.40
-# (40%) caps the gain at £80 (40% of the £200 equity used). sl_tp.FixedSLTP
+# of leverage. E.g. with MAX_EQUITY_PER_TRADE=£250: FIXED_SL_PERC=0.20 (20%)
+# caps the loss at £50 (20% of the £250 equity used) and FIXED_TP_PERC=0.40
+# (40%) caps the gain at £100 (40% of the £250 equity used). sl_tp.FixedSLTP
 # converts these equity-based percentages into the actual price-move
 # percentage by dividing by LEVERAGE (since exposure = equity_used *
 # LEVERAGE, a price move of equity_perc/LEVERAGE yields exactly

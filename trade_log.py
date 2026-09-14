@@ -537,6 +537,30 @@ def _ticker_candidate_aliases(ticker: Any) -> set:
     return _ticker_aliases(ticker, include_epic_symbol_alias=True)
 
 
+def _ticker_aliases_overlap(a: Any, b: Any) -> bool:
+    aliases_a = _ticker_candidate_aliases(a)
+    aliases_b = _ticker_candidate_aliases(b)
+    if not aliases_a or not aliases_b:
+        return False
+    return bool(aliases_a.intersection(aliases_b))
+
+
+def _trade_entry_matches(a: Any, b: Any) -> bool:
+    entry_a = _coerce_trade_float(a)
+    entry_b = _coerce_trade_float(b)
+    if entry_a is None or entry_b is None:
+        return True
+    return abs(entry_a - entry_b) <= 0.25
+
+
+def _trade_size_matches(a: Any, b: Any) -> bool:
+    size_a = _coerce_trade_float(a)
+    size_b = _coerce_trade_float(b)
+    if size_a is None or size_b is None:
+        return True
+    return abs(size_a - size_b) <= max(0.1, 0.1 * max(abs(size_a), abs(size_b)))
+
+
 def _find_pending_trade_by_ticker(trades: List[Dict[str, Any]], ticker: Any,
                                    side: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Find a still-open trade that has no dealId yet for *ticker* (optionally *side*).
@@ -802,10 +826,44 @@ def _collapse_lingering_tradingview_duplicate(
     if not canonical:
         return False
 
-    duplicate = _find_open_trade_for_dealid_rebind(
-        trades, ticker, side, dealId, dealReference, entry_price, size, time_entered
-    )
-    if duplicate is None or not _is_tradingview_origin_trade(duplicate):
+    duplicate = None
+    for candidate in trades:
+        if candidate is canonical or candidate.get("status") == "CLOSED":
+            continue
+        if not _is_tradingview_origin_trade(candidate):
+            continue
+        candidate_deal_id = candidate.get("dealId")
+        candidate_deal_reference = candidate.get("dealReference")
+        same_reference = (
+            dealReference not in (None, "")
+            and candidate_deal_reference not in (None, "")
+            and str(candidate_deal_reference) == str(dealReference)
+        )
+        same_deal_id = (
+            dealId not in (None, "")
+            and candidate_deal_id not in (None, "")
+            and str(candidate_deal_id) == str(dealId)
+        )
+        if not (same_reference or same_deal_id):
+            continue
+        candidate_side = _normalize_side(candidate.get("side"))
+        side_norm = _normalize_side(side)
+        if side_norm and candidate_side and candidate_side != side_norm:
+            continue
+        if not _ticker_aliases_overlap(candidate.get("ticker"), ticker):
+            continue
+        if not _trade_entry_matches(candidate.get("entry_price"), entry_price):
+            continue
+        if not _trade_size_matches(candidate.get("size"), size):
+            continue
+        duplicate = candidate
+        break
+
+    if duplicate is None:
+        duplicate = _find_open_trade_for_dealid_rebind(
+            trades, ticker, side, dealId, dealReference, entry_price, size, time_entered
+        )
+    if duplicate is None or duplicate is canonical or not _is_tradingview_origin_trade(duplicate):
         return False
     return _merge_lingering_open_duplicate(trades, canonical, duplicate)
 
@@ -951,19 +1009,24 @@ def _is_probable_duplicate_trade(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     if side_a and side_b and side_a != side_b:
         return False
 
+    ticker_a = a.get("ticker")
+    ticker_b = b.get("ticker")
+    if ticker_a not in (None, "") and ticker_b not in (None, "") and not _ticker_aliases_overlap(ticker_a, ticker_b):
+        return False
+
+    if not _trade_entry_matches(a.get("entry_price"), b.get("entry_price")):
+        return False
+
+    if not _trade_size_matches(a.get("size"), b.get("size")):
+        return False
+
     entry_a = _coerce_trade_float(a.get("entry_price"))
     entry_b = _coerce_trade_float(b.get("entry_price"))
-    if entry_a is not None and entry_b is not None and not _float_equal(entry_a, entry_b):
-        return False
-
     size_a = _coerce_trade_float(a.get("size"))
     size_b = _coerce_trade_float(b.get("size"))
-    if size_a is not None and size_b is not None and not _float_equal(size_a, size_b):
-        return False
-
     exit_a = _coerce_trade_float(a.get("exit_price"))
     exit_b = _coerce_trade_float(b.get("exit_price"))
-    if exit_a is not None and exit_b is not None and not _float_equal(exit_a, exit_b):
+    if exit_a is not None and exit_b is not None and abs(exit_a - exit_b) > 0.25:
         return False
 
     if _times_within_window(a.get("time_entered"), b.get("time_entered")):
