@@ -227,12 +227,30 @@ def _trusted_trade_origin(payload: Dict[str, Any], origin: Optional[str], dealRe
     return None
 
 
-def _has_trusted_tradingview_provenance(trade: Dict[str, Any]) -> bool:
-    """Return True when a row is structurally tied to the trusted TradingView path."""
+def _derive_trusted_origin_from_trade(trade: Dict[str, Any]) -> Optional[str]:
+    """Best-effort backfill of trusted TradingView provenance for existing rows."""
     trusted = _canonical_trade_source(trade.get("trusted_origin") or trade.get("trustedOrigin"))
     if trusted in ("tradingview", "hedge"):
-        return True
-    return trade.get("dealReference") not in (None, "")
+        return "tradingview"
+    if not _is_tradingview_origin_trade(trade):
+        return None
+    notes = str(trade.get("notes") or "")
+    notes_lower = notes.lower()
+    deal_reference = trade.get("dealReference")
+    if (
+        deal_reference not in (None, "")
+        and f"dealreference={deal_reference}".lower() in notes_lower
+        and "timeframe=" in notes_lower
+    ):
+        return "tradingview"
+    if notes.startswith("Imported from webhook"):
+        return "tradingview"
+    return None
+
+
+def _has_trusted_tradingview_provenance(trade: Dict[str, Any]) -> bool:
+    """Return True when a row is structurally tied to the trusted TradingView path."""
+    return _derive_trusted_origin_from_trade(trade) == "tradingview"
 
 
 # ---------------------------------------------------------------------------
@@ -383,22 +401,18 @@ def _confirm_trade_missing_from_broker(trade: Dict[str, Any]) -> bool:
         body = response.json() or {}
     except Exception:
         body = {}
+    error_code = str(body.get("errorCode") or "").strip().lower()
+    if error_code == "position_not_found":
+        return True
     text_parts = [
         getattr(response, "text", "") or "",
-        str(body.get("errorCode") or ""),
-        str(body.get("error") or ""),
         str(body.get("message") or ""),
         str(body.get("details") or ""),
     ]
     err_text = " ".join(text_parts).strip().lower()
     not_found_markers = (
-        "not found",
-        "unknown",
-        "does not exist",
-        "no position",
-        "position not",
-        "invalid deal",
-        "invalid position",
+        "position not found",
+        "no position found",
     )
     return bool(err_text and any(marker in err_text for marker in not_found_markers))
 
@@ -976,8 +990,14 @@ def canonicalize_trade_log(path: str = LOG_PATH) -> List[Dict[str, Any]]:
     """Persistently collapse obvious duplicate rows in the canonical log file."""
     with _trade_log_lock:
         trades = load_raw_log(path)
-        deduped, changed = dedupe_trade_log_entries(trades)
-        if changed:
+        trusted_changed = False
+        for trade in trades:
+            trusted_origin = _derive_trusted_origin_from_trade(trade)
+            if trusted_origin and trade.get("trusted_origin") != trusted_origin:
+                trade["trusted_origin"] = trusted_origin
+                trusted_changed = True
+        deduped, dedupe_changed = dedupe_trade_log_entries(trades)
+        if trusted_changed or dedupe_changed:
             save_raw_log(deduped, path)
             return deduped
         return trades

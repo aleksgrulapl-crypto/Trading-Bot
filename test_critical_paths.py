@@ -1599,6 +1599,7 @@ class TestDeleteTradeLogEntry:
                 "ticker": "AMZN",
                 "status": "OPEN",
                 "trade_source": "tradingview",
+                "notes": "sl=1; tp=2; timeframe=1h; dealReference=REF-PHANTOM1",
             }], f)
 
         class _Resp:
@@ -1629,6 +1630,7 @@ class TestDeleteTradeLogEntry:
                 "ticker": "AMZN",
                 "status": "OPEN",
                 "trade_source": "tradingview",
+                "notes": "sl=1; tp=2; timeframe=1h; dealReference=REF-LIVE1",
             }], f)
 
         class _Resp:
@@ -1658,6 +1660,7 @@ class TestDeleteTradeLogEntry:
                 "ticker": "MSFT",
                 "status": "OPEN",
                 "trade_source": "tradingview",
+                "notes": "sl=1; tp=2; timeframe=1h; dealReference=REF-PHANTOM400",
             }], f)
 
         class _Resp:
@@ -2452,7 +2455,7 @@ class TestDashboardDeleteTradeEndpoint:
         monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
         monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
             {"dealId": "OPEN1", "ticker": "AAPL", "status": "OPEN", "trade_source": "trader", "pnl_gbp": None},
-            {"dealId": "PHANTOM1", "dealReference": "REF-PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "pnl_gbp": None},
+            {"dealId": "PHANTOM1", "dealReference": "REF-PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "notes": "sl=1; tp=2; timeframe=1h; dealReference=REF-PHANTOM1", "pnl_gbp": None},
             {"dealId": "CLOSED1", "ticker": "NVDA", "status": "CLOSED", "time_exited": "2026-09-09T12:00:00Z", "pnl_gbp": 5.0},
         ])
 
@@ -2480,7 +2483,7 @@ class TestDashboardDeleteTradeEndpoint:
         monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
         monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
         monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
-            {"dealId": "PHANTOM1", "dealReference": "REF-PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "pnl_gbp": None},
+            {"dealId": "PHANTOM1", "dealReference": "REF-PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "notes": "sl=1; tp=2; timeframe=1h; dealReference=REF-PHANTOM1", "pnl_gbp": None},
         ])
 
         app = Flask(__name__)
@@ -2514,7 +2517,7 @@ class TestDashboardDeleteTradeEndpoint:
         monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
         monkeypatch.setattr(dashboard, "reconcile_with_positions", lambda positions: {"closed": [], "added": [], "reopened": []})
         monkeypatch.setattr(dashboard, "load_raw_log", lambda: [
-            {"dealId": "PHANTOM1", "dealReference": "REF-PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "pnl_gbp": None},
+            {"dealId": "PHANTOM1", "dealReference": "REF-PHANTOM1", "ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "notes": "sl=1; tp=2; timeframe=1h; dealReference=REF-PHANTOM1", "pnl_gbp": None},
         ])
 
         app = Flask(__name__)
