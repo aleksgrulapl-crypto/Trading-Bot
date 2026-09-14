@@ -26,7 +26,7 @@ def test_trailing_sl_updates_long_position(monkeypatch):
 
     assert len(calls) == 1
     assert calls[0][0] == "D1"
-    assert calls[0][1] == 100.3
+    assert calls[0][1] == 100.4
 
 
 def test_trailing_sl_supports_whole_percent_inputs(monkeypatch):
@@ -42,7 +42,23 @@ def test_trailing_sl_supports_whole_percent_inputs(monkeypatch):
     trail_sl.run_trailing_sl()
 
     assert len(calls) == 1
-    assert calls[0][1] == 99.4
+    assert calls[0][1] == 99.2
+
+
+def test_trailing_sl_tightens_further_as_profit_grows(monkeypatch):
+    pos = _mock_position(current_price=104.0, stopLevel=101.0)
+    monkeypatch.setattr(trail_sl.session, "get_positions", lambda: [{"position": {}, "market": {}}])
+    monkeypatch.setattr(trail_sl.session, "enrich_positions", lambda _: [pos])
+    monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_PERC", 0.005)
+    monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.60)
+
+    calls = []
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl: calls.append((deal_id, sl)) or True)
+
+    trail_sl.run_trailing_sl()
+
+    assert len(calls) == 1
+    assert calls[0][1] == 103.6
 
 
 def test_trailing_sl_skips_unknown_direction(monkeypatch):
