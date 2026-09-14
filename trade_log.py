@@ -551,6 +551,80 @@ def _find_open_trade_for_dealid_rebind(
     return candidates[0]
 
 
+def _merge_lingering_open_duplicate(
+    trades: List[Dict[str, Any]],
+    canonical: Dict[str, Any],
+    duplicate: Dict[str, Any],
+) -> bool:
+    """Merge a stray duplicate OPEN row into the canonical broker row."""
+    if not canonical or not duplicate or canonical is duplicate:
+        return False
+
+    changed = False
+
+    for key in ("dealReference", "ticker", "side"):
+        if canonical.get(key) in (None, "") and duplicate.get(key) not in (None, ""):
+            canonical[key] = duplicate.get(key)
+            changed = True
+
+    earliest_entered = _select_timestamp([canonical, duplicate], "time_entered", pick_latest=False)
+    if earliest_entered and canonical.get("time_entered") != earliest_entered:
+        canonical["time_entered"] = earliest_entered
+        canonical["time_entered_human"] = _humanize(earliest_entered)
+        changed = True
+
+    if canonical.get("trade_source") in (None, "", "unknown") and duplicate.get("trade_source") not in (None, "", "unknown"):
+        canonical["trade_source"] = duplicate.get("trade_source")
+        changed = True
+    if canonical.get("origin") in (None, "", "unknown") and duplicate.get("origin") not in (None, "", "unknown"):
+        canonical["origin"] = duplicate.get("origin")
+        changed = True
+
+    notes_parts: List[str] = []
+    seen_notes = set()
+    for entry in (canonical, duplicate):
+        note = str(entry.get("notes") or "").strip()
+        if note and note not in seen_notes:
+            seen_notes.add(note)
+            notes_parts.append(note)
+    if notes_parts:
+        merged_notes = " | ".join(notes_parts)
+        if canonical.get("notes") != merged_notes:
+            canonical["notes"] = merged_notes
+            changed = True
+
+    try:
+        trades.remove(duplicate)
+        changed = True
+    except ValueError:
+        pass
+
+    return changed
+
+
+def _collapse_lingering_tradingview_duplicate(
+    trades: List[Dict[str, Any]],
+    canonical: Dict[str, Any],
+    ticker: Any,
+    side: Optional[str],
+    dealId: Any,
+    dealReference: Any,
+    entry_price: Any,
+    size: Any,
+    time_entered: Any,
+) -> bool:
+    """Remove a leftover TradingView OPEN row once a broker row already exists."""
+    if dealId in (None, "") or not canonical:
+        return False
+
+    duplicate = _find_open_trade_for_dealid_rebind(
+        trades, ticker, side, dealId, dealReference, entry_price, size, time_entered
+    )
+    if duplicate is None:
+        return False
+    return _merge_lingering_open_duplicate(trades, canonical, duplicate)
+
+
 def _should_replace_existing_dealid(existing: Dict[str, Any], dealId: Any,
                                     dealReference: Any, matched_via_dealid_rebind: bool) -> bool:
     if dealId in (None, ""):
@@ -948,6 +1022,10 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
             elif origin and not existing.get("origin"):
                 existing["origin"] = origin
                 updated = True
+            if _collapse_lingering_tradingview_duplicate(
+                trades, existing, ticker_candidates, side, dealId, dealReference, entry_val, size_val, time_entered
+            ):
+                updated = True
             if updated:
                 existing["time_entered_human"] = _humanize(existing.get("time_entered"))
                 save_raw_log(trades, path)
@@ -1269,6 +1347,10 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                         matched["entry_price"] = float(entry_price); changed = True
                 except Exception:
                     pass
+                if _collapse_lingering_tradingview_duplicate(
+                    trades, matched, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered
+                ):
+                    changed = True
                 if changed:
                     existing_signatures.add(_make_signature(matched.get("dealId"), matched.get("dealReference"), matched.get("ticker"), matched.get("entry_price")))
                     matched_updates.append(matched)

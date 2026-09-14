@@ -474,6 +474,113 @@ class TestReconcileWithPositions:
         assert trades[0]["size"] == pytest.approx(0.10)
         assert trades[0]["trade_source"] == "tradingview"
 
+    def test_reconcile_removes_lingering_tradingview_duplicate_when_broker_row_already_exists(self, tmp_path):
+        from trade_log import reconcile_with_positions, load_raw_log, save_raw_log
+        path = str(tmp_path / "log.json")
+        save_raw_log([
+            {
+                "dealId": "D-REAL-UNH-2",
+                "dealReference": None,
+                "ticker": "UNH",
+                "side": "short",
+                "size": 0.5,
+                "entry_price": 378.75,
+                "time_entered": "2026-09-14T12:21:15Z",
+                "status": "OPEN",
+                "trade_source": "trader",
+                "origin": "trader",
+                "notes": "Imported from live positions",
+            },
+            {
+                "dealId": "TV-LOCAL-UNH-2",
+                "dealReference": None,
+                "ticker": "UNH",
+                "side": "short",
+                "size": 0.56,
+                "entry_price": 378.75,
+                "time_entered": "2026-09-14T12:15:45Z",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+                "origin": "tradingview",
+                "notes": "Imported from webhook (tradingview)",
+            },
+        ], path=path)
+
+        result = reconcile_with_positions(
+            [{
+                "dealId": "D-REAL-UNH-2",
+                "dealReference": None,
+                "ticker": "UNH",
+                "side": "sell",
+                "size": 0.5,
+                "entry_price": 378.75,
+                "time_entered": "2026-09-14T12:21:15Z",
+            }],
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert not result["added"]
+        assert trades[0]["dealId"] == "D-REAL-UNH-2"
+        assert trades[0]["trade_source"] == "trader"
+        assert trades[0]["time_entered"] == "2026-09-14T12:15:45Z"
+        assert "Imported from live positions" in (trades[0].get("notes") or "")
+        assert "Imported from webhook (tradingview)" in (trades[0].get("notes") or "")
+
+    def test_broker_upsert_removes_lingering_tradingview_duplicate_when_broker_row_already_exists(self, tmp_path):
+        from trade_log import upsert_open_trade, load_raw_log, save_raw_log
+        path = str(tmp_path / "log.json")
+        save_raw_log([
+            {
+                "dealId": "D-REAL-AMZN-2",
+                "dealReference": None,
+                "ticker": "AMZN",
+                "side": "long",
+                "size": 1.3,
+                "entry_price": 255.65,
+                "time_entered": "2026-09-14T12:21:15Z",
+                "status": "OPEN",
+                "trade_source": "trader",
+                "origin": "trader",
+                "notes": "Imported from live positions",
+            },
+            {
+                "dealId": None,
+                "dealReference": None,
+                "ticker": "AMZN",
+                "side": "long",
+                "size": 1.33,
+                "entry_price": 255.65,
+                "time_entered": "2026-09-14T12:15:20Z",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+                "origin": "tradingview",
+                "notes": "Imported from webhook (tradingview)",
+            },
+        ], path=path)
+
+        upsert_open_trade(
+            {
+                "dealId": "D-REAL-AMZN-2",
+                "dealReference": None,
+                "ticker": "AMZN",
+                "side": "buy",
+                "size": 1.3,
+                "entry_price": 255.65,
+                "time_entered": "2026-09-14T12:21:15Z",
+            },
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert trades[0]["dealId"] == "D-REAL-AMZN-2"
+        assert trades[0]["trade_source"] == "trader"
+        assert trades[0]["time_entered"] == "2026-09-14T12:15:20Z"
+        assert "Imported from live positions" in (trades[0].get("notes") or "")
+        assert "Imported from webhook (tradingview)" in (trades[0].get("notes") or "")
+
     def test_real_dealid_replaces_dealreference_placeholder_before_false_close(self, tmp_path):
         """Regression for the ORCL phantom close: an early raw broker payload may
         have only dealReference, but once the real dealId arrives it must replace
