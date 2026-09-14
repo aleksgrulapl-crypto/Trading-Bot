@@ -1009,11 +1009,6 @@ def _is_probable_duplicate_trade(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     if side_a and side_b and side_a != side_b:
         return False
 
-    ticker_a = a.get("ticker")
-    ticker_b = b.get("ticker")
-    if ticker_a not in (None, "") and ticker_b not in (None, "") and not _ticker_aliases_overlap(ticker_a, ticker_b):
-        return False
-
     if not _trade_entry_matches(a.get("entry_price"), b.get("entry_price")):
         return False
 
