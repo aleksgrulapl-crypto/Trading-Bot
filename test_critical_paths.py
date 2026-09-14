@@ -1677,6 +1677,36 @@ class TestDeleteTradeLogEntry:
         assert deleted["dealId"] == "PHANTOM400"
         assert trades == []
 
+    def test_deletes_open_tradingview_trade_with_trusted_origin_marker(self, tmp_path, monkeypatch):
+        from trade_log import delete_trade_log_entry, load_raw_log
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([{
+                "dealId": "PHANTOM-TRUSTED",
+                "ticker": "META",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+                "trusted_origin": "tradingview",
+            }], f)
+
+        class _Resp:
+            status_code = 404
+            text = ""
+
+            def json(self):
+                return {}
+
+        monkeypatch.setattr("session.request", lambda *_args, **_kwargs: _Resp())
+
+        ok, deleted, status = delete_trade_log_entry(0, path=path)
+        trades = load_raw_log(path)
+
+        assert ok is True
+        assert status == "deleted"
+        assert deleted["dealId"] == "PHANTOM-TRUSTED"
+        assert trades == []
+
 
 # ======================================================================== #
 #  webhook: payload validation                                              #

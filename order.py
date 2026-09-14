@@ -167,7 +167,7 @@ def place_order(
                     "notes": f"sl={sl}; tp={tp}; timeframe={timeframe}; dealReference={deal_ref}",
                 }
                 appended = append_open_trade(trade_payload)
-                logger.debug("Logged broker-confirmed open trade: %s", appended)
+                logger.debug("Logged broker-confirmed open trade for %s via %s", epic, source)
                 # Preserve compatibility with log entries created by an
                 # overlapping reconciliation poll before confirmation arrived.
                 if not appended:

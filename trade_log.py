@@ -227,6 +227,14 @@ def _trusted_trade_origin(payload: Dict[str, Any], origin: Optional[str], dealRe
     return None
 
 
+def _has_trusted_tradingview_provenance(trade: Dict[str, Any]) -> bool:
+    """Return True when a row is structurally tied to the trusted TradingView path."""
+    trusted = _canonical_trade_source(trade.get("trusted_origin") or trade.get("trustedOrigin"))
+    if trusted in ("tradingview", "hedge"):
+        return True
+    return trade.get("dealReference") not in (None, "")
+
+
 # ---------------------------------------------------------------------------
 # Public I/O helpers
 # ---------------------------------------------------------------------------
@@ -333,7 +341,7 @@ def is_trade_delete_candidate(
         return True
     if not _is_tradingview_origin_trade(trade):
         return False
-    if trade.get("trusted_origin") != "tradingview" and trade.get("dealReference") in (None, ""):
+    if not _has_trusted_tradingview_provenance(trade):
         return False
     deal_id = trade.get("dealId")
     if deal_id in (None, ""):
