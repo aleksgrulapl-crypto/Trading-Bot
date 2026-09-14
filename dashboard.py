@@ -180,7 +180,11 @@ def _mark_delete_candidates(trades, live_deal_ids):
     marked = []
     for trade in trades or []:
         copy = dict(trade) if isinstance(trade, dict) else {}
-        copy["can_delete"] = is_trade_delete_candidate(copy, live_deal_ids=live_deal_ids)
+        copy["can_delete"] = is_trade_delete_candidate(
+            copy,
+            live_deal_ids=live_deal_ids,
+            require_live_match_check=True,
+        )
         marked.append(copy)
     return marked
 

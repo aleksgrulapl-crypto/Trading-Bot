@@ -299,13 +299,17 @@ def delete_completed_trade(index: int, path: str = LOG_PATH) -> Tuple[bool, Opti
             return False, None, "not_completed"
 
         deleted = dict(trade)
-        trades.pop(idx)
-        if not save_raw_log(trades, path):
+        remaining = trades[:idx] + trades[idx + 1:]
+        if not save_raw_log(remaining, path):
             return False, None, "save_failed"
         return True, deleted, "deleted"
 
 
-def is_trade_delete_candidate(trade: Dict[str, Any], live_deal_ids: Optional[set] = None) -> bool:
+def is_trade_delete_candidate(
+    trade: Dict[str, Any],
+    live_deal_ids: Optional[set] = None,
+    require_live_match_check: bool = False,
+) -> bool:
     """Return True when *trade* is safe to show a dashboard Delete action for."""
     if not isinstance(trade, dict):
         return False
@@ -318,7 +322,7 @@ def is_trade_delete_candidate(trade: Dict[str, Any], live_deal_ids: Optional[set
     if deal_id in (None, ""):
         return False
     if live_deal_ids is None:
-        return False
+        return not require_live_match_check
     if str(deal_id) in live_deal_ids:
         return False
     return True
@@ -396,8 +400,8 @@ def delete_trade_log_entry(index: int, path: str = LOG_PATH) -> Tuple[bool, Opti
             return False, None, "broker_still_open"
 
         deleted = dict(trade)
-        trades.pop(idx)
-        if not save_raw_log(trades, path):
+        remaining = trades[:idx] + trades[idx + 1:]
+        if not save_raw_log(remaining, path):
             return False, None, "save_failed"
         return True, deleted, "deleted"
 
