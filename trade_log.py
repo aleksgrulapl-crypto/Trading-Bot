@@ -664,6 +664,7 @@ def _find_open_trade_for_dealid_rebind(
 
     candidates: List[Dict[str, Any]] = []
     relaxed_candidates: List[Dict[str, Any]] = []
+    entry_only_candidates: List[Dict[str, Any]] = []
     for t in trades:
         if t.get("status") == "CLOSED":
             continue
@@ -714,6 +715,20 @@ def _find_open_trade_for_dealid_rebind(
             and _has_trusted_tradingview_provenance(t)
         ):
             relaxed_candidates.append(t)
+            continue
+        # Some broker live-position payloads intermittently omit both
+        # dealReference and created/entered time. In that shape we can still
+        # safely rebind a single trusted TradingView row by ticker+side+entry,
+        # even when broker-filled size differs materially from the original
+        # requested size.
+        if (
+            dealReference_norm is None
+            and not time_entered
+            and entry_matches
+            and existing_deal_reference in (None, "")
+            and _has_trusted_tradingview_provenance(t)
+        ):
+            entry_only_candidates.append(t)
 
     if len(candidates) == 1:
         return candidates[0]
@@ -721,6 +736,8 @@ def _find_open_trade_for_dealid_rebind(
         return None
     if len(relaxed_candidates) == 1:
         return relaxed_candidates[0]
+    if len(entry_only_candidates) == 1:
+        return entry_only_candidates[0]
     return None
 
 

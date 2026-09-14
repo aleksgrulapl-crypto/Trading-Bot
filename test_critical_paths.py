@@ -628,6 +628,50 @@ class TestReconcileWithPositions:
         assert trades[0]["trade_source"] == "tradingview"
         assert trades[0]["origin"] == "tradingview"
 
+    def test_live_position_rebinds_trusted_tradingview_row_without_dealreference_when_size_rounded(self, tmp_path):
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {
+                "dealId": "TV-LOCAL-INTC-1",
+                "dealReference": None,
+                "ticker": "INTC",
+                "side": "sell",
+                "size": 10.37,
+                "entry_price": 96.36,
+                "trade_source": "tradingview",
+                "origin": "tradingview",
+                "trusted_origin": "tradingview",
+                "notes": "Imported from webhook (tradingview)",
+            },
+            path=path,
+        )
+
+        result = reconcile_with_positions(
+            [{
+                "dealId": "D-REAL-INTC-1",
+                "dealReference": None,
+                "ticker": "INTC",
+                "side": "sell",
+                "size": 10.0,
+                "entry_price": 96.36,
+                # Simulate the partial broker payload shape that can omit time_entered.
+                "time_entered": None,
+            }],
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert not result["added"]
+        assert trades[0]["dealId"] == "D-REAL-INTC-1"
+        assert trades[0]["trade_source"] == "tradingview"
+        assert trades[0]["origin"] == "tradingview"
+        assert trades[0]["size"] == pytest.approx(10.0)
+
     def test_real_dealid_replaces_dealreference_placeholder_before_false_close(self, tmp_path):
         """Regression for the ORCL phantom close: an early raw broker payload may
         have only dealReference, but once the real dealId arrives it must replace
