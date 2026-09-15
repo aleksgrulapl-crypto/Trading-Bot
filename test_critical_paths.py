@@ -1109,7 +1109,7 @@ class TestReconcileDoesNotPhantomClose:
         assert stx.get("status") == "OPEN", \
             "A trade whose dealId is absent from one snapshot must not be marked CLOSED"
         assert not result["closed"]
-    """Webhook orders must not create a log row before broker confirmation."""
+    """Webhook orders must create a pending row and then enrich with dealId."""
 
     class _Response:
         def __init__(self, status_code, body=None):
@@ -1120,7 +1120,7 @@ class TestReconcileDoesNotPhantomClose:
         def json(self):
             return self._body
 
-    def test_does_not_log_order_when_confirmation_has_no_deal_id(self, monkeypatch):
+    def test_logs_pending_order_when_confirmation_has_no_deal_id(self, monkeypatch):
         import order
 
         appended = []
@@ -1143,7 +1143,9 @@ class TestReconcileDoesNotPhantomClose:
         result = order.place_order("UNH", "buy", 2.05)
 
         assert result["dealId"] is None
-        assert appended == []
+        assert len(appended) == 1
+        assert appended[0]["dealReference"] == "REF-1"
+        assert appended[0]["dealId"] is None
 
     def test_logs_order_with_confirmed_deal_id(self, monkeypatch):
         import order
@@ -1167,9 +1169,11 @@ class TestReconcileDoesNotPhantomClose:
 
         order.place_order("UNH", "buy", 2.05)
 
-        assert len(appended) == 1
-        assert appended[0]["dealId"] == "DEAL-1"
+        assert len(appended) == 2
+        assert appended[0]["dealId"] is None
         assert appended[0]["dealReference"] == "REF-1"
+        assert appended[1]["dealId"] == "DEAL-1"
+        assert appended[1]["dealReference"] == "REF-1"
 
 
 class TestSyncClosedTradesDisappearanceGuard:
@@ -2241,6 +2245,69 @@ class TestWebhookProcessing:
 
         assert result["action"] == "upserted"
         assert captured["payload"]["dealId"] is None
+
+    def test_broker_open_payload_infers_existing_hedge_source(self, monkeypatch):
+        import webhook
+
+        captured = {}
+        monkeypatch.setattr(
+            webhook,
+            "load_raw_log",
+            lambda: [{
+                "dealId": None,
+                "dealReference": "REF-HEDGE-1",
+                "ticker": "INTC",
+                "side": "short",
+                "status": "OPEN",
+                "trade_source": "hedge",
+            }],
+        )
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda method, url, **kwargs: type(
+                "Resp",
+                (),
+                {"status_code": 200, "json": lambda self: {"position": {"dealId": "D-HEDGE-1"}}},
+            )(),
+        )
+        monkeypatch.setattr(webhook, "upsert_open_trade", lambda payload: captured.setdefault("payload", payload) or payload)
+
+        result = webhook.process_webhook_payload({
+            "position": {
+                "dealId": "D-HEDGE-1",
+                "dealReference": "REF-HEDGE-1",
+                "direction": "SELL",
+                "size": 1.0,
+                "level": 99.5,
+            },
+            "market": {"epic": "INTC", "symbol": "Intel"},
+        })
+
+        assert result["action"] == "upserted"
+        assert captured["payload"]["trade_source"] == "hedge"
+
+    def test_trade_lock_windows_support_half_hour_ranges(self, monkeypatch):
+        import webhook
+
+        monkeypatch.setattr(webhook, "TRADE_LOCK_ENABLED", True)
+        monkeypatch.setattr(webhook.config, "TRADE_LOCK_WINDOWS", [(8 * 60, 9 * 60 + 30), (13 * 60, 15 * 60)])
+
+        class _FakeDateTime:
+            @staticmethod
+            def now(_tz):
+                return type("T", (), {"hour": 9, "minute": 15})()
+
+        monkeypatch.setattr(webhook, "datetime", _FakeDateTime)
+        assert webhook._is_trade_locked_now() is True
+
+        class _FakeDateTime2:
+            @staticmethod
+            def now(_tz):
+                return type("T", (), {"hour": 10, "minute": 0})()
+
+        monkeypatch.setattr(webhook, "datetime", _FakeDateTime2)
+        assert webhook._is_trade_locked_now() is False
 
     def test_same_ticker_signal_can_scale_in_when_capacity_remains(self, monkeypatch):
         import webhook
