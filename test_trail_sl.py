@@ -17,6 +17,7 @@ def test_trailing_sl_updates_long_position(monkeypatch):
     monkeypatch.setattr(trail_sl.session, "get_positions", lambda: [{"position": {}, "market": {}}])
     monkeypatch.setattr(trail_sl.session, "enrich_positions", lambda _: [_mock_position()])
     monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_PERC", 0.005)
+    monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_TP_FRACTION", 0)
     monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.30)
 
     calls = []
@@ -34,6 +35,7 @@ def test_trailing_sl_supports_whole_percent_inputs(monkeypatch):
     monkeypatch.setattr(trail_sl.session, "get_positions", lambda: [{"position": {}, "market": {}}])
     monkeypatch.setattr(trail_sl.session, "enrich_positions", lambda _: [pos])
     monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_PERC", 1)   # 1%
+    monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_TP_FRACTION", 0)
     monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 30)          # 30%
 
     calls = []
@@ -50,6 +52,7 @@ def test_trailing_sl_tightens_further_as_profit_grows(monkeypatch):
     monkeypatch.setattr(trail_sl.session, "get_positions", lambda: [{"position": {}, "market": {}}])
     monkeypatch.setattr(trail_sl.session, "enrich_positions", lambda _: [pos])
     monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_PERC", 0.005)
+    monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_TP_FRACTION", 0)
     monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.60)
 
     calls = []
