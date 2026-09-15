@@ -85,6 +85,58 @@ def _effective_trail_percent(profit_perc: float, activation_perc: float, base_tr
     return min(max_trail_perc, base_trail_perc_f + (0.10 * tighten_steps))
 
 
+def _extract_tp_level(position: dict, side: str) -> Optional[float]:
+    candidates = (
+        position.get("profitLevel"),
+        position.get("profit_level"),
+        position.get("tp"),
+        position.get("takeProfit"),
+    )
+    for candidate in candidates:
+        try:
+            value = float(candidate)
+            if value <= 0:
+                continue
+            if side == "long" and value > 0:
+                return value
+            if side == "short" and value > 0:
+                return value
+        except Exception:
+            continue
+    return None
+
+
+def _activation_threshold_perc(position: dict, side: str, entry_price: float) -> float:
+    default_activation = _normalize_percent(
+        getattr(config, "TRAIL_ACTIVATION_PERC", TRAIL_ACTIVATION_PERC),
+        TRAIL_ACTIVATION_PERC,
+    )
+    if entry_price <= 0:
+        return default_activation
+
+    activation_tp_fraction = _normalize_percent(
+        getattr(config, "TRAIL_ACTIVATION_TP_FRACTION", 0.25),
+        0.25,
+    )
+    if activation_tp_fraction <= 0:
+        return default_activation
+
+    tp_level = _extract_tp_level(position, side)
+    if tp_level is None:
+        leverage = float(getattr(config, "LEVERAGE", 1) or 1)
+        if leverage <= 0:
+            leverage = 1.0
+        tp_equity_perc = _normalize_percent(getattr(config, "FIXED_TP_PERC", 0.40), 0.40)
+        tp_move_perc = tp_equity_perc / leverage
+    else:
+        tp_move_perc = abs(tp_level - entry_price) / entry_price
+
+    if tp_move_perc <= 0:
+        return default_activation
+
+    return max(default_activation, tp_move_perc * activation_tp_fraction)
+
+
 def _update_stop_level(deal_id: str, new_sl: float) -> bool:
     """
     Update stopLevel for a single position on Capital.com.
@@ -163,7 +215,7 @@ def run_trailing_sl() -> None:
         profit_perc = profit / entry_price_f if entry_price_f != 0 else 0.0
 
         # Activation threshold
-        activation_perc = _normalize_percent(getattr(config, "TRAIL_ACTIVATION_PERC", TRAIL_ACTIVATION_PERC), TRAIL_ACTIVATION_PERC)
+        activation_perc = _activation_threshold_perc(p, side, entry_price_f)
         if profit_perc < activation_perc:
             continue
 

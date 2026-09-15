@@ -121,6 +121,27 @@ def place_order(
     # Map dealReference -> dealId via confirms endpoint
     real_deal_id = None
     if deal_ref:
+        source = str(trade_source or "tradingview").strip().lower()
+        ts = uk_timestamp()
+        pending_payload = {
+            "dealId": None,
+            "dealReference": deal_ref,
+            "ticker": epic,
+            "epic": epic,
+            "side": "Long" if dir_norm == "BUY" else "Short",
+            "size": float(size),
+            "entry_price": float(entry_price),
+            "time_entered": ts,
+            "trade_source": source,
+            "origin": source,
+            "notes": f"sl={sl}; tp={tp}; timeframe={timeframe}; dealReference={deal_ref}",
+        }
+        try:
+            append_open_trade(pending_payload)
+            logger.debug("Logged pending open trade for %s via %s (dealReference=%s)", epic, source, deal_ref)
+        except Exception:
+            logger.exception("Failed to log pending open trade for dealReference=%s", deal_ref)
+
         confirms_url = f"{API_BASE}/api/v1/confirms/{deal_ref}"
         backoff = 0.2
         for attempt in range(10):
@@ -151,8 +172,6 @@ def place_order(
         if real_deal_id:
             logger.info("Mapped dealReference -> dealId: %s", real_deal_id)
             try:
-                ts = uk_timestamp()
-                source = str(trade_source or "tradingview").strip().lower()
                 trade_payload = {
                     "dealId": real_deal_id,
                     "dealReference": deal_ref,

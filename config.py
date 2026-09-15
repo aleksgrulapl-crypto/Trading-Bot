@@ -4,6 +4,7 @@
 # ============================
 
 import os
+from typing import List, Tuple
 
 # Base API
 API_BASE = os.getenv("API_BASE", "https://api-capital.backend-capital.com")
@@ -45,14 +46,14 @@ MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 1250))
 
 # SL/TP expressed as a percentage of the EQUITY USED for the trade (not the
 # leveraged exposure/full account balance), so risk is predictable regardless
-# of leverage. E.g. with MAX_EQUITY_PER_TRADE=£250: FIXED_SL_PERC=0.20 (20%)
-# caps the loss at £50 (20% of the £250 equity used) and FIXED_TP_PERC=0.40
+# of leverage. E.g. with MAX_EQUITY_PER_TRADE=£250: FIXED_SL_PERC=0.10 (10%)
+# caps the loss at £25 (10% of the £250 equity used) and FIXED_TP_PERC=0.40
 # (40%) caps the gain at £100 (40% of the £250 equity used). sl_tp.FixedSLTP
 # converts these equity-based percentages into the actual price-move
 # percentage by dividing by LEVERAGE (since exposure = equity_used *
 # LEVERAGE, a price move of equity_perc/LEVERAGE yields exactly
 # equity_perc * equity_used in £ terms).
-FIXED_SL_PERC = float(os.getenv("FIXED_SL_PERC", 0.20))
+FIXED_SL_PERC = float(os.getenv("FIXED_SL_PERC", 0.10))
 FIXED_TP_PERC = float(os.getenv("FIXED_TP_PERC", 0.40))
 
 # FX conversion (USD -> GBP)
@@ -100,6 +101,41 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/London")
 TRADE_LOCK_ENABLED = os.getenv("TRADE_LOCK_ENABLED", "True").lower() in ("1", "true", "yes")
 TRADE_LOCK_START_HOUR = int(os.getenv("TRADE_LOCK_START_HOUR", 14))
 TRADE_LOCK_END_HOUR = int(os.getenv("TRADE_LOCK_END_HOUR", 15))
+TRADE_LOCK_WINDOWS_RAW = os.getenv("TRADE_LOCK_WINDOWS", "08:00-09:30,13:00-15:00")
+
+
+def _parse_trade_lock_windows(raw: str) -> List[Tuple[int, int]]:
+    windows: List[Tuple[int, int]] = []
+    if not raw:
+        return windows
+    for segment in str(raw).split(","):
+        chunk = segment.strip()
+        if not chunk or "-" not in chunk:
+            continue
+        start_raw, end_raw = chunk.split("-", 1)
+
+        def _to_minutes(part: str) -> int:
+            text = str(part).strip()
+            if ":" in text:
+                hh, mm = text.split(":", 1)
+                return (int(hh) * 60) + int(mm)
+            return int(text) * 60
+
+        try:
+            start_m = _to_minutes(start_raw)
+            end_m = _to_minutes(end_raw)
+        except Exception:
+            continue
+
+        start_m = max(0, min(24 * 60, start_m))
+        end_m = max(0, min(24 * 60, end_m))
+        if start_m == end_m:
+            continue
+        windows.append((start_m, end_m))
+    return windows
+
+
+TRADE_LOCK_WINDOWS = _parse_trade_lock_windows(TRADE_LOCK_WINDOWS_RAW)
 
 # Guard against auto-closing a trade moments after it was opened: a
 # freshly-created broker position can transiently fail to appear in the
@@ -163,5 +199,6 @@ EPIC_MAP = {
 }
 
 # Trailing stop defaults
-TRAIL_ACTIVATION_PERC = float(os.getenv("TRAIL_ACTIVATION_PERC", 0.005))
-TRAIL_SL_PERC = float(os.getenv("TRAIL_SL_PERC", 0.60))
+TRAIL_ACTIVATION_PERC = float(os.getenv("TRAIL_ACTIVATION_PERC", 0.02))
+TRAIL_ACTIVATION_TP_FRACTION = float(os.getenv("TRAIL_ACTIVATION_TP_FRACTION", 0.25))
+TRAIL_SL_PERC = float(os.getenv("TRAIL_SL_PERC", 0.50))

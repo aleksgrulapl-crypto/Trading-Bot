@@ -24,6 +24,7 @@ from flask import Flask, request, jsonify, render_template, redirect
 
 import pytz
 
+import config
 import session
 from sizing import calculate_size
 from order import place_order
@@ -39,6 +40,7 @@ from config import (
     TRADE_LOCK_ENABLED,
     TRADE_LOCK_START_HOUR,
     TRADE_LOCK_END_HOUR,
+    TRADE_LOCK_WINDOWS,
     HEDGING_ENABLED,
 )
 from scheduler import start_scheduler
@@ -68,12 +70,33 @@ def _is_trade_locked_now() -> bool:
     """
     if not TRADE_LOCK_ENABLED:
         return False
-    hour = datetime.now(_UK_TZ).hour
-    start, end = TRADE_LOCK_START_HOUR, TRADE_LOCK_END_HOUR
-    if start <= end:
-        return start <= hour < end
-    # Wrap-around window (e.g. start=23, end=1)
-    return hour >= start or hour < end
+    now = datetime.now(_UK_TZ)
+    now_minutes = now.hour * 60 + now.minute
+    windows = list(getattr(config, "TRADE_LOCK_WINDOWS", TRADE_LOCK_WINDOWS) or [])
+    if not windows:
+        start, end = TRADE_LOCK_START_HOUR * 60, TRADE_LOCK_END_HOUR * 60
+        windows = [(start, end)]
+    for start, end in windows:
+        if start <= end:
+            if start <= now_minutes < end:
+                return True
+        else:
+            # Wrap-around window (e.g. 23:00-01:00)
+            if now_minutes >= start or now_minutes < end:
+                return True
+    return False
+
+
+def _trade_lock_windows_label() -> str:
+    windows = list(getattr(config, "TRADE_LOCK_WINDOWS", TRADE_LOCK_WINDOWS) or [])
+    if not windows:
+        windows = [(TRADE_LOCK_START_HOUR * 60, TRADE_LOCK_END_HOUR * 60)]
+
+    def _fmt(total_minutes: int) -> str:
+        total = int(total_minutes) % (24 * 60)
+        return f"{total // 60:02d}:{total % 60:02d}"
+
+    return ", ".join(f"{_fmt(start)}-{_fmt(end)}" for start, end in windows)
 
 # In-memory cache of recently processed TradingView alerts, keyed by a
 # signature of the alert content. Used to guard against TradingView
@@ -347,10 +370,50 @@ def _normalize_source(payload: Dict[str, Any], dealId: Optional[str], dealRefere
     if payload.get("manual") is True:
         return "trader"
     if dealId is not None or dealReference is not None:
-        return "trader"
+        return "unknown"
     if side in ("long", "short"):
-        return "trader"
+        return "unknown"
     return "unknown"
+
+
+def _infer_source_from_open_log(dealId: Optional[str], dealReference: Optional[str], ticker: Optional[str], side: Optional[str]) -> Optional[str]:
+    try:
+        trades = load_raw_log()
+    except Exception:
+        return None
+
+    ticker_norm = str(ticker).strip().lower() if ticker not in (None, "") else None
+    side_norm = _normalize_side(side)
+    candidates = []
+    for trade in trades:
+        if str(trade.get("status") or "").upper() != "OPEN":
+            continue
+        if dealId not in (None, "") and str(trade.get("dealId") or "") == str(dealId):
+            candidates.append(trade)
+            continue
+        if dealReference not in (None, "") and str(trade.get("dealReference") or "") == str(dealReference):
+            candidates.append(trade)
+            continue
+        if ticker_norm:
+            existing_ticker = trade.get("ticker") or trade.get("epic")
+            if existing_ticker and str(existing_ticker).strip().lower() == ticker_norm:
+                existing_side = _normalize_side(trade.get("side"))
+                if side_norm in ("long", "short") and existing_side and existing_side != side_norm:
+                    continue
+                candidates.append(trade)
+
+    if len(candidates) != 1:
+        return None
+    trade = candidates[0]
+    source = trade.get("trade_source") or trade.get("origin") or trade.get("source") or trade.get("trade_type")
+    source_norm = str(source).strip().lower() if source not in (None, "") else ""
+    if source_norm in ("tradingview", "webhook", "bot"):
+        return "tradingview"
+    if source_norm in ("hedge",):
+        return "hedge"
+    if source_norm in ("manual", "trader", "broker"):
+        return "trader"
+    return None
 
 
 def _is_broker_position_event(payload: Any) -> bool:
@@ -499,6 +562,10 @@ def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str,
     time_entered = pos.get("createdDate") or pos.get("createdDateUTC") or payload.get("time_entered")
     time_exited = payload.get("closedDate") or payload.get("time_exited") or payload.get("timestamp")
     source = _normalize_source(payload, dealId, dealReference, side)
+    if source == "unknown":
+        inferred = _infer_source_from_open_log(dealId, dealReference, ticker, side)
+        if inferred:
+            source = inferred
 
     logger.debug("%sExtracted fields: dealId=%s ticker=%s side=%s size=%s entry=%s exit=%s",
                  log_prefix, dealId, ticker, side, size, entry_price, exit_price)
@@ -629,8 +696,7 @@ def webhook():
         return _ok_response({"status": "blocked", "reason": alert.get("reason"), "cid": cid})
 
     if _is_trade_locked_now():
-        logger.info("[cid=%s] New trade blocked by trade time lock (%02d:00-%02d:00 UK time)",
-                    cid, TRADE_LOCK_START_HOUR, TRADE_LOCK_END_HOUR)
+        logger.info("[cid=%s] New trade blocked by trade time lock (%s UK time)", cid, _trade_lock_windows_label())
         return _ok_response({"status": "blocked", "reason": "trade_time_lock", "cid": cid})
 
     symbol = alert.get("symbol")
