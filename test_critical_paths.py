@@ -323,6 +323,39 @@ class TestReconcileWithPositions:
         assert len(trades) == 1
         assert trades[0]["status"] == "CLOSED"
 
+    def test_live_position_replaces_dealreference_placeholder_without_duplicate(self, tmp_path):
+        from trade_log import load_raw_log, reconcile_with_positions, save_raw_log
+        path = str(tmp_path / "log.json")
+        save_raw_log([{
+            "dealId": "REF-PLACEHOLDER",
+            "dealReference": "REF-PLACEHOLDER",
+            "ticker": "NVDA",
+            "side": "long",
+            "size": 0.59,
+            "entry_price": 219.08,
+            "time_entered": "2026-09-22T10:00:00+01:00",
+            "status": "OPEN",
+            "trade_source": "tradingview",
+            "origin": "tradingview",
+            "notes": "sl=210; tp=230; timeframe=1h; dealReference=REF-PLACEHOLDER",
+        }], path=path)
+
+        result = reconcile_with_positions([{
+            "dealId": "DEAL-NVDA-REAL",
+            "ticker": "NVDA",
+            "side": "buy",
+            "size": 0.5,
+            "entry_price": 219.42,
+            "time_entered": "2026-09-22T10:00:04+01:00",
+        }], path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert not result["added"]
+        assert trades[0]["dealId"] == "DEAL-NVDA-REAL"
+        assert trades[0]["dealReference"] == "REF-PLACEHOLDER"
+        assert trades[0]["trade_source"] == "tradingview"
+
     def test_live_position_with_distinct_dealid_creates_second_open_trade(self, tmp_path):
         """Distinct broker dealIds for the same ticker/side must remain distinct
         open trades so scale-ins do not overwrite the first row."""
@@ -2599,6 +2632,28 @@ class TestDashboardDedupe:
         assert any(t["status"] == "OPEN" and t["trade_type"] == "Trader" for t in ctx["combined_trades"])
         assert any(t["status"] == "CLOSED" and t["trade_type"] == "TradingView" for t in ctx["combined_trades"])
         assert ctx["analytics"]["trade_count"] == 1
+
+    def test_dashboard_header_has_live_uk_clock_and_single_trade_log(self, monkeypatch):
+        from flask import Flask
+        import dashboard
+
+        monkeypatch.setattr(dashboard, "_build_request_context", lambda: {
+            "account": {"equity": 1000, "balance": 900, "pnl": 100, "available": 800},
+            "positions": [],
+            "combined_trades": [],
+            "analytics": dashboard._safe_analytics({}),
+        })
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard.dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+
+        html = client.get("/dashboard").get_data(as_text=True)
+
+        assert 'id="uk-clock-value"' in html
+        assert "Europe/London" in html
+        assert html.count(">Trade Log<") == 1
 
 
 class TestComputeAnalytics:

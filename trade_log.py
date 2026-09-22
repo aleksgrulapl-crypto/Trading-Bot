@@ -578,7 +578,11 @@ def _find_pending_trade_by_ticker(trades: List[Dict[str, Any]], ticker: Any,
         return None
     candidates = [
         t for t in trades
-        if t.get("status") != "CLOSED" and not t.get("dealId")
+        if t.get("status") != "CLOSED"
+        and (
+            not t.get("dealId")
+            or _dealid_is_placeholder(t.get("dealId"), t.get("dealReference"))
+        )
         and _ticker_aliases(t.get("ticker")).intersection(ticker_aliases)
     ]
     if side:
@@ -859,6 +863,8 @@ def _collapse_lingering_tradingview_duplicate(
         duplicate = candidate
         break
 
+    if duplicate is None:
+        duplicate = _find_pending_trade_by_ticker(trades, ticker, side)
     if duplicate is None:
         duplicate = _find_open_trade_for_dealid_rebind(
             trades, ticker, side, dealId, dealReference, entry_price, size, time_entered

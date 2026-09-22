@@ -37,23 +37,44 @@
             background: linear-gradient(90deg, #020617, #0a1a2f);
             padding: 20px 24px;
             border-bottom: 1px solid var(--border);
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
             align-items: center;
-            justify-content: flex-start;
-            position: relative;
+            gap: 24px;
         }
         header .title {
             font-size: 24px;
             font-weight: 700;
-            color: var(--gold);
+            color: var(--accent-soft);
             letter-spacing: 0.05em;
-            text-shadow: 0 0 8px rgba(245, 215, 110, 0.4);
+            text-shadow: 0 0 8px rgba(14, 165, 233, 0.4);
+            white-space: nowrap;
+        }
+        header .uk-clock {
+            color: var(--accent-soft);
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-align: center;
+            white-space: nowrap;
+        }
+        header .uk-clock-label {
+            color: var(--text-muted);
+            display: block;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.12em;
+            margin-bottom: 3px;
+            text-transform: uppercase;
+        }
+        header .header-right {
+            align-items: flex-end;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
         }
         header .nav {
-            position: absolute;
-            right: 24px;
-            top: 50%;
-            transform: translateY(-50%);
             display: flex;
             gap: 16px;
             font-size: 14px;
@@ -137,7 +158,29 @@
             background: rgba(249, 115, 115, 0.2);
             border-color: rgba(249, 115, 115, 0.65);
         }
-        @media (max-width: 1024px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+        @media (max-width: 1024px) {
+            header {
+                grid-template-columns: 1fr auto;
+            }
+            header .uk-clock {
+                grid-column: 1 / -1;
+                grid-row: 2;
+            }
+            .grid { grid-template-columns: minmax(0, 1fr); }
+        }
+        @media (max-width: 720px) {
+            header {
+                grid-template-columns: 1fr;
+                text-align: center;
+            }
+            header .title { white-space: normal; }
+            header .uk-clock {
+                grid-column: 1;
+                grid-row: auto;
+            }
+            header .header-right { align-items: center; }
+            header .nav { flex-wrap: wrap; justify-content: center; }
+        }
     </style>
 </head>
 <body>
@@ -145,7 +188,12 @@
 <header>
     <div class="title">{{ title }}</div>
 
-    <div class="nav">
+    <div id="uk-clock" class="uk-clock" aria-live="off">
+        <span class="uk-clock-label">UK Time</span>
+        <span id="uk-clock-value">--:--:--</span>
+    </div>
+
+    <div class="header-right">
         <span id="header-account" style="color: var(--accent-soft); font-weight: 600;">
             Equity: {{ account.equity|default('—') }} ·
             Balance: {{ account.balance|default('—') }} ·
@@ -156,192 +204,36 @@
             · Available: {{ account.available|default('—') }}
         </span>
 
-        <a href="/dashboard">Dashboard</a>
-        <a href="/dashboard/logout" class="logout">Logout</a>
+        <div class="nav">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/dashboard/logout" class="logout">Logout</a>
+        </div>
     </div>
 </header>
 
 <div id="error-banner"></div>
 
 <div id="dashboard-content">
-    <div id="dashboard-inner">
-        <!-- Server-side rendered content so first load shows canonical fields -->
-        <div class="grid">
-            <div class="card">
-                <div class="card-header">
-                    <div class="card-title">Performance Snapshot</div>
-                </div>
-
-                <div class="metrics-row">
-                    <div class="metric">
-                        <div class="metric-label">Win Rate</div>
-                        <div class="metric-value metric-neutral">
-                            {{ analytics.win_rate is not none and analytics.win_rate or '—' }}%
-                        </div>
-                    </div>
-                    <div class="metric">
-                        <div class="metric-label">Expectancy / Trade</div>
-                        <div class="metric-value {% if analytics.expectancy is not none and analytics.expectancy >= 0 %}metric-good{% else %}metric-bad{% endif %}">
-                            {{ analytics.expectancy is not none and analytics.expectancy or '—' }}
-                        </div>
-                    </div>
-                    <div class="metric">
-                        <div class="metric-label">Trades</div>
-                        <div class="metric-value metric-neutral">
-                            {{ analytics.trade_count|default('—') }}
-                        </div>
-                    </div>
-                </div>
-
-                <div class="metrics-row" style="margin-top: 10px;">
-                    <div class="metric">
-                        <div class="metric-label">Profit / Loss (GBP)</div>
-                        <div class="metric-value {% if analytics.total_pl is not none and analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
-                            {{ analytics.total_pl is not none and analytics.total_pl or '—' }}
-                        </div>
-                    </div>
-                    <div class="metric">
-                        <div class="metric-label">Max Drawdown</div>
-                        <div class="metric-value metric-bad">
-                            {{ analytics.max_drawdown|default('—') }}
-                        </div>
-                    </div>
-                    <div class="metric">
-                        <div class="metric-label">Average Win / Loss</div>
-                        <div class="metric-value metric-neutral">
-                            W {{ analytics.avg_win|default('—') }} / L {{ analytics.avg_loss|default('—') }}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-header">
-                    <div class="card-title">Account & Open Positions</div>
-                </div>
-
-                {% if positions %}
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Stock</th>
-                            <th>Side</th>
-                            <th>Size</th>
-                            <th>Entry</th>
-                            <th>Current</th>
-                            <th>SL / TP</th>
-                            <th>PNL (GBP)</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for p in positions %}
-                        <tr>
-                            <td>{{ p.ticker or p.epic or '—' }}</td>
-                            <td>
-                                {% set dir = p.direction or p.side %}
-                                {% if dir == 'Long' %}
-                                    <span class="pill pill-long">Long</span>
-                                {% elif dir == 'Short' %}
-                                    <span class="pill pill-short">Short</span>
-                                {% else %}
-                                    <span class="pill pill-status">{{ dir or '—' }}</span>
-                                {% endif %}
-                            </td>
-                            <td>{{ p.size|default('—') }}</td>
-                            <td>{{ p.entry_price is not none and p.entry_price or p.price|default('—') }}</td>
-                            <td>{{ p.current_price|default('—') }}</td>
-                            <td>{{ p.stopLevel|default('—') }} / {{ p.limitLevel|default('—') }}</td>
-                            <td class="{% if p.profit is not none and p.profit >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
-                                {{ p.profit is not none and p.profit or '—' }}
-                            </td>
-                            <td>
-                                <button onclick="closePosition('{{ p.dealId or p.id }}')">Close</button>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                {% else %}
-                <div class="small">No open positions.</div>
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="grid-full" style="margin-top:16px;">
-            <div class="card">
-                <div class="card-header">
-                    <div class="card-title">Trade Log</div>
-                </div>
-
-                {% if trades %}
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Time Entered</th>
-                            <th>Time Exited</th>
-                            <th>Ticker</th>
-                            <th>Type</th>
-                            <th>Side</th>
-                            <th>Size</th>
-                            <th>Entry</th>
-                            <th>Exit</th>
-                            <th>PnL (GBP)</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for t in trades %}
-                        <tr>
-                            <td class="small">{{ t.time_entered_human or t.time_entered or '—' }}</td>
-                            <td class="small">{{ t.time_exited_human or t.time_exited or '—' }}</td>
-                            <td>{{ t.ticker or '—' }}</td>
-                            <td><span class="pill pill-status">{{ t.trade_type or 'Manual' }}</span></td>
-                            <td>
-                                {% set side = t.side or t.direction %}
-                                {% if side == 'Long' %}
-                                    <span class="pill pill-long">Long</span>
-                                {% elif side == 'Short' %}
-                                    <span class="pill pill-short">Short</span>
-                                {% else %}
-                                    <span class="pill pill-status">{{ side or '—' }}</span>
-                                {% endif %}
-                            </td>
-                            <td>{{ t.size|default('—') }}</td>
-                            <td>
-                                {{ t.entry_price is not none and t.entry_price or t.get('entryPrice') or '—' }}
-                            </td>
-                            <td>
-                                {{ t.exit_price is not none and t.exit_price or t.get('exitPrice') or '—' }}
-                            </td>
-                            {% set display_pnl = t.pnl_gbp %}
-                            {% if display_pnl is none and t.pnl is not none %}
-                                {% set display_pnl = (t.pnl * (config.FX_USD_GBP if config and config.FX_USD_GBP else 0.78))|round(2) %}
-                            {% endif %}
-                            <td class="{% if display_pnl is not none and display_pnl >= 0 %}pnl-pos{% elif display_pnl is not none %}pnl-neg{% endif %}">
-                                {{ display_pnl if display_pnl is not none else '—' }}
-                            </td>
-                            <td>
-                                {% if t.can_delete and t._log_index is not none %}
-                                <button class="button-danger" onclick="deleteTrade({{ t._log_index }})">Delete</button>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% else %}
-                        <tr><td colspan="10" class="small">No trades recorded.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                {% else %}
-                <div class="small">No trades recorded.</div>
-                {% endif %}
-            </div>
-        </div>
-    </div>
+    {% block content %}{% endblock %}
 </div>
 
 <script>
 let isFirstLoad = true;
+
+function updateUkClock() {
+    const clock = document.getElementById('uk-clock-value');
+    if (!clock) return;
+    clock.textContent = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/London',
+        weekday: 'short',
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    }).format(new Date());
+}
 
 function closePosition(dealId) {
     const errorBanner = document.getElementById('error-banner');
@@ -411,6 +303,9 @@ function refreshDashboard() {
             errorBanner.style.display = "block";
         });
 }
+
+updateUkClock();
+setInterval(updateUkClock, 1000);
 
 // Start refreshing after 8 seconds on first load, then every 5 seconds
 if (isFirstLoad) {

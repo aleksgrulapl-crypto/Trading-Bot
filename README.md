@@ -6,10 +6,10 @@ A Python/Flask-based automated trading bot for the Capital.com CFD API, with a r
 
 ## Features
 
-- **Webhook receiver** (`/webhook`) — accepts TradingView alerts and idempotent broker position events
+- **Webhook receiver** (`/webhook`) — accepts TradingView alerts, suppresses duplicate deliveries, and handles idempotent broker position events
 - **Automated order placement** — sizes positions based on available equity, leverage, per-trade caps, and per-ticker minimums
 - **Trade log** (`/data/trade_log.json`) — thread-safe JSON store with atomic writes and timestamped backups
-- **Real-time dashboard** (`/dashboard`) — performance metrics, open positions, and completed-trade history
+- **Real-time dashboard** (`/dashboard`) — live UK clock, account metrics, open positions, and completed-trade history
 - **Scheduler** — runs the daily report and trailing-stop sync in the background
 
 ---
