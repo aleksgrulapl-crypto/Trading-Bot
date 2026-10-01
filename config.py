@@ -29,7 +29,13 @@ CAPITAL_PASSWORD = os.getenv("CAPITAL_PASSWORD")
 DEBUG_LOGS = os.getenv("DEBUG_LOGS", "False").lower() in ("1", "true", "yes")
 
 # Trading parameters
+# MAX_POSITIONS_PER_TICKER is an overall safety-net cap on concurrently open
+# trades for one ticker across all timeframes (3, matching the 3 timeframes
+# the strategy runs). MAX_POSITIONS_PER_TICKER_PER_TIMEFRAME is the primary
+# rule: at most 1 open trade per ticker per individual timeframe, so the
+# same timeframe can't open a second trade while one is already running.
 MAX_POSITIONS_PER_TICKER = int(os.getenv("MAX_POSITIONS_PER_TICKER", 3))
+MAX_POSITIONS_PER_TICKER_PER_TIMEFRAME = int(os.getenv("MAX_POSITIONS_PER_TICKER_PER_TIMEFRAME", 1))
 RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", 0.50))
 EQUITY_PERCENT = float(os.getenv("EQUITY_PERCENT", 0.50))
 LEVERAGE = int(os.getenv("LEVERAGE", 5))
@@ -38,11 +44,11 @@ LEVERAGE = int(os.getenv("LEVERAGE", 5))
 #   MAX_EQUITY_PER_TRADE    – equity (before leverage) allocated to one trade
 #   MAX_EQUITY_PER_TICKER   – combined equity allowed across all open trades for one ticker
 #   MAX_EXPOSURE_PER_TRADE  – leveraged exposure allocated to one trade
-# Defaults: up to £250 equity per trade, up to £250 combined equity per ticker,
-# and £1250 exposure at 5x leverage.
-MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 250))
-MAX_EQUITY_PER_TICKER = float(os.getenv("MAX_EQUITY_PER_TICKER", MAX_EQUITY_PER_TRADE))
-MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 1250))
+# Defaults: up to £125 equity per trade (£625 exposure at 5x leverage), and
+# up to £375 combined equity per ticker across its 3 timeframes (3 x £125).
+MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 125))
+MAX_EQUITY_PER_TICKER = float(os.getenv("MAX_EQUITY_PER_TICKER", 375))
+MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 625))
 
 # SL/TP expressed as a percentage of the EQUITY USED for the trade (not the
 # leveraged exposure/full account balance), so risk is predictable regardless

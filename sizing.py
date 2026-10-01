@@ -57,6 +57,15 @@ def _normalize_ticker(value: Optional[str]) -> Optional[str]:
         return None
 
 
+def _normalize_timeframe(value: Optional[str]) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    try:
+        return str(value).strip().upper() or None
+    except Exception:
+        return None
+
+
 def _open_ticker_usage(ticker: Optional[str], side: Optional[str] = None) -> Dict[str, float]:
     ticker_norm = _normalize_ticker(ticker)
     if not ticker_norm:
@@ -101,15 +110,74 @@ def _open_ticker_usage(ticker: Optional[str], side: Optional[str] = None) -> Dic
     }
 
 
+def _open_ticker_timeframe_usage(
+    ticker: Optional[str], timeframe: Optional[str], side: Optional[str] = None
+) -> Dict[str, float]:
+    """Count open trades for *ticker* restricted to one specific *timeframe*.
+
+    This enforces "max 1 trade per ticker per timeframe" independently of
+    the ticker-wide position/equity caps in `_open_ticker_usage`, which
+    aggregate across all timeframes. Used so the strategy's 3 timeframes
+    per ticker can each hold their own trade without the overall ticker
+    cap. "N/A" (manually opened) trades are not timeframe-bucketed and are
+    never matched here; see the "N/A" skip in `calculate_size`.
+    """
+    ticker_norm = _normalize_ticker(ticker)
+    timeframe_norm = _normalize_timeframe(timeframe)
+    if not ticker_norm or not timeframe_norm:
+        return {"open_count": 0}
+    side_norm = _normalize_direction(side)
+
+    try:
+        trades = load_raw_log()
+    except Exception:
+        logger.exception("Failed to load trade log for ticker/timeframe sizing")
+        return {"open_count": 0}
+
+    open_count = 0
+    for trade in trades or []:
+        status = str(trade.get("status") or ("CLOSED" if trade.get("time_exited") else "OPEN")).strip().upper()
+        if status != "OPEN":
+            continue
+        trade_ticker = _normalize_ticker(trade.get("ticker") or trade.get("epic"))
+        if trade_ticker != ticker_norm:
+            continue
+        trade_timeframe = _normalize_timeframe(trade.get("timeframe"))
+        if trade_timeframe != timeframe_norm:
+            continue
+        if side_norm:
+            trade_side = _normalize_direction(trade.get("side"))
+            if trade_side and trade_side != side_norm:
+                continue
+        open_count += 1
+
+    return {"open_count": open_count}
+
+
 def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[str] = None,
                    ticker: Optional[str] = None,
-                   ignore_opposite_side_for_ticker_limits: bool = False) -> Dict[str, Any]:
+                   timeframe: Optional[str] = None,
+                   ignore_opposite_side_for_ticker_limits: bool = False,
+                   hedge_size_override: Optional[float] = None) -> Dict[str, Any]:
     """
     Calculate position size using:
       - a fraction of AVAILABLE equity (config.EQUITY_PERCENT)
       - leverage multiplier (config.LEVERAGE)
       - per-ticker minimum size enforcement (config.TICKER_SETTINGS)
+      - per-ticker-per-timeframe and per-ticker position/equity caps
       - SL/TP safety validation
+
+    `timeframe`, when provided, additionally caps concurrent trades to
+    config.MAX_POSITIONS_PER_TICKER_PER_TIMEFRAME for that specific
+    ticker+timeframe pairing (the strategy runs 3 timeframes per ticker,
+    each capped independently of the others). "N/A" (manual trades) are
+    exempt from this per-timeframe cap.
+
+    `hedge_size_override`, when provided and positive, bypasses every
+    ticker/timeframe capacity and equity cap below and returns that exact
+    size — hedging an existing opposite-side position is an explicit,
+    bounded exception to the capacity rules (it mirrors that position's
+    own size rather than allocating fresh capacity).
 
     Returns:
       {"blocked": True, "reason": "..."} on failure
@@ -145,6 +213,22 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
         if sl == entry or tp == entry:
             return {"blocked": True, "reason": "sl_tp_equal_entry"}
 
+    # 2b) Hedge exception: mirror the hedged trade's own size exactly,
+    # bypassing every capacity/equity cap below.
+    hedge_size = _safe_float(hedge_size_override)
+    if hedge_size is not None and hedge_size > 0:
+        hedge_leverage = float(getattr(config, "LEVERAGE", 1) or 1)
+        if hedge_leverage <= 0:
+            hedge_leverage = 1.0
+        size = _round_size(hedge_size)
+        return {
+            "blocked": False,
+            "size": float(size),
+            "exposure": float(round(size * entry, 2)),
+            "equity_used": float(round((size * entry) / hedge_leverage, 2)),
+            "hedge_mirrored_size": True,
+        }
+
     # 3) Fetch account available margin
     try:
         account_raw = session.get_account()
@@ -178,6 +262,24 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
             "open_positions": int(ticker_usage["open_count"]),
             "ticker": ticker_key,
         }
+
+    # 4b) Per-timeframe capacity: the strategy runs several timeframes per
+    #    ticker, each independently capped (default 1 open trade) by
+    #    MAX_POSITIONS_PER_TICKER_PER_TIMEFRAME. Manually opened trades are
+    #    recorded with timeframe "N/A" and are exempt from this check (they
+    #    still count toward the overall ticker cap above).
+    timeframe_key = _normalize_timeframe(timeframe)
+    if timeframe_key and timeframe_key != "N/A":
+        timeframe_usage = _open_ticker_timeframe_usage(ticker_key, timeframe_key, side=ticker_usage_side)
+        max_positions_per_ticker_timeframe = int(getattr(config, "MAX_POSITIONS_PER_TICKER_PER_TIMEFRAME", 0) or 0)
+        if max_positions_per_ticker_timeframe > 0 and timeframe_usage["open_count"] >= max_positions_per_ticker_timeframe:
+            return {
+                "blocked": True,
+                "reason": "max_positions_per_ticker_timeframe_reached",
+                "open_positions": int(timeframe_usage["open_count"]),
+                "ticker": ticker_key,
+                "timeframe": timeframe_key,
+            }
 
     max_equity_per_trade = float(getattr(config, "MAX_EQUITY_PER_TRADE", 0) or 0)
     max_equity_per_ticker = float(getattr(config, "MAX_EQUITY_PER_TICKER", max_equity_per_trade) or 0)

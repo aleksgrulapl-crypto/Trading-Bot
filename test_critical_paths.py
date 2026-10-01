@@ -1607,6 +1607,90 @@ class TestSizing:
         assert result["blocked"] is True
         assert result["reason"] == "max_positions_per_ticker_reached"
 
+    def test_timeframe_cap_blocks_second_trade_on_same_timeframe(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_POSITIONS_PER_TICKER", 3)
+        monkeypatch.setattr(sizing.config, "MAX_POSITIONS_PER_TICKER_PER_TIMEFRAME", 1)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 125)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 375)
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "NVDA", "status": "OPEN", "size": 1.0, "entry_price": 100.0, "timeframe": "5M"},
+        ])
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA", ticker="NVDA", timeframe="5M")
+
+        assert result["blocked"] is True
+        assert result["reason"] == "max_positions_per_ticker_timeframe_reached"
+
+    def test_timeframe_cap_allows_other_timeframe_on_same_ticker(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_POSITIONS_PER_TICKER", 3)
+        monkeypatch.setattr(sizing.config, "MAX_POSITIONS_PER_TICKER_PER_TIMEFRAME", 1)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 125)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 375)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "NVDA", "status": "OPEN", "size": 1.0, "entry_price": 100.0, "timeframe": "5M"},
+        ])
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA", ticker="NVDA", timeframe="15M")
+
+        assert result["blocked"] is False
+        assert result["equity_used_by_ticker"] == pytest.approx(20.0)
+
+    def test_timeframe_cap_ignores_manual_na_trades(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_POSITIONS_PER_TICKER", 3)
+        monkeypatch.setattr(sizing.config, "MAX_POSITIONS_PER_TICKER_PER_TIMEFRAME", 1)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 125)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 375)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "NVDA", "status": "OPEN", "size": 1.0, "entry_price": 100.0, "timeframe": "N/A"},
+        ])
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA", ticker="NVDA", timeframe="N/A")
+
+        assert result["blocked"] is False
+
+    def test_hedge_size_override_mirrors_hedged_trade_size(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        # Capacity caps intentionally tiny/exhausted to prove the override bypasses them.
+        monkeypatch.setattr(sizing.config, "MAX_POSITIONS_PER_TICKER", 0)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 1)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 1)
+        # Account/ticker-usage lookups must not even be consulted for the override path.
+        monkeypatch.setattr(sizing.session, "get_account", lambda: (_ for _ in ()).throw(AssertionError("should not fetch account")))
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: (_ for _ in ()).throw(AssertionError("should not load trade log")))
+
+        result = sizing.calculate_size(
+            100, 95, 110, "buy", symbol="NVDA", ticker="NVDA",
+            hedge_size_override=3.0,
+        )
+
+        assert result["blocked"] is False
+        assert result["size"] == pytest.approx(3.0)
+        assert result["exposure"] == pytest.approx(300.0)
+        assert result["equity_used"] == pytest.approx(60.0)
+        assert result.get("hedge_mirrored_size") is True
+
     def test_ticker_usage_ignores_non_open_rows(self, monkeypatch):
         import sizing
 
@@ -2473,6 +2557,45 @@ class TestWebhookProcessing:
         assert resp.status_code == 200
         assert body.get("status") == "ok"
         assert captured["ignore_opposite_side_for_ticker_limits"] is True
+        assert captured["trade_source"] == "hedge"
+
+    def test_hedge_signal_passes_hedged_trade_size_as_override(self, monkeypatch):
+        import webhook
+
+        monkeypatch.setattr(
+            webhook,
+            "load_raw_log",
+            lambda: [{"ticker": "INTC", "side": "long", "status": "OPEN", "trade_source": "tradingview", "size": 7.5}],
+        )
+        monkeypatch.setattr(webhook.session, "verify_epic", lambda symbol: {"epic": "INTC", "source": "mock"})
+        monkeypatch.setattr(webhook, "_is_duplicate_alert", lambda *_: False)
+        monkeypatch.setattr(webhook, "_is_trade_locked_now", lambda: False)
+        monkeypatch.setattr(webhook, "parse_tradingview_alert", lambda payload: {"symbol": "INTC", "action": "sell"})
+        monkeypatch.setattr(webhook.session, "request", lambda *args, **kwargs: type("Resp", (), {"status_code": 200, "json": lambda self: {"snapshot": {"bid": 100.0, "offer": 100.2}}})())
+        monkeypatch.setattr(webhook.session, "update_last_trade", lambda: None)
+
+        captured = {}
+
+        def _fake_calculate_size(**kwargs):
+            captured["hedge_size_override"] = kwargs.get("hedge_size_override")
+            return {"blocked": False, "size": kwargs.get("hedge_size_override")}
+
+        def _fake_place_order(epic, action, size, sl, tp, timeframe=None, trade_source="tradingview"):
+            captured["size"] = size
+            captured["trade_source"] = trade_source
+            return {"status": "ok"}
+
+        monkeypatch.setattr(webhook, "calculate_size", _fake_calculate_size)
+        monkeypatch.setattr(webhook, "place_order", _fake_place_order)
+
+        client = webhook.app.test_client()
+        resp = client.post("/webhook", json={"symbol": "INTC", "action": "sell"})
+        body = resp.get_json() or {}
+
+        assert resp.status_code == 200
+        assert body.get("status") == "ok"
+        assert captured["hedge_size_override"] == pytest.approx(7.5)
+        assert captured["size"] == pytest.approx(7.5)
         assert captured["trade_source"] == "hedge"
 
     def test_opposite_signal_against_manual_open_trade_is_not_marked_hedge(self, monkeypatch):
