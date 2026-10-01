@@ -131,6 +131,19 @@
         .pill-short { background: rgba(248, 113, 113, 0.1); color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.4); }
         .pill-status { background: rgba(56, 189, 248, 0.1); color: var(--accent); border: 1px solid rgba(56, 189, 248, 0.4); cursor: pointer; }
         .pill-status:hover { background: rgba(56, 189, 248, 0.2); }
+        .type-select {
+            background: rgba(56, 189, 248, 0.1);
+            color: var(--accent);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 999px;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .type-select:hover {
+            background: rgba(56, 189, 248, 0.2);
+        }
         .pnl-pos { color: var(--success); font-weight: 600; }
         .pnl-neg { color: var(--danger); font-weight: 600; }
         .small { font-size: 11px; color: var(--text-muted); }
@@ -263,6 +276,23 @@ function deleteTrade(tradeIndex) {
             refreshDashboard();
         })
         .catch(err => console.error("Delete trade error:", err));
+}
+
+function updateTradeType(tradeIndex, newType) {
+    const errorBanner = document.getElementById('error-banner');
+
+    fetch(`/dashboard/trade/${encodeURIComponent(tradeIndex)}/type`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: newType })
+    })
+        .then(r => r.json())
+        .then(data => {
+            errorBanner.innerText = (data && data.message) || "Update type action failed.";
+            errorBanner.style.display = "block";
+            refreshDashboard();
+        })
+        .catch(err => console.error("Update trade type error:", err));
 }
 
 function refreshDashboard() {

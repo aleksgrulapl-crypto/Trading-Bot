@@ -22,6 +22,7 @@ import config
 from close_position import close_position as close_live_position
 from trade_log import (
     delete_trade_log_entry,
+    update_trade_type_entry,
     dedupe_trade_log_entries,
     is_trade_delete_candidate,
     load_raw_log,
@@ -657,6 +658,43 @@ def dashboard_delete_trade(trade_index: int):
         code = 404
     elif status in ("not_completed", "not_deletable", "broker_still_open"):
         code = 409
+    else:
+        code = 500
+    return jsonify({
+        "status": "error",
+        "message": status,
+    }), code
+
+
+@dashboard.route("/dashboard/trade/<int:trade_index>/type", methods=["POST"])
+@login_required
+def dashboard_update_trade_type(trade_index: int):
+    """Correct a trade log row's recorded type (e.g. mislabeled 'Trader' rows
+    that were really TradingView alerts), so analytics stay accurate."""
+    payload = request.get_json(silent=True) or {}
+    new_type = payload.get("type")
+
+    try:
+        updated, _trade, status = update_trade_type_entry(trade_index, new_type)
+    except Exception as exc:
+        logger.exception("dashboard: update type action failed for trade %s: %s", trade_index, exc)
+        return jsonify({
+            "status": "error",
+            "message": "update_type_failed_internal",
+        }), 500
+
+    if updated:
+        return jsonify({
+            "status": "success",
+            "message": "Trade type updated.",
+        }), 200
+
+    if status == "invalid_index":
+        code = 400
+    elif status == "invalid_type":
+        code = 400
+    elif status == "not_found":
+        code = 404
     else:
         code = 500
     return jsonify({

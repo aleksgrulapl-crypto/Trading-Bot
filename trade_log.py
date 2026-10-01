@@ -445,6 +445,46 @@ def delete_trade_log_entry(index: int, path: str = LOG_PATH) -> Tuple[bool, Opti
         return True, deleted, "deleted"
 
 
+# Canonical trade_source values a user may correct a trade to. These map onto
+# the dashboard's "TradingView" / "Hedge" / "Trader" display labels.
+TRADE_TYPE_OVERRIDES = ("tradingview", "hedge", "trader")
+
+
+def update_trade_type_entry(
+    index: int, new_type: str, path: str = LOG_PATH
+) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """Manually correct a trade log row's recorded source/type.
+
+    Lets the trader fix rows mislabeled as "Trader" (e.g. by the dupe
+    phantom-trade reconciliation bug) back to "TradingView", or otherwise
+    relabel a row, so analytics accurately reflect the strategy's own
+    performance. Only the ``trade_source`` field is changed; nothing else
+    about the trade (price, size, pnl, timestamps) is altered.
+    """
+    try:
+        idx = int(index)
+    except (TypeError, ValueError):
+        return False, None, "invalid_index"
+
+    normalized_type = str(new_type or "").strip().lower()
+    if normalized_type not in TRADE_TYPE_OVERRIDES:
+        return False, None, "invalid_type"
+
+    with _trade_log_lock:
+        trades = load_raw_log(path)
+        if idx < 0 or idx >= len(trades):
+            return False, None, "not_found"
+
+        trade = trades[idx] if isinstance(trades[idx], dict) else None
+        if trade is None:
+            return False, None, "not_found"
+
+        trade["trade_source"] = normalized_type
+        if not save_raw_log(trades, path):
+            return False, None, "save_failed"
+        return True, dict(trade), "updated"
+
+
 # ---------------------------------------------------------------------------
 # Internal calculation helpers
 # ---------------------------------------------------------------------------

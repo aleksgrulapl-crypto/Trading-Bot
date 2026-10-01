@@ -139,7 +139,17 @@
             <td class="small">{{ t.time_exited_human or t.time_exited or '—' }}</td>
             <td>{{ t.ticker or '—' }}</td>
             <td class="small">{{ t.timeframe or 'N/A' }}</td>
-            <td><span class="pill pill-status">{{ t.trade_type or 'Manual' }}</span></td>
+            <td>
+              {% if t._log_index is not none %}
+              <select class="type-select" onchange="updateTradeType({{ t._log_index }}, this.value)">
+                {% for value, label in [('tradingview', 'TradingView'), ('trader', 'Trader'), ('hedge', 'Hedge')] %}
+                <option value="{{ value }}" {% if (t.trade_type or 'Trader') == label %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              {% else %}
+              <span class="pill pill-status">{{ t.trade_type or 'Manual' }}</span>
+              {% endif %}
+            </td>
             <td>
               {% set side = t.side or t.direction %}
               {% if side == 'Long' %}
