@@ -182,19 +182,25 @@ def _has_open_trade_for_ticker(ticker: Optional[str], action: Optional[str] = No
     return False
 
 
-def _is_hedge_signal(ticker: Optional[str], action: Optional[str]) -> bool:
-    """Return True if this signal is opposite to an already-open ticker trade."""
+def _find_hedge_source_trade(ticker: Optional[str], action: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Return the open TradingView-origin trade this *action* would hedge
+    (an opposite-side trade already open on the same ticker), or None.
+
+    The caller uses the matched trade's own `size` to mirror it exactly when
+    placing the hedge order (see process_webhook_payload), so the hedge is
+    sized to offset that specific position rather than a fresh allocation.
+    """
     if not HEDGING_ENABLED or not ticker or not action:
-        return False
+        return None
     try:
         trades = load_raw_log()
     except Exception:
-        logger.exception("_is_hedge_signal: failed to load trade log")
-        return False
+        logger.exception("_find_hedge_source_trade: failed to load trade log")
+        return None
     ticker_norm = str(ticker).strip().lower()
     new_side = _normalize_side(action)
     if new_side not in ("long", "short"):
-        return False
+        return None
 
     def _is_tv_origin(trade: Dict[str, Any]) -> bool:
         raw_source = trade.get("trade_source") or trade.get("origin") or trade.get("source") or trade.get("trade_type")
@@ -215,8 +221,13 @@ def _is_hedge_signal(ticker: Optional[str], action: Optional[str]) -> bool:
                     continue
                 existing_side = _normalize_side(t.get("side"))
                 if existing_side in ("long", "short") and existing_side != new_side:
-                    return True
-    return False
+                    return t
+    return None
+
+
+def _is_hedge_signal(ticker: Optional[str], action: Optional[str]) -> bool:
+    """Return True if this signal is opposite to an already-open ticker trade."""
+    return _find_hedge_source_trade(ticker, action) is not None
 
 # ---------------------------------------------------------------------------
 # Parser import: try both common names for compatibility
@@ -734,8 +745,18 @@ def webhook():
         return _ok_response({"status": "blocked", "reason": "order_in_flight", "symbol": symbol, "epic": epic, "cid": cid})
 
     try:
-        is_hedge_signal = _is_hedge_signal(epic, action)
+        hedge_source_trade = _find_hedge_source_trade(epic, action)
+        is_hedge_signal = hedge_source_trade is not None
         trade_source = "hedge" if is_hedge_signal else "tradingview"
+
+        hedge_size_override = None
+        if hedge_source_trade is not None:
+            try:
+                candidate = float(hedge_source_trade.get("size"))
+                if candidate > 0:
+                    hedge_size_override = candidate
+            except (TypeError, ValueError):
+                hedge_size_override = None
 
         market_resp = session.request("GET", f"{API_MARKET}/{epic}", timeout=BROKER_API_TIMEOUT)
         if not market_resp or getattr(market_resp, "status_code", 0) != 200:
@@ -779,7 +800,9 @@ def webhook():
             direction=action,
             symbol=symbol,
             ticker=epic,
+            timeframe=timeframe,
             ignore_opposite_side_for_ticker_limits=is_hedge_signal,
+            hedge_size_override=hedge_size_override,
         )
         if size_info.get("blocked"):
             logger.info("[cid=%s] Sizing blocked: %s", cid, size_info.get("reason"))
