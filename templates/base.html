@@ -159,23 +159,28 @@
         .pnl-pos { color: var(--success); font-weight: 600; }
         .pnl-neg { color: var(--danger); font-weight: 600; }
         .small { font-size: 11px; color: var(--text-muted); }
-        .metrics-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
-        .metrics-grid .metric { text-align: center; padding: 10px 8px; }
+        .metrics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 8px; height: 100%; align-content: center; }
+        .metrics-grid .metric { text-align: center; padding: 12px 8px; }
         .metrics-grid .metric-value { font-size: 17px; }
         .card-accent-good { border-top: 3px solid var(--success); }
         .card-accent-bad { border-top: 3px solid var(--danger); }
-        .trade-highlight { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+        .trade-highlight { display: grid; grid-template-columns: 1fr; gap: 6px; }
         .trade-highlight .metric { padding: 6px 10px; }
         .trade-highlight .metric-value { font-size: 13px; }
         .trade-highlight .metric-label { font-size: 10px; }
         .table-spaced th, .table-spaced td { padding: 10px 16px; }
         .table-spaced tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }
+        .analytics-wrap { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+        .analytics-top-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
+        .analytics-top-grid .card { display: flex; flex-direction: column; }
         @media (max-width: 1024px) {
-            .metrics-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .analytics-top-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+            .analytics-top-grid .card:first-child { grid-column: 1 / -1; }
         }
-        @media (max-width: 560px) {
+        @media (max-width: 640px) {
+            .analytics-top-grid { grid-template-columns: 1fr; }
+            .analytics-top-grid .card:first-child { grid-column: auto; }
             .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-            .trade-highlight { grid-template-columns: 1fr; }
         }
         button {
             background: rgba(56, 189, 248, 0.1);

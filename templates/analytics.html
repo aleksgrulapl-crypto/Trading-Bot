@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="grid-full">
+<div class="analytics-wrap">
+<div class="analytics-top-grid">
   <div class="card">
     <div class="card-header">
       <div class="card-title">Performance Overview</div>
@@ -51,9 +52,7 @@
       </div>
     </div>
   </div>
-</div>
 
-<div class="grid" style="margin-top:16px;">
   <div class="card card-accent-good">
     <div class="card-header">
       <div class="card-title">Best Trade</div>
@@ -111,24 +110,21 @@
   </div>
 </div>
 
-<div class="grid-full" style="margin-top:16px;">
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">Equity Curve</div>
-    </div>
-    {% if detailed.equity_curve %}
-    <canvas id="equityCurveChart" height="90"></canvas>
-    {% else %}
-    <div class="small">No closed trades yet.</div>
-    {% endif %}
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">Equity Curve</div>
   </div>
+  {% if detailed.equity_curve %}
+  <canvas id="equityCurveChart" height="90"></canvas>
+  {% else %}
+  <div class="small">No closed trades yet.</div>
+  {% endif %}
 </div>
 
-<div class="grid-full" style="margin-top:16px;">
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">Win / Loss by Ticker</div>
-    </div>
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">Win / Loss by Ticker</div>
+  </div>
     {% if detailed.per_ticker_stats %}
     <table class="table table-spaced">
       <thead>
@@ -157,7 +153,7 @@
     {% else %}
     <div class="small">No closed trades yet.</div>
     {% endif %}
-  </div>
+</div>
 </div>
 
 <script>
