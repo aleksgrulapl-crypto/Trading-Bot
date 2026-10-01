@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="grid-full">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Performance Overview</div>
+    </div>
+
+    <div class="metrics-row">
+      <div class="metric">
+        <div class="metric-label">Win Rate</div>
+        <div class="metric-value metric-neutral">
+          {{ analytics.win_rate is not none and analytics.win_rate or '—' }}%
+        </div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-label">Expectancy / Trade</div>
+        <div class="metric-value {% if analytics.expectancy is not none and analytics.expectancy >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+          {{ analytics.expectancy is not none and analytics.expectancy or '—' }}
+        </div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-label">Trades</div>
+        <div class="metric-value metric-neutral">
+          {{ analytics.trade_count|default('—') }}
+        </div>
+      </div>
+    </div>
+
+    <div class="metrics-row" style="margin-top: 10px;">
+      <div class="metric">
+        <div class="metric-label">Profit / Loss (GBP)</div>
+        <div class="metric-value {% if analytics.total_pl is not none and analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+          {{ analytics.total_pl is not none and analytics.total_pl or '—' }}
+        </div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-label">Max Drawdown</div>
+        <div class="metric-value metric-bad">
+          {{ analytics.max_drawdown|default('—') }}
+        </div>
+      </div>
+
+      <div class="metric">
+        <div class="metric-label">Average Hold Time</div>
+        <div class="metric-value metric-neutral">
+          {{ detailed.avg_hold_time or '—' }}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="grid" style="margin-top:16px;">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Best Trade</div>
+    </div>
+    {% if detailed.best_trade %}
+    <div class="metrics-row" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+      <div class="metric">
+        <div class="metric-label">Ticker / Timeframe</div>
+        <div class="metric-value metric-neutral">{{ detailed.best_trade.ticker or '—' }} · {{ detailed.best_trade.timeframe or 'N/A' }}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">PnL (GBP)</div>
+        <div class="metric-value metric-good">{{ detailed.best_trade.pnl_gbp_display }}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Entry → Exit</div>
+        <div class="metric-value metric-neutral">{{ detailed.best_trade.entry_price|default('—') }} → {{ detailed.best_trade.exit_price|default('—') }}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Closed</div>
+        <div class="metric-value small">{{ detailed.best_trade.time_exited_human or detailed.best_trade.time_exited or '—' }}</div>
+      </div>
+    </div>
+    {% else %}
+    <div class="small">No closed trades yet.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Worst Trade</div>
+    </div>
+    {% if detailed.worst_trade %}
+    <div class="metrics-row" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+      <div class="metric">
+        <div class="metric-label">Ticker / Timeframe</div>
+        <div class="metric-value metric-neutral">{{ detailed.worst_trade.ticker or '—' }} · {{ detailed.worst_trade.timeframe or 'N/A' }}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">PnL (GBP)</div>
+        <div class="metric-value metric-bad">{{ detailed.worst_trade.pnl_gbp_display }}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Entry → Exit</div>
+        <div class="metric-value metric-neutral">{{ detailed.worst_trade.entry_price|default('—') }} → {{ detailed.worst_trade.exit_price|default('—') }}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Closed</div>
+        <div class="metric-value small">{{ detailed.worst_trade.time_exited_human or detailed.worst_trade.time_exited or '—' }}</div>
+      </div>
+    </div>
+    {% else %}
+    <div class="small">No closed trades yet.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid-full" style="margin-top:16px;">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Equity Curve</div>
+    </div>
+    {% if detailed.equity_curve %}
+    <canvas id="equityCurveChart" height="90"></canvas>
+    {% else %}
+    <div class="small">No closed trades yet.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid-full" style="margin-top:16px;">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Win / Loss by Ticker</div>
+    </div>
+    {% if detailed.per_ticker_stats %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Ticker</th>
+          <th>Trades</th>
+          <th>Wins</th>
+          <th>Losses</th>
+          <th>Win Rate</th>
+          <th>Total PnL (GBP)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in detailed.per_ticker_stats %}
+        <tr>
+          <td>{{ s.ticker }}</td>
+          <td>{{ s.trade_count }}</td>
+          <td>{{ s.wins }}</td>
+          <td>{{ s.losses }}</td>
+          <td>{{ s.win_rate is not none and s.win_rate or '—' }}%</td>
+          <td class="{% if s.total_pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">{{ s.total_pnl }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="small">No closed trades yet.</div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+(function () {
+  const equityData = {{ detailed.equity_curve | tojson }};
+  const canvas = document.getElementById('equityCurveChart');
+  if (!canvas || !equityData.length) return;
+
+  new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: equityData.map(p => p.label),
+      datasets: [{
+        label: 'Cumulative PnL (GBP)',
+        data: equityData.map(p => p.balance),
+        borderColor: '#38bdf8',
+        backgroundColor: 'rgba(56, 189, 248, 0.15)',
+        fill: true,
+        tension: 0.25,
+        pointRadius: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: '#e5e7eb' } }
+      },
+      scales: {
+        x: { ticks: { color: '#9ca3af', maxTicksLimit: 10 }, grid: { color: 'rgba(31,41,55,0.4)' } },
+        y: { ticks: { color: '#9ca3af' }, grid: { color: 'rgba(31,41,55,0.4)' } }
+      }
+    }
+  });
+})();
+</script>
+{% endblock %}
