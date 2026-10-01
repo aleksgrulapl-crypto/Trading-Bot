@@ -7,7 +7,7 @@
       <div class="card-title">Performance Overview</div>
     </div>
 
-    <div class="metrics-row">
+    <div class="metrics-grid">
       <div class="metric">
         <div class="metric-label">Win Rate</div>
         <div class="metric-value metric-neutral">
@@ -28,9 +28,7 @@
           {{ analytics.trade_count|default('—') }}
         </div>
       </div>
-    </div>
 
-    <div class="metrics-row" style="margin-top: 10px;">
       <div class="metric">
         <div class="metric-label">Profit / Loss (GBP)</div>
         <div class="metric-value {% if analytics.total_pl is not none and analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
@@ -56,12 +54,12 @@
 </div>
 
 <div class="grid" style="margin-top:16px;">
-  <div class="card">
+  <div class="card card-accent-good">
     <div class="card-header">
       <div class="card-title">Best Trade</div>
     </div>
     {% if detailed.best_trade %}
-    <div class="metrics-row" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+    <div class="trade-highlight">
       <div class="metric">
         <div class="metric-label">Ticker / Timeframe</div>
         <div class="metric-value metric-neutral">{{ detailed.best_trade.ticker or '—' }} · {{ detailed.best_trade.timeframe or 'N/A' }}</div>
@@ -84,12 +82,12 @@
     {% endif %}
   </div>
 
-  <div class="card">
+  <div class="card card-accent-bad">
     <div class="card-header">
       <div class="card-title">Worst Trade</div>
     </div>
     {% if detailed.worst_trade %}
-    <div class="metrics-row" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+    <div class="trade-highlight">
       <div class="metric">
         <div class="metric-label">Ticker / Timeframe</div>
         <div class="metric-value metric-neutral">{{ detailed.worst_trade.ticker or '—' }} · {{ detailed.worst_trade.timeframe or 'N/A' }}</div>
@@ -132,7 +130,7 @@
       <div class="card-title">Win / Loss by Ticker</div>
     </div>
     {% if detailed.per_ticker_stats %}
-    <table class="table">
+    <table class="table table-spaced">
       <thead>
         <tr>
           <th>Ticker</th>
@@ -168,19 +166,45 @@
   const canvas = document.getElementById('equityCurveChart');
   if (!canvas || !equityData.length) return;
 
+  const GOOD_LINE = '#4ade80';
+  const BAD_LINE = '#f97373';
+  const GOOD_FILL = 'rgba(74, 222, 128, 0.15)';
+  const BAD_FILL = 'rgba(249, 115, 115, 0.15)';
+
+  function segmentColor(ctx, goodColor, badColor) {
+    const avg = (ctx.p0.parsed.y + ctx.p1.parsed.y) / 2;
+    return avg >= 0 ? goodColor : badColor;
+  }
+
   new Chart(canvas, {
     type: 'line',
     data: {
       labels: equityData.map(p => p.label),
-      datasets: [{
-        label: 'Cumulative PnL (GBP)',
-        data: equityData.map(p => p.balance),
-        borderColor: '#38bdf8',
-        backgroundColor: 'rgba(56, 189, 248, 0.15)',
-        fill: true,
-        tension: 0.25,
-        pointRadius: 2,
-      }]
+      datasets: [
+        {
+          label: 'Cumulative PnL (GBP)',
+          data: equityData.map(p => p.balance),
+          borderWidth: 2,
+          segment: {
+            borderColor: ctx => segmentColor(ctx, GOOD_LINE, BAD_LINE),
+            backgroundColor: ctx => segmentColor(ctx, GOOD_FILL, BAD_FILL),
+          },
+          fill: true,
+          tension: 0.25,
+          pointRadius: 0,
+          pointHoverRadius: 3,
+        },
+        {
+          label: 'Break-even',
+          data: equityData.map(() => 0),
+          borderColor: 'rgba(156, 163, 175, 0.5)',
+          borderDash: [5, 5],
+          borderWidth: 1,
+          fill: false,
+          pointRadius: 0,
+          pointHitRadius: 0,
+        },
+      ]
     },
     options: {
       responsive: true,
