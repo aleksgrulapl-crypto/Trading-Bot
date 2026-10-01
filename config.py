@@ -97,6 +97,11 @@ TICKER_SETTINGS = {
 # UI / dashboard
 DASHBOARD_TITLE = os.getenv("DASHBOARD_TITLE", "AG Capital Trader")
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "Killen123%")
+# Dual login roles: "Owner" has full control (close/delete/edit trades); "Viewer"
+# can only view the Dashboard/Analytics pages. DASHBOARD_OWNER_PASSWORD falls back
+# to the original single DASHBOARD_PASSWORD so existing deployments keep working.
+DASHBOARD_OWNER_PASSWORD = os.getenv("DASHBOARD_OWNER_PASSWORD", DASHBOARD_PASSWORD)
+DASHBOARD_VIEWER_PASSWORD = os.getenv("DASHBOARD_VIEWER_PASSWORD", "Viewer123$")
 
 # Timezone and reporting
 TIMEZONE = os.getenv("TIMEZONE", "Europe/London")
