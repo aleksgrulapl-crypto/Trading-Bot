@@ -174,6 +174,9 @@ def normalize_trades(trades):
         # ensure status is present
         copy["status"] = copy.get("status") or ("CLOSED" if copy.get("time_exited") else "OPEN")
 
+        # ensure timeframe is present (older log entries predate this field)
+        copy["timeframe"] = copy.get("timeframe") or "N/A"
+
         # human timestamps preserved by trade_log but ensure keys exist
         copy["time_entered"] = copy.get("time_entered")
         copy["time_exited"] = copy.get("time_exited")
