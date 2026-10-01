@@ -122,6 +122,7 @@
             <th>Time Entered</th>
             <th>Time Exited</th>
             <th>Ticker</th>
+            <th>Timeframe</th>
             <th>Type</th>
             <th>Side</th>
             <th>Size</th>
@@ -137,6 +138,7 @@
             <td class="small">{{ t.time_entered_human or t.time_entered or '—' }}</td>
             <td class="small">{{ t.time_exited_human or t.time_exited or '—' }}</td>
             <td>{{ t.ticker or '—' }}</td>
+            <td class="small">{{ t.timeframe or 'N/A' }}</td>
             <td><span class="pill pill-status">{{ t.trade_type or 'Manual' }}</span></td>
             <td>
               {% set side = t.side or t.direction %}

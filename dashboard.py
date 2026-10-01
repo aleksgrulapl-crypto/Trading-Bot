@@ -26,6 +26,7 @@ from trade_log import (
     is_trade_delete_candidate,
     load_raw_log,
     reconcile_with_positions,
+    _parse_iso_like,
 )
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
@@ -173,6 +174,9 @@ def normalize_trades(trades):
 
         # ensure status is present
         copy["status"] = copy.get("status") or ("CLOSED" if copy.get("time_exited") else "OPEN")
+
+        # ensure timeframe is present (older log entries predate this field)
+        copy["timeframe"] = copy.get("timeframe") or "N/A"
 
         # human timestamps preserved by trade_log but ensure keys exist
         copy["time_entered"] = copy.get("time_entered")
@@ -335,6 +339,123 @@ def _safe_analytics(analytics: dict) -> dict:
     return result
 
 
+def _trade_hold_seconds(trade):
+    """Seconds between time_entered and time_exited, or None if unavailable."""
+    entered = _parse_iso_like(trade.get("time_entered"))
+    exited = _parse_iso_like(trade.get("time_exited"))
+    if not entered or not exited:
+        return None
+    try:
+        return (exited - entered).total_seconds()
+    except Exception:
+        return None
+
+
+def _format_duration(seconds):
+    """Format a duration in seconds as e.g. '1d 4h 12m'."""
+    if seconds is None:
+        return None
+    seconds = max(0, int(seconds))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, _ = divmod(rem, 60)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours or days:
+        parts.append(f"{hours}h")
+    parts.append(f"{minutes}m")
+    return " ".join(parts)
+
+
+def compute_detailed_analytics(trades):
+    """
+    Build in-depth analytics for the Analytics page: best/worst trade,
+    per-ticker win/loss breakdown, an equity curve, and average hold time.
+    Uses only closed trades with a resolvable GBP PnL.
+    """
+    defaults = {
+        "best_trade": None,
+        "worst_trade": None,
+        "per_ticker_stats": [],
+        "equity_curve": [],
+        "avg_hold_time": None,
+    }
+    if not trades:
+        return defaults
+
+    fx_rate = float(getattr(config, "FX_USD_GBP", 0.78) or 0.78)
+
+    cleaned = []
+    for t in trades:
+        copy = dict(t)
+        pnl_gbp_raw = copy.get("pnl_gbp")
+        pnl_raw = copy.get("pnl")
+        try:
+            if pnl_gbp_raw not in (None, ""):
+                copy["pnl_gbp_display"] = float(pnl_gbp_raw)
+            elif pnl_raw not in (None, ""):
+                copy["pnl_gbp_display"] = round(float(pnl_raw) * fx_rate, 2)
+            else:
+                copy["pnl_gbp_display"] = None
+        except Exception:
+            copy["pnl_gbp_display"] = None
+        cleaned.append(copy)
+
+    closed = [t for t in cleaned if t.get("status") == "CLOSED" or t.get("time_exited")]
+    closed_with_pnl = [t for t in closed if t.get("pnl_gbp_display") is not None]
+
+    best_trade = max(closed_with_pnl, key=lambda t: t["pnl_gbp_display"]) if closed_with_pnl else None
+    worst_trade = min(closed_with_pnl, key=lambda t: t["pnl_gbp_display"]) if closed_with_pnl else None
+
+    # Per-ticker win/loss breakdown
+    per_ticker = {}
+    for t in closed_with_pnl:
+        ticker = t.get("ticker") or "—"
+        stats = per_ticker.setdefault(ticker, {
+            "ticker": ticker, "wins": 0, "losses": 0, "trade_count": 0, "total_pnl": 0.0,
+        })
+        stats["trade_count"] += 1
+        pnl = t["pnl_gbp_display"]
+        stats["total_pnl"] += pnl
+        if pnl > 0:
+            stats["wins"] += 1
+        elif pnl < 0:
+            stats["losses"] += 1
+
+    per_ticker_stats = []
+    for stats in per_ticker.values():
+        decided = stats["wins"] + stats["losses"]
+        stats["win_rate"] = round((stats["wins"] / decided) * 100, 2) if decided else None
+        stats["total_pnl"] = round(stats["total_pnl"], 2)
+        per_ticker_stats.append(stats)
+    per_ticker_stats.sort(key=lambda s: s["total_pnl"], reverse=True)
+
+    # Equity curve: cumulative GBP PnL ordered chronologically by exit time
+    ordered = sorted(
+        closed_with_pnl,
+        key=lambda t: t.get("time_exited") or t.get("time_entered") or "",
+    )
+    equity_curve = []
+    running = 0.0
+    for t in ordered:
+        running += t["pnl_gbp_display"]
+        label = t.get("time_exited_human") or t.get("time_exited") or t.get("time_entered_human") or ""
+        equity_curve.append({"label": label, "balance": round(running, 2)})
+
+    # Average hold time across closed trades with resolvable entry/exit timestamps
+    hold_seconds = [s for s in (_trade_hold_seconds(t) for t in closed) if s is not None]
+    avg_hold_seconds = mean(hold_seconds) if hold_seconds else None
+
+    return {
+        "best_trade": best_trade,
+        "worst_trade": worst_trade,
+        "per_ticker_stats": per_ticker_stats,
+        "equity_curve": equity_curve,
+        "avg_hold_time": _format_duration(avg_hold_seconds),
+    }
+
+
 def _build_request_context():
     """Build fresh, per-request dashboard context.
 
@@ -449,6 +570,24 @@ def dashboard_data():
             "message": "Failed to render dashboard partial",
             "details": str(exc),
         }), 500
+
+
+@dashboard.route("/dashboard/analytics")
+@login_required
+def dashboard_analytics():
+    """Render the in-depth Analytics page: best/worst trade, per-ticker
+    win/loss breakdown, equity curve, and average hold time."""
+    ctx = _build_request_context()
+    detailed = compute_detailed_analytics(ctx["combined_trades"])
+
+    return render_template(
+        "analytics.html",
+        title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
+        cache_bust=time.time(),
+        account=ctx["account"],
+        analytics=ctx["analytics"],
+        detailed=detailed,
+    )
 
 
 @dashboard.route("/dashboard/close/<position_id>", methods=["POST"])

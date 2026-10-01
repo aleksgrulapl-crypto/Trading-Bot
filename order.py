@@ -123,6 +123,7 @@ def place_order(
     if deal_ref:
         source = str(trade_source or "tradingview").strip().lower()
         ts = uk_timestamp()
+        tf = timeframe or "N/A"
         pending_payload = {
             "dealId": None,
             "dealReference": deal_ref,
@@ -132,6 +133,7 @@ def place_order(
             "size": float(size),
             "entry_price": float(entry_price),
             "time_entered": ts,
+            "timeframe": tf,
             "trade_source": source,
             "origin": source,
             "notes": f"sl={sl}; tp={tp}; timeframe={timeframe}; dealReference={deal_ref}",
@@ -181,6 +183,7 @@ def place_order(
                     "size": float(size),
                     "entry_price": float(entry_price),
                     "time_entered": ts,
+                    "timeframe": tf,
                     "trade_source": source,
                     "origin": source,
                     "notes": f"sl={sl}; tp={tp}; timeframe={timeframe}; dealReference={deal_ref}",

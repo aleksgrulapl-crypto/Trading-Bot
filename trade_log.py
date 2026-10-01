@@ -1062,7 +1062,7 @@ def _merge_trade_group(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     for entry in ranked[1:]:
         for key in ("dealId", "dealReference", "ticker", "side", "size", "entry_price",
-                    "exit_price", "trade_source", "origin"):
+                    "exit_price", "trade_source", "origin", "timeframe"):
             if merged.get(key) in (None, "") and entry.get(key) not in (None, ""):
                 merged[key] = entry.get(key)
         _promote_trusted_duplicate_provenance(merged, entry)
@@ -1214,6 +1214,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
     size = payload.get("size") or (pos.get("size") if isinstance(pos, dict) else None) or (pos.get("contractSize") if isinstance(pos, dict) else None)
     entry_price = payload.get("entry_price") or (pos.get("level") if isinstance(pos, dict) else None) or (pos.get("entryPrice") if isinstance(pos, dict) else None)
     time_entered = payload.get("time_entered") or (pos.get("createdDate") if isinstance(pos, dict) else None) or (pos.get("createdDateUTC") if isinstance(pos, dict) else None)
+    timeframe = payload.get("timeframe") or (pos.get("timeframe") if isinstance(pos, dict) else None) or "N/A"
     origin = _detect_trade_origin(payload, side, dealId, dealReference)
     trusted_origin = _trusted_trade_origin(payload, origin, dealReference)
 
@@ -1304,6 +1305,8 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
                     existing["entry_price"] = entry_val; updated = True
             if (existing.get("time_entered") in (None, "")) and time_entered:
                 existing["time_entered"] = time_entered; updated = True
+            if (existing.get("timeframe") in (None, "")) and timeframe:
+                existing["timeframe"] = timeframe; updated = True
             if not existing.get("trade_source"):
                 existing["trade_source"] = existing.get("origin") or origin
                 updated = True
@@ -1331,6 +1334,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
             "entry_price": entry_val,
             "time_entered": time_entered or _now_iso(),
             "time_entered_human": _humanize(time_entered or _now_iso()),
+            "timeframe": timeframe,
             "exit_price": None,
             "time_exited": None,
             "time_exited_human": None,
@@ -1650,6 +1654,8 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                         matched["entry_price"] = float(entry_price); changed = True
                 except Exception:
                     pass
+                if not matched.get("timeframe"):
+                    matched["timeframe"] = "N/A"; changed = True
                 if _collapse_lingering_tradingview_duplicate(
                     trades, matched, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered
                 ):
@@ -1669,6 +1675,7 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                     "entry_price": float(entry_price or 0),
                     "time_entered": time_entered or _now_iso(),
                     "time_entered_human": _humanize(time_entered or _now_iso()),
+                    "timeframe": "N/A",
                     "time_exited": None,
                     "time_exited_human": None,
                     "pnl": None,
@@ -1688,6 +1695,7 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                     "entry_price": entry_price or 0,
                     "time_entered": time_entered or _now_iso(),
                     "time_entered_human": _humanize(time_entered or _now_iso()),
+                    "timeframe": "N/A",
                     "time_exited": None,
                     "time_exited_human": None,
                     "pnl": None,
