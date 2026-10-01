@@ -96,7 +96,11 @@
               {{ p.profit is not none and p.profit or '—' }}
             </td>
             <td>
+              {% if is_owner %}
               <button onclick="closePosition('{{ p.dealId or p.id }}')">Close</button>
+              {% else %}
+              <span class="small">—</span>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -140,7 +144,7 @@
             <td>{{ t.ticker or '—' }}</td>
             <td class="small">{{ t.timeframe or 'N/A' }}</td>
             <td>
-              {% if t._log_index is not none %}
+              {% if is_owner and t._log_index is not none %}
               <select class="type-select" onchange="updateTradeType({{ t._log_index }}, this.value)">
                 {% for value, label in [('tradingview', 'TradingView'), ('trader', 'Trader'), ('hedge', 'Hedge')] %}
                 <option value="{{ value }}" {% if (t.trade_type or 'Trader') == label %}selected{% endif %}>{{ label }}</option>
@@ -175,7 +179,7 @@
               {{ display_pnl if display_pnl is not none else '—' }}
             </td>
             <td>
-              {% if t.can_delete and t._log_index is not none %}
+              {% if is_owner and t.can_delete and t._log_index is not none %}
               <button class="button-danger" onclick="deleteTrade({{ t._log_index }})">Delete</button>
               {% endif %}
             </td>

@@ -51,32 +51,72 @@ def dashboard_login():
 
 @dashboard.route("/dashboard/login", methods=["POST"])
 def dashboard_login_submit():
+    username = (request.form.get("username") or "owner").strip().lower()
     password = request.form.get("password", "")
-    expected = os.getenv("DASHBOARD_PASSWORD", getattr(config, "DASHBOARD_PASSWORD", None) or "Angelika140282")
-    if expected == "Angelika140282":
-        logger.warning("Using default dashboard password. Set DASHBOARD_PASSWORD in environment to secure the dashboard.")
-    if password == expected:
-        resp = redirect("/dashboard")
-        resp.set_cookie("dashboard_auth", "1", max_age=60 * 60 * 24 * 7)
-        return resp
-    return render_template("login.html", title="Dashboard Login", error="Invalid password")
+
+    owner_password = os.getenv("DASHBOARD_OWNER_PASSWORD", getattr(config, "DASHBOARD_OWNER_PASSWORD", None) or "Angelika140282")
+    viewer_password = os.getenv("DASHBOARD_VIEWER_PASSWORD", getattr(config, "DASHBOARD_VIEWER_PASSWORD", None) or "Viewer123$")
+    if owner_password == "Angelika140282":
+        logger.warning("Using default dashboard Owner password. Set DASHBOARD_OWNER_PASSWORD in environment to secure the dashboard.")
+
+    if username == "owner" and password == owner_password:
+        role = "owner"
+    elif username == "viewer" and password == viewer_password:
+        role = "viewer"
+    else:
+        return render_template("login.html", title="Dashboard Login", error="Invalid username or password"), 401
+
+    resp = redirect("/dashboard")
+    resp.set_cookie("dashboard_auth", "1", max_age=60 * 60 * 24 * 7)
+    resp.set_cookie("dashboard_role", role, max_age=60 * 60 * 24 * 7)
+    return resp
 
 
 @dashboard.route("/dashboard/logout")
 def dashboard_logout():
     resp = redirect("/dashboard/login")
     resp.delete_cookie("dashboard_auth")
+    resp.delete_cookie("dashboard_role")
     return resp
 
 
 # -----------------------------
-# Auth decorator
+# Auth decorators
 # -----------------------------
 def login_required(view):
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
         if not request.cookies.get("dashboard_auth"):
             return redirect("/dashboard/login")
+        return view(*args, **kwargs)
+    return wrapper
+
+
+def current_role() -> str:
+    """Return the logged-in role: 'owner' or 'viewer'.
+
+    Legacy sessions (an auth cookie set before roles existed, or a cookie
+    with an unrecognized value) are treated as 'owner' to preserve the
+    original single-password behavior.
+    """
+    role = request.cookies.get("dashboard_role")
+    if role in ("owner", "viewer"):
+        return role
+    return "owner"
+
+
+def owner_required(view):
+    """Require the Owner role for mutating dashboard actions (close/delete/edit).
+    Viewer accounts are authenticated but limited to read-only pages."""
+    @functools.wraps(view)
+    def wrapper(*args, **kwargs):
+        if not request.cookies.get("dashboard_auth"):
+            return redirect("/dashboard/login")
+        if current_role() != "owner":
+            return jsonify({
+                "status": "error",
+                "message": "forbidden_viewer_role",
+            }), 403
         return view(*args, **kwargs)
     return wrapper
 
@@ -536,6 +576,7 @@ def dashboard_home():
         positions=ctx["positions"],
         trades=ctx["combined_trades"],
         analytics=ctx["analytics"],
+        is_owner=current_role() == "owner",
     )
 
 
@@ -556,6 +597,7 @@ def dashboard_data():
             positions=ctx["positions"],
             trades=ctx["combined_trades"],
             analytics=ctx["analytics"],
+            is_owner=current_role() == "owner",
         )
         return jsonify({
             "html": html,
@@ -588,11 +630,12 @@ def dashboard_analytics():
         account=ctx["account"],
         analytics=ctx["analytics"],
         detailed=detailed,
+        is_owner=current_role() == "owner",
     )
 
 
 @dashboard.route("/dashboard/close/<position_id>", methods=["POST"])
-@login_required
+@owner_required
 def dashboard_close_position(position_id: str):
     """Close a live broker position from the dashboard."""
     position_id = str(position_id or "").strip()
@@ -634,7 +677,7 @@ def dashboard_close_position(position_id: str):
 
 
 @dashboard.route("/dashboard/trade/<int:trade_index>/delete", methods=["POST"])
-@login_required
+@owner_required
 def dashboard_delete_trade(trade_index: int):
     """Delete one completed or broker-missing phantom trade-log row from the dashboard."""
     try:
@@ -667,7 +710,7 @@ def dashboard_delete_trade(trade_index: int):
 
 
 @dashboard.route("/dashboard/trade/<int:trade_index>/type", methods=["POST"])
-@login_required
+@owner_required
 def dashboard_update_trade_type(trade_index: int):
     """Correct a trade log row's recorded type (e.g. mislabeled 'Trader' rows
     that were really TradingView alerts), so analytics stay accurate."""

@@ -315,6 +315,21 @@ def _dashboard_login_required(view):
         return view(*args, **kwargs)
     return wrapper
 
+def _dashboard_owner_required(view):
+    """Like _dashboard_login_required, but also blocks the Viewer role from
+    debug routes that place orders or close positions."""
+    @functools.wraps(view)
+    def wrapper(*args, **kwargs):
+        if not request.cookies.get("dashboard_auth"):
+            return redirect("/dashboard/login")
+        role = request.cookies.get("dashboard_role") or "owner"
+        if role not in ("owner", "viewer"):
+            role = "owner"
+        if role != "owner":
+            return jsonify({"status": "error", "message": "forbidden_viewer_role"}), 403
+        return view(*args, **kwargs)
+    return wrapper
+
 def _safe_get_json(raw_text: str) -> Any:
     try:
         return request.get_json(force=True)
@@ -876,7 +891,7 @@ def debug_sizing(symbol, action, price, sl, tp):
         return jsonify({"error": "invalid_parameters"}), 400
 
 @app.route("/debug/order/<epic>/<action>/<size>")
-@_dashboard_login_required
+@_dashboard_owner_required
 def debug_order(epic, action, size):
     try:
         result = place_order(epic, action, float(size))
@@ -886,7 +901,7 @@ def debug_order(epic, action, size):
         return jsonify({"error": "order_failed"}), 500
 
 @app.route("/debug/close-test/<deal_id>", methods=["GET"])
-@_dashboard_login_required
+@_dashboard_owner_required
 def debug_close_test(deal_id):
     from config import API_POSITIONS
     url1 = f"{API_POSITIONS}/{deal_id}/close"

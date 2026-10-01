@@ -2846,6 +2846,184 @@ class TestProtectedRoutes:
         assert response.headers["Location"].endswith("/dashboard/login")
 
 
+class TestDashboardRoles:
+    def test_owner_login_sets_owner_role_cookie(self, monkeypatch):
+        from flask import Flask
+        from dashboard import dashboard
+        import dashboard as dashboard_module
+
+        monkeypatch.delenv("DASHBOARD_OWNER_PASSWORD", raising=False)
+        monkeypatch.delenv("DASHBOARD_VIEWER_PASSWORD", raising=False)
+        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_OWNER_PASSWORD", "owner-pw")
+        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_VIEWER_PASSWORD", "viewer-pw")
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+
+        response = client.post("/dashboard/login", data={"username": "owner", "password": "owner-pw"})
+
+        assert response.status_code == 302
+        assert response.headers["Location"] == "/dashboard"
+        set_cookie_headers = response.headers.get_all("Set-Cookie")
+        assert any("dashboard_auth=1" in h for h in set_cookie_headers)
+        assert any("dashboard_role=owner" in h for h in set_cookie_headers)
+
+    def test_viewer_login_sets_viewer_role_cookie(self, monkeypatch):
+        from flask import Flask
+        from dashboard import dashboard
+        import dashboard as dashboard_module
+
+        monkeypatch.delenv("DASHBOARD_OWNER_PASSWORD", raising=False)
+        monkeypatch.delenv("DASHBOARD_VIEWER_PASSWORD", raising=False)
+        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_OWNER_PASSWORD", "owner-pw")
+        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_VIEWER_PASSWORD", "viewer-pw")
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+
+        response = client.post("/dashboard/login", data={"username": "viewer", "password": "viewer-pw"})
+
+        assert response.status_code == 302
+        set_cookie_headers = response.headers.get_all("Set-Cookie")
+        assert any("dashboard_role=viewer" in h for h in set_cookie_headers)
+
+    def test_viewer_password_rejected_for_owner_username(self, monkeypatch):
+        from flask import Flask
+        from dashboard import dashboard
+        import dashboard as dashboard_module
+
+        monkeypatch.delenv("DASHBOARD_OWNER_PASSWORD", raising=False)
+        monkeypatch.delenv("DASHBOARD_VIEWER_PASSWORD", raising=False)
+        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_OWNER_PASSWORD", "owner-pw")
+        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_VIEWER_PASSWORD", "viewer-pw")
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+
+        response = client.post("/dashboard/login", data={"username": "owner", "password": "viewer-pw"})
+
+        assert response.status_code == 401
+        assert "Invalid" in response.get_data(as_text=True)
+
+    def test_viewer_role_is_blocked_from_close_endpoint(self, monkeypatch):
+        from flask import Flask
+        from dashboard import dashboard
+
+        monkeypatch.setattr("dashboard.close_live_position", lambda position_id: {"status": "success"})
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "viewer")
+
+        response = client.post("/dashboard/close/D1")
+        data = response.get_json()
+
+        assert response.status_code == 403
+        assert data["message"] == "forbidden_viewer_role"
+
+    def test_viewer_role_is_blocked_from_delete_endpoint(self, monkeypatch):
+        from flask import Flask
+        from dashboard import dashboard
+
+        monkeypatch.setattr("dashboard.delete_trade_log_entry", lambda idx: (True, {}, "ok"))
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "viewer")
+
+        response = client.post("/dashboard/trade/0/delete")
+        data = response.get_json()
+
+        assert response.status_code == 403
+        assert data["message"] == "forbidden_viewer_role"
+
+    def test_viewer_role_is_blocked_from_update_type_endpoint(self, monkeypatch):
+        from flask import Flask
+        from dashboard import dashboard
+
+        monkeypatch.setattr("dashboard.update_trade_type_entry", lambda idx, new_type: (True, {}, "ok"))
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "viewer")
+
+        response = client.post("/dashboard/trade/0/type", json={"type": "hedge"})
+        data = response.get_json()
+
+        assert response.status_code == 403
+        assert data["message"] == "forbidden_viewer_role"
+
+    def test_owner_role_can_still_use_close_endpoint(self, monkeypatch):
+        from flask import Flask
+        from dashboard import dashboard
+
+        monkeypatch.setattr("dashboard.close_live_position", lambda position_id: {"status": "success"})
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "owner")
+
+        response = client.post("/dashboard/close/D1")
+
+        assert response.status_code == 200
+
+    def test_legacy_auth_cookie_without_role_is_treated_as_owner(self, monkeypatch):
+        """Pre-existing sessions created before roles existed only carry
+        dashboard_auth; they must keep full (Owner) access."""
+        from flask import Flask
+        from dashboard import dashboard
+
+        monkeypatch.setattr("dashboard.close_live_position", lambda position_id: {"status": "success"})
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+
+        response = client.post("/dashboard/close/D1")
+
+        assert response.status_code == 200
+
+    def test_dashboard_home_marks_viewer_role_in_context(self, monkeypatch):
+        from flask import Flask
+        import dashboard as dashboard_module
+        from dashboard import dashboard
+
+        monkeypatch.setattr(dashboard_module, "_build_request_context", lambda: {
+            "account": {"pnl": 0},
+            "positions": [],
+            "combined_trades": [],
+            "analytics": {
+                "win_rate": 0, "expectancy": 0, "trade_count": 0,
+                "total_pl": 0, "max_drawdown": 0,
+            },
+        })
+
+        app = Flask(__name__, template_folder="templates")
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "viewer")
+
+        response = client.get("/dashboard")
+        body = response.get_data(as_text=True)
+
+        assert response.status_code == 200
+        assert "Viewer" in body
+        assert "button onclick=\"closePosition" not in body
+
+
 class TestDashboardCloseEndpoint:
     def test_close_endpoint_calls_close_service(self, monkeypatch):
         from flask import Flask
