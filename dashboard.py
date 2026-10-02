@@ -19,6 +19,7 @@ from flask import Blueprint, request, render_template, redirect, jsonify
 
 import session
 import config
+import deposits
 from close_position import close_position as close_live_position
 from trade_log import (
     delete_trade_log_entry,
@@ -117,6 +118,20 @@ def owner_required(view):
                 "status": "error",
                 "message": "forbidden_viewer_role",
             }), 403
+        return view(*args, **kwargs)
+    return wrapper
+
+
+def owner_page_required(view):
+    """Require the Owner role for whole-page (non-JSON) dashboard routes.
+    Viewer accounts are authenticated but are redirected back to the main
+    dashboard instead of receiving a JSON 403."""
+    @functools.wraps(view)
+    def wrapper(*args, **kwargs):
+        if not request.cookies.get("dashboard_auth"):
+            return redirect("/dashboard/login")
+        if current_role() != "owner":
+            return redirect("/dashboard")
         return view(*args, **kwargs)
     return wrapper
 
@@ -632,6 +647,63 @@ def dashboard_analytics():
         detailed=detailed,
         is_owner=current_role() == "owner",
     )
+
+
+@dashboard.route("/dashboard/deposits")
+@owner_page_required
+def dashboard_deposits():
+    """Render the Owner-only deposit/withdrawal bookkeeping page.
+
+    This is a manual ledger for tracking money moved in/out of the broker
+    account for accurate equity context; it does not move real funds."""
+    ctx = _build_request_context()
+    entries = deposits.list_entries_sorted()
+    totals = deposits.summarize(entries)
+
+    return render_template(
+        "deposits.html",
+        title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
+        cache_bust=time.time(),
+        account=ctx["account"],
+        entries=entries,
+        totals=totals,
+        is_owner=True,
+    )
+
+
+@dashboard.route("/dashboard/deposits/add", methods=["POST"])
+@owner_required
+def dashboard_deposits_add():
+    """Add a manual deposit/withdrawal row to the bookkeeping ledger."""
+    payload = request.form if request.form else (request.get_json(silent=True) or {})
+    entry_type = payload.get("type")
+    amount = payload.get("amount")
+    note = payload.get("note", "")
+    occurred_at = payload.get("occurred_at")
+
+    ok, record, status = deposits.add_entry(entry_type, amount, note, occurred_at)
+
+    if request.is_json:
+        if ok:
+            return jsonify({"status": "success", "entry": record}), 200
+        code = 400 if status in ("invalid_type", "invalid_amount") else 500
+        return jsonify({"status": "error", "message": status}), code
+
+    # Standard HTML form submission: redirect back to the page.
+    return redirect("/dashboard/deposits")
+
+
+@dashboard.route("/dashboard/deposits/<entry_id>/delete", methods=["POST"])
+@owner_required
+def dashboard_deposits_delete(entry_id: str):
+    """Delete a row from the deposit/withdrawal bookkeeping ledger."""
+    ok, status = deposits.delete_entry(entry_id)
+
+    if ok:
+        return jsonify({"status": "success", "message": "Entry deleted."}), 200
+
+    code = 404 if status == "not_found" else (400 if status == "invalid_id" else 500)
+    return jsonify({"status": "error", "message": status}), code
 
 
 @dashboard.route("/dashboard/close/<position_id>", methods=["POST"])
