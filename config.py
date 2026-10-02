@@ -171,6 +171,11 @@ DAILY_REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", 0))
 TRADE_LOG_PATH = os.getenv("TRADE_LOG_PATH", os.getenv("TRADE_LOG_FILE", "/data/trade_log.json"))
 DAILY_REPORT_FILE = os.getenv("DAILY_REPORT_FILE", "/tmp/daily_report.json")
 
+# Deposit/withdrawal bookkeeping log (Owner-only dashboard page). This is a
+# manual ledger for tracking money moved in/out of the broker account for
+# accurate equity context; it does not move real funds.
+DEPOSITS_LOG_PATH = os.getenv("DEPOSITS_LOG_PATH", "/data/deposits_log.json")
+
 # Cache and timing
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 2))
 

@@ -258,6 +258,9 @@
             </span>
             <a href="/dashboard">Dashboard</a>
             <a href="/dashboard/analytics">Analytics</a>
+            {% if is_owner %}
+            <a href="/dashboard/deposits">Deposits</a>
+            {% endif %}
             <a href="/dashboard/logout" class="logout">Logout</a>
         </div>
     </div>
