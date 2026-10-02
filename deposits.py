@@ -99,6 +99,7 @@ def _coerce_amount(raw: Any) -> Optional[float]:
 def add_entry(
     entry_type: str,
     amount: Any,
+    investor: str = "",
     note: str = "",
     occurred_at: Optional[str] = None,
     path: str = LOG_PATH,
@@ -106,7 +107,9 @@ def add_entry(
     """Append a new deposit/withdrawal row to the ledger.
 
     *amount* must be a positive number; direction is carried by *entry_type*
-    ("deposit" or "withdrawal"), not by the sign of the amount.
+    ("deposit" or "withdrawal"), not by the sign of the amount. *investor*
+    identifies whose capital this entry belongs to, so ROI/ownership share
+    can be calculated per-person.
     """
     normalized_type = str(entry_type or "").strip().lower()
     if normalized_type not in VALID_TYPES:
@@ -116,6 +119,11 @@ def add_entry(
     if amt is None:
         return False, None, "invalid_amount"
 
+    investor_name = str(investor or "").strip()
+    if not investor_name:
+        return False, None, "invalid_investor"
+    investor_name = investor_name[:100]
+
     # Accept a caller-supplied date (YYYY-MM-DD or ISO datetime); fall back to now.
     when = (str(occurred_at).strip() if occurred_at else "") or _now_iso()
 
@@ -123,6 +131,7 @@ def add_entry(
         "id": uuid.uuid4().hex,
         "type": normalized_type,
         "amount": amt,
+        "investor": investor_name,
         "note": (str(note).strip() if note else "")[:500],
         "occurred_at": when,
         "created_at": _now_iso(),
@@ -183,3 +192,177 @@ def list_entries_sorted(path: str = LOG_PATH) -> List[Dict[str, Any]]:
         return str(e.get("occurred_at") or e.get("created_at") or "")
 
     return sorted(entries, key=_sort_key, reverse=True)
+
+
+def list_investors(entries: List[Dict[str, Any]]) -> List[str]:
+    """Return a sorted list of distinct investor names seen in *entries*."""
+    names = {str(e.get("investor") or "").strip() for e in entries or [] if isinstance(e, dict)}
+    names.discard("")
+    return sorted(names, key=str.lower)
+
+
+def _parse_entry_datetime(raw: Optional[str]) -> Optional[datetime]:
+    """Parse an entry's ``occurred_at``/``created_at`` string into a naive
+    (UTC-equivalent) datetime. Accepts plain dates ("2026-01-01") and
+    ISO-8601 timestamps (with or without a trailing "Z")."""
+    if not raw:
+        return None
+    s = str(raw).strip()
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt
+    except Exception:
+        pass
+    try:
+        return datetime.strptime(s, "%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def investor_breakdown(
+    entries: List[Dict[str, Any]],
+    current_balance: Optional[float] = None,
+    as_of: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Compute each investor's time-weighted ownership share and ROI.
+
+    Allocation method ("capital-days"): every deposit contributes
+    ``amount * days_held_until(as_of)`` to its investor's weight, and every
+    withdrawal subtracts ``amount * days_since_until(as_of)``. Summing these
+    is mathematically equivalent to the area under that investor's balance
+    curve over time (a dollar invested for twice as long carries twice the
+    weight of an equally-sized dollar invested for half as long), so capital
+    added or removed at different times is weighted fairly rather than
+    treated as if it had all been invested from day one.
+
+    A configured "owner" investor (``config.OWNER_INVESTOR_NAME``) is given
+    a flat ownership-share override (``config.OWNER_INVESTOR_OVERRIDE_PCT``,
+    default 15%) off the top before the remaining share pool is split by
+    time-weighted capital, e.g. for covering backend/hosting costs as the
+    account owner. The owner still participates in the remaining pool via
+    their own time-weighted contribution, on top of the flat override.
+
+    The overall account gain/loss (current_balance - total net contribution)
+    is then split across investors proportional to their final share.
+    """
+    as_of = as_of or datetime.utcnow()
+
+    per_investor: Dict[str, Dict[str, float]] = {}
+    for e in entries or []:
+        if not isinstance(e, dict):
+            continue
+        name = str(e.get("investor") or "").strip() or "Unassigned"
+        amt = e.get("amount") or 0
+        try:
+            amt = float(amt)
+        except (TypeError, ValueError):
+            continue
+
+        occurred = _parse_entry_datetime(e.get("occurred_at")) or _parse_entry_datetime(e.get("created_at"))
+        days_held = max((as_of - occurred).total_seconds() / 86400.0, 0.0) if occurred else 0.0
+
+        bucket = per_investor.setdefault(name, {"deposited": 0.0, "withdrawn": 0.0, "capital_days": 0.0})
+        if e.get("type") == "deposit":
+            bucket["deposited"] += amt
+            bucket["capital_days"] += amt * days_held
+        elif e.get("type") == "withdrawal":
+            bucket["withdrawn"] += amt
+            bucket["capital_days"] -= amt * days_held
+
+    total_net_contribution = round(
+        sum(b["deposited"] - b["withdrawn"] for b in per_investor.values()), 2
+    )
+    total_capital_days = sum(b["capital_days"] for b in per_investor.values())
+
+    # Raw (pre-owner-override) share per investor. Prefer time-weighted
+    # capital-days; if there's no meaningful time weight yet (e.g. all
+    # contributions were just made and share the same as_of date), fall back
+    # to a simple net-contribution split so day-one shares are still sane.
+    use_time_weighted = total_capital_days > 0
+    raw_share: Dict[str, float] = {}
+    for name, b in per_investor.items():
+        if use_time_weighted:
+            raw_share[name] = (b["capital_days"] / total_capital_days) * 100.0 if total_capital_days else 0.0
+        else:
+            raw_share[name] = (
+                ((b["deposited"] - b["withdrawn"]) / total_net_contribution) * 100.0
+                if total_net_contribution not in (0, 0.0)
+                else 0.0
+            )
+
+    owner_name = str(getattr(config, "OWNER_INVESTOR_NAME", "Aleks") or "").strip()
+    owner_override_pct = float(getattr(config, "OWNER_INVESTOR_OVERRIDE_PCT", 15) or 0)
+    owner_key = next(
+        (name for name in per_investor if name.strip().lower() == owner_name.lower()),
+        None,
+    ) if owner_name else None
+
+    final_share: Dict[str, float] = {}
+    if owner_key is not None and 0 < owner_override_pct < 100:
+        remaining_pool = 100.0 - owner_override_pct
+        for name in per_investor:
+            if name == owner_key:
+                final_share[name] = owner_override_pct + raw_share[name] * (remaining_pool / 100.0)
+            else:
+                final_share[name] = raw_share[name] * (remaining_pool / 100.0)
+    else:
+        final_share = dict(raw_share)
+
+    balance = None
+    if current_balance is not None:
+        try:
+            balance = float(current_balance)
+        except (TypeError, ValueError):
+            balance = None
+
+    overall_gain_loss = round(balance - total_net_contribution, 2) if balance is not None else None
+    overall_roi_pct = (
+        round((overall_gain_loss / total_net_contribution) * 100, 2)
+        if overall_gain_loss is not None and total_net_contribution not in (0, 0.0)
+        else None
+    )
+
+    investors = []
+    for name, b in sorted(per_investor.items(), key=lambda kv: kv[0].lower()):
+        net_contribution = round(b["deposited"] - b["withdrawn"], 2)
+        share_pct = round(final_share.get(name, 0.0), 2)
+        allocated_gain_loss = (
+            round(overall_gain_loss * (final_share.get(name, 0.0) / 100.0), 2)
+            if overall_gain_loss is not None
+            else None
+        )
+        current_value = (
+            round(net_contribution + allocated_gain_loss, 2)
+            if allocated_gain_loss is not None
+            else None
+        )
+        roi_pct = (
+            round((allocated_gain_loss / net_contribution) * 100, 2)
+            if allocated_gain_loss is not None and net_contribution not in (0, 0.0)
+            else None
+        )
+        investors.append({
+            "investor": name,
+            "deposited": round(b["deposited"], 2),
+            "withdrawn": round(b["withdrawn"], 2),
+            "net_contribution": net_contribution,
+            "capital_days": round(b["capital_days"], 1),
+            "share_pct": share_pct,
+            "is_owner": name == owner_key,
+            "allocated_gain_loss": allocated_gain_loss,
+            "current_value": current_value,
+            "roi_pct": roi_pct,
+        })
+
+    return {
+        "investors": investors,
+        "total_net_contribution": total_net_contribution,
+        "current_balance": balance,
+        "overall_gain_loss": overall_gain_loss,
+        "overall_roi_pct": overall_roi_pct,
+        "owner_name": owner_key,
+        "owner_override_pct": owner_override_pct if owner_key is not None else None,
+        "time_weighted": use_time_weighted,
+    }
