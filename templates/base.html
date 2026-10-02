@@ -76,12 +76,23 @@
         }
         header .nav {
             display: flex;
-            gap: 16px;
+            gap: 4px;
             font-size: 14px;
             align-items: center;
         }
-        header .nav a { color: var(--accent); text-decoration: none; font-weight: 500; }
+        header .nav a {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 500;
+            display: inline-block;
+            padding: 6px 8px;
+            margin: -6px -8px;
+            border-radius: 6px;
+            line-height: 1.2;
+        }
+        header .nav a:hover { background: rgba(56, 189, 248, 0.12); }
         header .nav a.logout { color: var(--danger); }
+        header .nav a.logout:hover { background: rgba(248, 113, 113, 0.12); }
         #error-banner {
             display: none;
             margin: 12px 24px 0;

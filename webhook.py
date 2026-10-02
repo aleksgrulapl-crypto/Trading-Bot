@@ -62,21 +62,27 @@ ALERT_DEDUPE_WINDOW = 10      # seconds – suppress identical repeat alerts (Tr
 _UK_TZ = pytz.timezone(TIMEZONE)
 
 
+_WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
 def _is_trade_locked_now() -> bool:
     """
     Return True if new trade entries should currently be blocked, per the
-    configured trade time lock window (default 14:00-15:00 UK time), which
-    covers the US cash market open and its associated volatility spike.
+    configured trade time lock window(s). Each window may apply every day or
+    be restricted to a single weekday (see config.TRADE_LOCK_WINDOWS).
     """
     if not TRADE_LOCK_ENABLED:
         return False
     now = datetime.now(_UK_TZ)
     now_minutes = now.hour * 60 + now.minute
+    now_weekday = now.weekday()
     windows = list(getattr(config, "TRADE_LOCK_WINDOWS", TRADE_LOCK_WINDOWS) or [])
     if not windows:
         start, end = TRADE_LOCK_START_HOUR * 60, TRADE_LOCK_END_HOUR * 60
-        windows = [(start, end)]
-    for start, end in windows:
+        windows = [(-1, start, end)]
+    for weekday, start, end in windows:
+        if weekday != -1 and weekday != now_weekday:
+            continue
         if start <= end:
             if start <= now_minutes < end:
                 return True
@@ -90,13 +96,19 @@ def _is_trade_locked_now() -> bool:
 def _trade_lock_windows_label() -> str:
     windows = list(getattr(config, "TRADE_LOCK_WINDOWS", TRADE_LOCK_WINDOWS) or [])
     if not windows:
-        windows = [(TRADE_LOCK_START_HOUR * 60, TRADE_LOCK_END_HOUR * 60)]
+        windows = [(-1, TRADE_LOCK_START_HOUR * 60, TRADE_LOCK_END_HOUR * 60)]
 
     def _fmt(total_minutes: int) -> str:
         total = int(total_minutes) % (24 * 60)
         return f"{total // 60:02d}:{total % 60:02d}"
 
-    return ", ".join(f"{_fmt(start)}-{_fmt(end)}" for start, end in windows)
+    parts = []
+    for weekday, start, end in windows:
+        label = f"{_fmt(start)}-{_fmt(end)}"
+        if weekday != -1:
+            label = f"{_WEEKDAY_LABELS[weekday]} {label}"
+        parts.append(label)
+    return ", ".join(parts)
 
 # In-memory cache of recently processed TradingView alerts, keyed by a
 # signature of the alert content. Used to guard against TradingView

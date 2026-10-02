@@ -2408,12 +2408,16 @@ class TestWebhookProcessing:
         import webhook
 
         monkeypatch.setattr(webhook, "TRADE_LOCK_ENABLED", True)
-        monkeypatch.setattr(webhook.config, "TRADE_LOCK_WINDOWS", [(8 * 60, 9 * 60 + 30), (13 * 60, 15 * 60)])
+        monkeypatch.setattr(
+            webhook.config,
+            "TRADE_LOCK_WINDOWS",
+            [(-1, 8 * 60, 9 * 60 + 30), (-1, 13 * 60, 15 * 60)],
+        )
 
         class _FakeDateTime:
             @staticmethod
             def now(_tz):
-                return type("T", (), {"hour": 9, "minute": 15})()
+                return type("T", (), {"hour": 9, "minute": 15, "weekday": lambda self: 2})()
 
         monkeypatch.setattr(webhook, "datetime", _FakeDateTime)
         assert webhook._is_trade_locked_now() is True
@@ -2421,9 +2425,32 @@ class TestWebhookProcessing:
         class _FakeDateTime2:
             @staticmethod
             def now(_tz):
-                return type("T", (), {"hour": 10, "minute": 0})()
+                return type("T", (), {"hour": 10, "minute": 0, "weekday": lambda self: 2})()
 
         monkeypatch.setattr(webhook, "datetime", _FakeDateTime2)
+        assert webhook._is_trade_locked_now() is False
+
+    def test_trade_lock_windows_support_weekday_restriction(self, monkeypatch):
+        import webhook
+
+        monkeypatch.setattr(webhook, "TRADE_LOCK_ENABLED", True)
+        # Monday-only 08:30-09:30 window (weekday 0 = Monday).
+        monkeypatch.setattr(webhook.config, "TRADE_LOCK_WINDOWS", [(0, 8 * 60 + 30, 9 * 60 + 30)])
+
+        class _FakeMonday:
+            @staticmethod
+            def now(_tz):
+                return type("T", (), {"hour": 9, "minute": 0, "weekday": lambda self: 0})()
+
+        monkeypatch.setattr(webhook, "datetime", _FakeMonday)
+        assert webhook._is_trade_locked_now() is True
+
+        class _FakeTuesday:
+            @staticmethod
+            def now(_tz):
+                return type("T", (), {"hour": 9, "minute": 0, "weekday": lambda self: 1})()
+
+        monkeypatch.setattr(webhook, "datetime", _FakeTuesday)
         assert webhook._is_trade_locked_now() is False
 
     def test_same_ticker_signal_can_scale_in_when_capacity_remains(self, monkeypatch):
