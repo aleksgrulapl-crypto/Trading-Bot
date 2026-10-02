@@ -659,6 +659,7 @@ def dashboard_deposits():
     ctx = _build_request_context()
     entries = deposits.list_entries_sorted()
     totals = deposits.summarize(entries)
+    investors = deposits.list_investors(entries)
 
     return render_template(
         "deposits.html",
@@ -667,6 +668,28 @@ def dashboard_deposits():
         account=ctx["account"],
         entries=entries,
         totals=totals,
+        investors=investors,
+        is_owner=True,
+    )
+
+
+@dashboard.route("/dashboard/roi")
+@owner_page_required
+def dashboard_roi():
+    """Render the Owner-only ROI page: per-investor ownership share and
+    gain/loss, allocated proportionally to each investor's net contribution
+    against the broker account's current balance."""
+    ctx = _build_request_context()
+    entries = deposits.list_entries_sorted()
+    account = ctx["account"]
+    breakdown = deposits.investor_breakdown(entries, (account or {}).get("balance"))
+
+    return render_template(
+        "roi.html",
+        title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
+        cache_bust=time.time(),
+        account=account,
+        breakdown=breakdown,
         is_owner=True,
     )
 
@@ -678,15 +701,16 @@ def dashboard_deposits_add():
     payload = request.form if request.form else (request.get_json(silent=True) or {})
     entry_type = payload.get("type")
     amount = payload.get("amount")
+    investor = payload.get("investor", "")
     note = payload.get("note", "")
     occurred_at = payload.get("occurred_at")
 
-    ok, record, status = deposits.add_entry(entry_type, amount, note, occurred_at)
+    ok, record, status = deposits.add_entry(entry_type, amount, investor, note, occurred_at)
 
     if request.is_json:
         if ok:
             return jsonify({"status": "success", "entry": record}), 200
-        code = 400 if status in ("invalid_type", "invalid_amount") else 500
+        code = 400 if status in ("invalid_type", "invalid_amount", "invalid_investor") else 500
         return jsonify({"status": "error", "message": status}), code
 
     # Standard HTML form submission: redirect back to the page.

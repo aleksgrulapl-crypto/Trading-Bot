@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="analytics-wrap">
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">ROI Overview</div>
+    </div>
+    <div class="metrics-row">
+      <div class="metric">
+        <div class="metric-label">Total Net Contribution</div>
+        <div class="metric-value metric-neutral">£{{ "%.2f"|format(breakdown.total_net_contribution) }}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Current Balance</div>
+        <div class="metric-value metric-neutral">
+          {% if breakdown.current_balance is not none %}£{{ "%.2f"|format(breakdown.current_balance) }}{% else %}—{% endif %}
+        </div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Overall Gain / Loss</div>
+        <div class="metric-value {% if breakdown.overall_gain_loss is not none and breakdown.overall_gain_loss >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+          {% if breakdown.overall_gain_loss is not none %}£{{ "%.2f"|format(breakdown.overall_gain_loss) }}{% else %}—{% endif %}
+        </div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Overall ROI</div>
+        <div class="metric-value {% if breakdown.overall_roi_pct is not none and breakdown.overall_roi_pct >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+          {% if breakdown.overall_roi_pct is not none %}{{ "%.2f"|format(breakdown.overall_roi_pct) }}%{% else %}—{% endif %}
+        </div>
+      </div>
+    </div>
+    <p class="small" style="margin-top: 10px;">
+      Each investor's share of the overall gain/loss is allocated proportionally to their
+      net contribution (deposits minus withdrawals) as a fraction of total net contributions.
+      This is a simple capital-weighted split — it does not time-weight contributions, so
+      capital added later shares equally (by %) in gains/losses that accrued before it was
+      invested. Manage expectations accordingly for contributions made at very different times.
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Per-Investor Breakdown</div>
+    </div>
+    <table class="table table-spaced">
+      <thead>
+        <tr>
+          <th>Investor</th>
+          <th>Deposited</th>
+          <th>Withdrawn</th>
+          <th>Net Contribution</th>
+          <th>Ownership Share</th>
+          <th>Allocated Gain / Loss</th>
+          <th>Current Value</th>
+          <th>ROI</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for inv in breakdown.investors %}
+        <tr>
+          <td>{{ inv.investor }}</td>
+          <td>£{{ "%.2f"|format(inv.deposited) }}</td>
+          <td>£{{ "%.2f"|format(inv.withdrawn) }}</td>
+          <td>£{{ "%.2f"|format(inv.net_contribution) }}</td>
+          <td>{% if inv.share_pct is not none %}{{ "%.2f"|format(inv.share_pct) }}%{% else %}—{% endif %}</td>
+          <td class="{% if inv.allocated_gain_loss is not none and inv.allocated_gain_loss >= 0 %}pnl-pos{% elif inv.allocated_gain_loss is not none %}pnl-neg{% endif %}">
+            {% if inv.allocated_gain_loss is not none %}£{{ "%.2f"|format(inv.allocated_gain_loss) }}{% else %}—{% endif %}
+          </td>
+          <td>{% if inv.current_value is not none %}£{{ "%.2f"|format(inv.current_value) }}{% else %}—{% endif %}</td>
+          <td class="{% if inv.roi_pct is not none and inv.roi_pct >= 0 %}pnl-pos{% elif inv.roi_pct is not none %}pnl-neg{% endif %}">
+            {% if inv.roi_pct is not none %}{{ "%.2f"|format(inv.roi_pct) }}%{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="small">No investor contributions recorded yet. Add entries on the <a href="/dashboard/deposits">Deposits page</a>.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+{% endblock %}

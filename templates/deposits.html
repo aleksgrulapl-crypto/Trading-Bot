@@ -48,6 +48,16 @@
                style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 120px;">
       </div>
       <div>
+        <label class="small" for="investor">Investor</label><br>
+        <input type="text" name="investor" id="investor" list="investor-list" maxlength="100" required placeholder="e.g. Aleks"
+               style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 140px;">
+        <datalist id="investor-list">
+          {% for inv in investors %}
+          <option value="{{ inv }}">
+          {% endfor %}
+        </datalist>
+      </div>
+      <div>
         <label class="small" for="occurred_at">Date</label><br>
         <input type="date" name="occurred_at" id="occurred_at"
                style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border);">
@@ -67,10 +77,14 @@
     <div class="card-header">
       <div class="card-title">History</div>
     </div>
+    <p class="small" style="margin-top: -4px;">
+      See the per-investor ownership share and ROI on the <a href="/dashboard/roi">ROI page</a>.
+    </p>
     <table class="table table-spaced">
       <thead>
         <tr>
           <th>Date</th>
+          <th>Investor</th>
           <th>Type</th>
           <th>Amount</th>
           <th>Note</th>
@@ -81,6 +95,7 @@
         {% for e in entries %}
         <tr>
           <td>{{ e.occurred_at|default('—') }}</td>
+          <td>{{ e.investor|default('Unassigned') }}</td>
           <td>
             <span class="pill {% if e.type == 'deposit' %}pill-long{% else %}pill-short{% endif %}">
               {{ e.type|capitalize }}
@@ -95,7 +110,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="5" class="small">No deposit/withdrawal entries yet.</td></tr>
+        <tr><td colspan="6" class="small">No deposit/withdrawal entries yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
