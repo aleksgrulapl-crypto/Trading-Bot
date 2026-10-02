@@ -109,21 +109,54 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/London")
 # Trade time lock: block opening new trades during a high-volatility window
 # (e.g. the US cash market open at 14:30 UK time), to reduce volatility
 # exposure and improve winrate. Hours are in 24h UK local time (TIMEZONE).
+#
+# TEMPORARY (2-month trial, started Oct 2026): the general daily lock windows
+# have been switched OFF while bot behaviour is monitored. Only the Monday
+# 08:30-09:30 UK window remains active, to avoid weekend-reopen spikes/drops.
+# This is not a removal of the feature — to restore the previous behaviour,
+# set TRADE_LOCK_WINDOWS back to "08:00-09:30,13:00-15:00" (applies every day)
+# or set TRADE_LOCK_ENABLED=False to disable the lock entirely.
 TRADE_LOCK_ENABLED = os.getenv("TRADE_LOCK_ENABLED", "True").lower() in ("1", "true", "yes")
 TRADE_LOCK_START_HOUR = int(os.getenv("TRADE_LOCK_START_HOUR", 14))
 TRADE_LOCK_END_HOUR = int(os.getenv("TRADE_LOCK_END_HOUR", 15))
-TRADE_LOCK_WINDOWS_RAW = os.getenv("TRADE_LOCK_WINDOWS", "08:00-09:30,13:00-15:00")
+# Each window is "HH:MM-HH:MM" (applies every day) or "Day:HH:MM-HH:MM" (applies
+# only on that day of the week, e.g. "Mon:08:30-09:30"). Comma-separated.
+TRADE_LOCK_WINDOWS_RAW = os.getenv("TRADE_LOCK_WINDOWS", "Mon:08:30-09:30")
+
+_WEEKDAY_NAMES = {
+    "mon": 0, "monday": 0,
+    "tue": 1, "tuesday": 1,
+    "wed": 2, "wednesday": 2,
+    "thu": 3, "thursday": 3,
+    "fri": 4, "friday": 4,
+    "sat": 5, "saturday": 5,
+    "sun": 6, "sunday": 6,
+}
 
 
-def _parse_trade_lock_windows(raw: str) -> List[Tuple[int, int]]:
-    windows: List[Tuple[int, int]] = []
+def _parse_trade_lock_windows(raw: str) -> List[Tuple[int, int, int]]:
+    """Parse TRADE_LOCK_WINDOWS into (weekday_or_-1, start_minute, end_minute)
+    tuples. weekday_or_-1 is -1 (meaning "every day") when no day prefix is
+    given, otherwise 0=Monday .. 6=Sunday, matching datetime.weekday()."""
+    windows: List[Tuple[int, int, int]] = []
     if not raw:
         return windows
     for segment in str(raw).split(","):
         chunk = segment.strip()
         if not chunk or "-" not in chunk:
             continue
-        start_raw, end_raw = chunk.split("-", 1)
+
+        weekday = -1
+        time_part = chunk
+        if ":" in chunk:
+            maybe_day, _, rest = chunk.partition(":")
+            if maybe_day.strip().lower() in _WEEKDAY_NAMES:
+                weekday = _WEEKDAY_NAMES[maybe_day.strip().lower()]
+                time_part = rest.strip()
+
+        if "-" not in time_part:
+            continue
+        start_raw, end_raw = time_part.split("-", 1)
 
         def _to_minutes(part: str) -> int:
             text = str(part).strip()
@@ -142,7 +175,7 @@ def _parse_trade_lock_windows(raw: str) -> List[Tuple[int, int]]:
         end_m = max(0, min(24 * 60, end_m))
         if start_m == end_m:
             continue
-        windows.append((start_m, end_m))
+        windows.append((weekday, start_m, end_m))
     return windows
 
 
