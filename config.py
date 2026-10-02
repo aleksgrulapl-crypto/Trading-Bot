@@ -176,6 +176,13 @@ DAILY_REPORT_FILE = os.getenv("DAILY_REPORT_FILE", "/tmp/daily_report.json")
 # accurate equity context; it does not move real funds.
 DEPOSITS_LOG_PATH = os.getenv("DEPOSITS_LOG_PATH", "/data/deposits_log.json")
 
+# ROI allocation: the named investor receives a flat ownership-share
+# override (e.g. for covering backend/hosting costs as the account owner),
+# taken off the top before the remaining share pool is split by time-weighted
+# capital contribution. Set OWNER_INVESTOR_OVERRIDE_PCT to 0 to disable.
+OWNER_INVESTOR_NAME = os.getenv("OWNER_INVESTOR_NAME", "Aleks")
+OWNER_INVESTOR_OVERRIDE_PCT = float(os.getenv("OWNER_INVESTOR_OVERRIDE_PCT", 15))
+
 # Cache and timing
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 2))
 

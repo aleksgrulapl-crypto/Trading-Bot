@@ -32,11 +32,22 @@
       </div>
     </div>
     <p class="small" style="margin-top: 10px;">
-      Each investor's share of the overall gain/loss is allocated proportionally to their
-      net contribution (deposits minus withdrawals) as a fraction of total net contributions.
-      This is a simple capital-weighted split — it does not time-weight contributions, so
-      capital added later shares equally (by %) in gains/losses that accrued before it was
-      invested. Manage expectations accordingly for contributions made at very different times.
+      Each investor's share of the overall gain/loss is allocated by
+      <strong>time-weighted capital</strong>: money invested for longer carries
+      proportionally more weight than the same amount invested recently, so
+      contributions made at different times are split fairly instead of as if
+      everyone had invested from day one.
+      {% if breakdown.owner_name %}
+      <strong>{{ breakdown.owner_name }}</strong> additionally receives a flat
+      {{ "%.0f"|format(breakdown.owner_override_pct) }}% ownership share off the top
+      (for covering backend/hosting costs as account owner), on top of their own
+      time-weighted share of the remaining {{ "%.0f"|format(100 - breakdown.owner_override_pct) }}%.
+      {% endif %}
+      {% if not breakdown.time_weighted %}
+      <br>Note: all current contributions are too recent for time-weighting to take
+      effect yet, so shares below are temporarily based on contribution amount only —
+      this will shift to be time-weighted as the ledger accumulates history.
+      {% endif %}
     </p>
   </div>
 
@@ -51,6 +62,7 @@
           <th>Deposited</th>
           <th>Withdrawn</th>
           <th>Net Contribution</th>
+          <th>Capital-Days</th>
           <th>Ownership Share</th>
           <th>Allocated Gain / Loss</th>
           <th>Current Value</th>
@@ -60,10 +72,14 @@
       <tbody>
         {% for inv in breakdown.investors %}
         <tr>
-          <td>{{ inv.investor }}</td>
+          <td>
+            {{ inv.investor }}
+            {% if inv.is_owner %}<span class="pill pill-status" title="Includes {{ '%.0f'|format(breakdown.owner_override_pct) }}% flat owner share">Owner +{{ "%.0f"|format(breakdown.owner_override_pct) }}%</span>{% endif %}
+          </td>
           <td>£{{ "%.2f"|format(inv.deposited) }}</td>
           <td>£{{ "%.2f"|format(inv.withdrawn) }}</td>
           <td>£{{ "%.2f"|format(inv.net_contribution) }}</td>
+          <td class="small">{{ "{:,.0f}".format(inv.capital_days) }}</td>
           <td>{% if inv.share_pct is not none %}{{ "%.2f"|format(inv.share_pct) }}%{% else %}—{% endif %}</td>
           <td class="{% if inv.allocated_gain_loss is not none and inv.allocated_gain_loss >= 0 %}pnl-pos{% elif inv.allocated_gain_loss is not none %}pnl-neg{% endif %}">
             {% if inv.allocated_gain_loss is not none %}£{{ "%.2f"|format(inv.allocated_gain_loss) }}{% else %}—{% endif %}
@@ -74,7 +90,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="8" class="small">No investor contributions recorded yet. Add entries on the <a href="/dashboard/deposits">Deposits page</a>.</td></tr>
+        <tr><td colspan="9" class="small">No investor contributions recorded yet. Add entries on the <a href="/dashboard/deposits">Deposits page</a>.</td></tr>
         {% endfor %}
       </tbody>
     </table>

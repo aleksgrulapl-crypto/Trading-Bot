@@ -201,24 +201,54 @@ def list_investors(entries: List[Dict[str, Any]]) -> List[str]:
     return sorted(names, key=str.lower)
 
 
+def _parse_entry_datetime(raw: Optional[str]) -> Optional[datetime]:
+    """Parse an entry's ``occurred_at``/``created_at`` string into a naive
+    (UTC-equivalent) datetime. Accepts plain dates ("2026-01-01") and
+    ISO-8601 timestamps (with or without a trailing "Z")."""
+    if not raw:
+        return None
+    s = str(raw).strip()
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt
+    except Exception:
+        pass
+    try:
+        return datetime.strptime(s, "%Y-%m-%d")
+    except Exception:
+        return None
+
+
 def investor_breakdown(
     entries: List[Dict[str, Any]],
     current_balance: Optional[float] = None,
+    as_of: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    """Compute each investor's ownership share and ROI from the ledger.
+    """Compute each investor's time-weighted ownership share and ROI.
 
-    Allocation method: each investor's net contribution (deposits minus
-    withdrawals) is compared against the total net contribution across all
-    investors to get a current ownership share. The overall account gain/loss
-    (current_balance - total net contribution) is then split across
-    investors proportional to that share. This is a simple capital-weighted
-    split — it does not time-weight contributions, so an investor who joined
-    later shares in gains/losses accrued before their contribution the same
-    as one who was in from day one. For a small, informal partnership this
-    is usually an acceptable approximation; a time-weighted (XIRR-style)
-    method would be more precise if contributions happen at very different
-    times.
+    Allocation method ("capital-days"): every deposit contributes
+    ``amount * days_held_until(as_of)`` to its investor's weight, and every
+    withdrawal subtracts ``amount * days_since_until(as_of)``. Summing these
+    is mathematically equivalent to the area under that investor's balance
+    curve over time (a dollar invested for twice as long carries twice the
+    weight of an equally-sized dollar invested for half as long), so capital
+    added or removed at different times is weighted fairly rather than
+    treated as if it had all been invested from day one.
+
+    A configured "owner" investor (``config.OWNER_INVESTOR_NAME``) is given
+    a flat ownership-share override (``config.OWNER_INVESTOR_OVERRIDE_PCT``,
+    default 15%) off the top before the remaining share pool is split by
+    time-weighted capital, e.g. for covering backend/hosting costs as the
+    account owner. The owner still participates in the remaining pool via
+    their own time-weighted contribution, on top of the flat override.
+
+    The overall account gain/loss (current_balance - total net contribution)
+    is then split across investors proportional to their final share.
     """
+    as_of = as_of or datetime.utcnow()
+
     per_investor: Dict[str, Dict[str, float]] = {}
     for e in entries or []:
         if not isinstance(e, dict):
@@ -229,15 +259,56 @@ def investor_breakdown(
             amt = float(amt)
         except (TypeError, ValueError):
             continue
-        bucket = per_investor.setdefault(name, {"deposited": 0.0, "withdrawn": 0.0})
+
+        occurred = _parse_entry_datetime(e.get("occurred_at")) or _parse_entry_datetime(e.get("created_at"))
+        days_held = max((as_of - occurred).total_seconds() / 86400.0, 0.0) if occurred else 0.0
+
+        bucket = per_investor.setdefault(name, {"deposited": 0.0, "withdrawn": 0.0, "capital_days": 0.0})
         if e.get("type") == "deposit":
             bucket["deposited"] += amt
+            bucket["capital_days"] += amt * days_held
         elif e.get("type") == "withdrawal":
             bucket["withdrawn"] += amt
+            bucket["capital_days"] -= amt * days_held
 
     total_net_contribution = round(
         sum(b["deposited"] - b["withdrawn"] for b in per_investor.values()), 2
     )
+    total_capital_days = sum(b["capital_days"] for b in per_investor.values())
+
+    # Raw (pre-owner-override) share per investor. Prefer time-weighted
+    # capital-days; if there's no meaningful time weight yet (e.g. all
+    # contributions were just made and share the same as_of date), fall back
+    # to a simple net-contribution split so day-one shares are still sane.
+    use_time_weighted = total_capital_days > 0
+    raw_share: Dict[str, float] = {}
+    for name, b in per_investor.items():
+        if use_time_weighted:
+            raw_share[name] = (b["capital_days"] / total_capital_days) * 100.0 if total_capital_days else 0.0
+        else:
+            raw_share[name] = (
+                ((b["deposited"] - b["withdrawn"]) / total_net_contribution) * 100.0
+                if total_net_contribution not in (0, 0.0)
+                else 0.0
+            )
+
+    owner_name = str(getattr(config, "OWNER_INVESTOR_NAME", "Aleks") or "").strip()
+    owner_override_pct = float(getattr(config, "OWNER_INVESTOR_OVERRIDE_PCT", 15) or 0)
+    owner_key = next(
+        (name for name in per_investor if name.strip().lower() == owner_name.lower()),
+        None,
+    ) if owner_name else None
+
+    final_share: Dict[str, float] = {}
+    if owner_key is not None and 0 < owner_override_pct < 100:
+        remaining_pool = 100.0 - owner_override_pct
+        for name in per_investor:
+            if name == owner_key:
+                final_share[name] = owner_override_pct + raw_share[name] * (remaining_pool / 100.0)
+            else:
+                final_share[name] = raw_share[name] * (remaining_pool / 100.0)
+    else:
+        final_share = dict(raw_share)
 
     balance = None
     if current_balance is not None:
@@ -256,14 +327,10 @@ def investor_breakdown(
     investors = []
     for name, b in sorted(per_investor.items(), key=lambda kv: kv[0].lower()):
         net_contribution = round(b["deposited"] - b["withdrawn"], 2)
-        share_pct = (
-            round((net_contribution / total_net_contribution) * 100, 2)
-            if total_net_contribution not in (0, 0.0)
-            else None
-        )
+        share_pct = round(final_share.get(name, 0.0), 2)
         allocated_gain_loss = (
-            round(overall_gain_loss * (net_contribution / total_net_contribution), 2)
-            if overall_gain_loss is not None and total_net_contribution not in (0, 0.0)
+            round(overall_gain_loss * (final_share.get(name, 0.0) / 100.0), 2)
+            if overall_gain_loss is not None
             else None
         )
         current_value = (
@@ -281,7 +348,9 @@ def investor_breakdown(
             "deposited": round(b["deposited"], 2),
             "withdrawn": round(b["withdrawn"], 2),
             "net_contribution": net_contribution,
+            "capital_days": round(b["capital_days"], 1),
             "share_pct": share_pct,
+            "is_owner": name == owner_key,
             "allocated_gain_loss": allocated_gain_loss,
             "current_value": current_value,
             "roi_pct": roi_pct,
@@ -293,4 +362,7 @@ def investor_breakdown(
         "current_balance": balance,
         "overall_gain_loss": overall_gain_loss,
         "overall_roi_pct": overall_roi_pct,
+        "owner_name": owner_key,
+        "owner_override_pct": owner_override_pct if owner_key is not None else None,
+        "time_weighted": use_time_weighted,
     }
