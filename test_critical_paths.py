@@ -2792,6 +2792,8 @@ class TestDashboardDedupe:
             "positions": [],
             "combined_trades": [],
             "analytics": dashboard._safe_analytics({}),
+            "weekly_analytics": dashboard._safe_analytics({}),
+            "monthly_analytics": dashboard._safe_analytics({}),
         })
 
         app = Flask(__name__)
@@ -3035,6 +3037,8 @@ class TestDashboardRoles:
                 "win_rate": 0, "expectancy": 0, "trade_count": 0,
                 "total_pl": 0, "max_drawdown": 0,
             },
+            "weekly_analytics": dashboard_module._safe_analytics({}),
+            "monthly_analytics": dashboard_module._safe_analytics({}),
         })
 
         app = Flask(__name__, template_folder="templates")
@@ -3153,7 +3157,7 @@ class TestDashboardDeleteTradeEndpoint:
         client = app.test_client()
         client.set_cookie("dashboard_auth", "1")
 
-        response = client.get("/dashboard/data")
+        response = client.get("/dashboard/trades/data")
         data = response.get_json()
         html = data["html"]
 
@@ -3180,7 +3184,7 @@ class TestDashboardDeleteTradeEndpoint:
         client = app.test_client()
         client.set_cookie("dashboard_auth", "1")
 
-        response = client.get("/dashboard/data")
+        response = client.get("/dashboard/trades/data")
         data = response.get_json()
         html = data["html"]
 
@@ -3214,7 +3218,7 @@ class TestDashboardDeleteTradeEndpoint:
         client = app.test_client()
         client.set_cookie("dashboard_auth", "1")
 
-        response = client.get("/dashboard/data")
+        response = client.get("/dashboard/trades/data")
         data = response.get_json()
         html = data["html"]
 
