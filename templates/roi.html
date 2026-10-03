@@ -32,21 +32,22 @@
       </div>
     </div>
     <p class="small" style="margin-top: 10px;">
-      Each investor's share of the overall gain/loss is allocated by
-      <strong>time-weighted capital</strong>: money invested for longer carries
-      proportionally more weight than the same amount invested recently, so
-      contributions made at different times are split fairly instead of as if
-      everyone had invested from day one.
+      Each investor's gain/loss is computed with <strong>NAV-per-unit
+      accounting</strong>: a deposit buys units of the fund at the current
+      NAV, and a withdrawal redeems units at the current NAV. Every closed
+      trade's PnL moves the NAV for everyone holding units at that moment —
+      so an investor only shares in gains or losses from trades closed
+      <em>after</em> their own deposit, never retroactively.
       {% if breakdown.owner_name %}
-      <strong>{{ breakdown.owner_name }}</strong> additionally receives a flat
-      {{ "%.0f"|format(breakdown.owner_override_pct) }}% ownership share off the top
-      (for covering backend/hosting costs as account owner), on top of their own
-      time-weighted share of the remaining {{ "%.0f"|format(100 - breakdown.owner_override_pct) }}%.
+      <strong>{{ breakdown.owner_name }}</strong> additionally receives a
+      {{ "%.0f"|format(breakdown.owner_override_pct) }}% performance fee on
+      profitable closed trades (for covering backend/hosting costs as account
+      owner), paid in newly issued units at that trade's NAV.
       {% endif %}
-      {% if not breakdown.time_weighted %}
-      <br>Note: all current contributions are too recent for time-weighting to take
-      effect yet, so shares below are temporarily based on contribution amount only —
-      this will shift to be time-weighted as the ledger accumulates history.
+      {% if breakdown.pre_ledger_pnl %}
+      <br>Note: £{{ "%.2f"|format(breakdown.pre_ledger_pnl) }} of PnL was
+      generated before any deposits were tracked and has been credited to
+      {{ breakdown.owner_name }} as pre-ledger equity.
       {% endif %}
     </p>
   </div>
@@ -62,7 +63,7 @@
           <th>Deposited</th>
           <th>Withdrawn</th>
           <th>Net Contribution</th>
-          <th>Capital-Days</th>
+          <th>Units Held</th>
           <th>Ownership Share</th>
           <th>Allocated Gain / Loss</th>
           <th>Current Value</th>
@@ -74,12 +75,12 @@
         <tr>
           <td>
             {{ inv.investor }}
-            {% if inv.is_owner %}<span class="pill pill-status" title="Includes {{ '%.0f'|format(breakdown.owner_override_pct) }}% flat owner share">Owner +{{ "%.0f"|format(breakdown.owner_override_pct) }}%</span>{% endif %}
+            {% if inv.is_owner %}<span class="pill pill-status" title="Receives a {{ '%.0f'|format(breakdown.owner_override_pct) }}% performance fee on profitable trades">Owner +{{ "%.0f"|format(breakdown.owner_override_pct) }}%</span>{% endif %}
           </td>
           <td>£{{ "%.2f"|format(inv.deposited) }}</td>
           <td>£{{ "%.2f"|format(inv.withdrawn) }}</td>
           <td>£{{ "%.2f"|format(inv.net_contribution) }}</td>
-          <td class="small">{{ "{:,.0f}".format(inv.capital_days) }}</td>
+          <td class="small">{{ "%.2f"|format(inv.units_held) }}</td>
           <td>{% if inv.share_pct is not none %}{{ "%.2f"|format(inv.share_pct) }}%{% else %}—{% endif %}</td>
           <td class="{% if inv.allocated_gain_loss is not none and inv.allocated_gain_loss >= 0 %}pnl-pos{% elif inv.allocated_gain_loss is not none %}pnl-neg{% endif %}">
             {% if inv.allocated_gain_loss is not none %}£{{ "%.2f"|format(inv.allocated_gain_loss) }}{% else %}—{% endif %}

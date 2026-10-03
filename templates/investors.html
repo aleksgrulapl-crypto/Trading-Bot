@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="grid-full">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Investors</div>
+    </div>
+
+    {% if investors %}
+    <div class="investor-list">
+      {% for name in investors %}
+      <span class="investor-chip {% if owner_name and name.strip().lower() == owner_name.strip().lower() %}investor-owner{% endif %}">
+        {{ name }}
+      </span>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="small">No investors recorded yet.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -223,33 +223,51 @@ def _parse_entry_datetime(raw: Optional[str]) -> Optional[datetime]:
 
 def investor_breakdown(
     entries: List[Dict[str, Any]],
+    trade_pnl_events: Optional[List[Dict[str, Any]]] = None,
     current_balance: Optional[float] = None,
     as_of: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    """Compute each investor's time-weighted ownership share and ROI.
+    """Compute each investor's ownership and ROI using NAV-per-unit accounting.
 
-    Allocation method ("capital-days"): every deposit contributes
-    ``amount * days_held_until(as_of)`` to its investor's weight, and every
-    withdrawal subtracts ``amount * days_since_until(as_of)``. Summing these
-    is mathematically equivalent to the area under that investor's balance
-    curve over time (a dollar invested for twice as long carries twice the
-    weight of an equally-sized dollar invested for half as long), so capital
-    added or removed at different times is weighted fairly rather than
-    treated as if it had all been invested from day one.
+    This is the standard mutual-fund allocation model: every deposit buys
+    "units" of the fund at its *current* NAV-per-unit; every withdrawal
+    redeems units at the current NAV-per-unit. Each closed trade's PnL
+    moves the fund's total value, which moves NAV-per-unit for everyone
+    holding units *at that moment*.
 
-    A configured "owner" investor (``config.OWNER_INVESTOR_NAME``) is given
-    a flat ownership-share override (``config.OWNER_INVESTOR_OVERRIDE_PCT``,
-    default 15%) off the top before the remaining share pool is split by
-    time-weighted capital, e.g. for covering backend/hosting costs as the
-    account owner. The owner still participates in the remaining pool via
-    their own time-weighted contribution, on top of the flat override.
+    The critical property this gives us (unlike a flat/time-weighted split
+    of total gain-loss): an investor who deposits today starts holding
+    units at today's NAV, so prior gains/losses never retroactively apply
+    to them, and future trade PnL only affects them proportional to the
+    units they hold at the time each trade closes. Depositing with no
+    trades closed since shows ~0 gain/loss, not a share of historical P&L.
 
-    The overall account gain/loss (current_balance - total net contribution)
-    is then split across investors proportional to their final share.
+    ``trade_pnl_events`` is an optional list of ``{"ts": datetime-or-iso-str,
+    "pnl": float}`` dicts, one per closed trade with a resolvable GBP PnL and
+    exit time, used to drive the NAV-per-unit timeline. Pass the caller's
+    already FX-converted trade PnL series (see dashboard.py).
+
+    Any trade PnL that closed *before* the first capital entry (e.g. the
+    bot was already trading before anyone's deposits were tracked) has no
+    unit holders to attribute it to, so it is credited directly to the
+    configured owner (``config.OWNER_INVESTOR_NAME``) as pre-ledger equity,
+    or left unattributed if no owner is configured/present.
+
+    A configured owner performance fee (``config.OWNER_INVESTOR_OVERRIDE_PCT``,
+    default 15%) is skimmed from each *profitable* closed trade while other
+    investors hold units, and credited to the owner as additional units at
+    that moment's NAV (covering backend/hosting costs) — this dilutes other
+    unit holders only going forward, never retroactively.
     """
     as_of = as_of or datetime.utcnow()
 
-    per_investor: Dict[str, Dict[str, float]] = {}
+    owner_name = str(getattr(config, "OWNER_INVESTOR_NAME", "Aleks") or "").strip()
+    owner_override_pct = float(getattr(config, "OWNER_INVESTOR_OVERRIDE_PCT", 15) or 0)
+
+    # Build the chronological event timeline: capital flows + trade PnL.
+    capital_events = []
+    deposited_totals: Dict[str, float] = {}
+    withdrawn_totals: Dict[str, float] = {}
     for e in entries or []:
         if not isinstance(e, dict):
             continue
@@ -259,56 +277,95 @@ def investor_breakdown(
             amt = float(amt)
         except (TypeError, ValueError):
             continue
+        etype = e.get("type")
+        if etype not in ("deposit", "withdrawal"):
+            continue
 
         occurred = _parse_entry_datetime(e.get("occurred_at")) or _parse_entry_datetime(e.get("created_at"))
-        days_held = max((as_of - occurred).total_seconds() / 86400.0, 0.0) if occurred else 0.0
+        capital_events.append({"ts": occurred or as_of, "kind": "capital", "ctype": etype, "investor": name, "amount": amt})
 
-        bucket = per_investor.setdefault(name, {"deposited": 0.0, "withdrawn": 0.0, "capital_days": 0.0})
-        if e.get("type") == "deposit":
-            bucket["deposited"] += amt
-            bucket["capital_days"] += amt * days_held
-        elif e.get("type") == "withdrawal":
-            bucket["withdrawn"] += amt
-            bucket["capital_days"] -= amt * days_held
-
-    total_net_contribution = round(
-        sum(b["deposited"] - b["withdrawn"] for b in per_investor.values()), 2
-    )
-    total_capital_days = sum(b["capital_days"] for b in per_investor.values())
-
-    # Raw (pre-owner-override) share per investor. Prefer time-weighted
-    # capital-days; if there's no meaningful time weight yet (e.g. all
-    # contributions were just made and share the same as_of date), fall back
-    # to a simple net-contribution split so day-one shares are still sane.
-    use_time_weighted = total_capital_days > 0
-    raw_share: Dict[str, float] = {}
-    for name, b in per_investor.items():
-        if use_time_weighted:
-            raw_share[name] = (b["capital_days"] / total_capital_days) * 100.0 if total_capital_days else 0.0
+        if etype == "deposit":
+            deposited_totals[name] = deposited_totals.get(name, 0.0) + amt
         else:
-            raw_share[name] = (
-                ((b["deposited"] - b["withdrawn"]) / total_net_contribution) * 100.0
-                if total_net_contribution not in (0, 0.0)
-                else 0.0
-            )
+            withdrawn_totals[name] = withdrawn_totals.get(name, 0.0) + amt
 
-    owner_name = str(getattr(config, "OWNER_INVESTOR_NAME", "Aleks") or "").strip()
-    owner_override_pct = float(getattr(config, "OWNER_INVESTOR_OVERRIDE_PCT", 15) or 0)
+    pnl_events = []
+    for p in trade_pnl_events or []:
+        if not isinstance(p, dict):
+            continue
+        try:
+            amount = float(p.get("pnl"))
+        except (TypeError, ValueError):
+            continue
+        raw_ts = p.get("ts")
+        ts = raw_ts if isinstance(raw_ts, datetime) else _parse_entry_datetime(raw_ts)
+        if ts is None:
+            continue
+        pnl_events.append({"ts": ts, "kind": "pnl", "amount": amount})
+
     owner_key = next(
-        (name for name in per_investor if name.strip().lower() == owner_name.lower()),
+        (name for name in deposited_totals.keys() | withdrawn_totals.keys() if name.strip().lower() == owner_name.lower()),
         None,
     ) if owner_name else None
 
-    final_share: Dict[str, float] = {}
-    if owner_key is not None and 0 < owner_override_pct < 100:
-        remaining_pool = 100.0 - owner_override_pct
-        for name in per_investor:
-            if name == owner_key:
-                final_share[name] = owner_override_pct + raw_share[name] * (remaining_pool / 100.0)
+    first_capital_ts = min((ev["ts"] for ev in capital_events), default=None)
+
+    pre_ledger_pnl = round(
+        sum(ev["amount"] for ev in pnl_events if first_capital_ts is None or ev["ts"] < first_capital_ts),
+        2,
+    )
+
+    timeline = [ev for ev in capital_events if True]
+    timeline += [ev for ev in pnl_events if first_capital_ts is not None and ev["ts"] >= first_capital_ts]
+    timeline.sort(key=lambda ev: ev["ts"])
+
+    fund_value = 0.0
+    total_units = 0.0
+    nav_per_unit = 1.0
+    investor_units: Dict[str, float] = {}
+
+    for ev in timeline:
+        if ev["kind"] == "pnl":
+            fund_value += ev["amount"]
+            if total_units > 0:
+                nav_per_unit = fund_value / total_units
             else:
-                final_share[name] = raw_share[name] * (remaining_pool / 100.0)
-    else:
-        final_share = dict(raw_share)
+                # No one holds units right now (e.g. everyone redeemed); this
+                # PnL has no owner to attribute to, so reset the baseline for
+                # whoever deposits next rather than crash on a divide-by-zero.
+                fund_value = 0.0
+                nav_per_unit = 1.0
+                continue
+
+            # Owner performance fee on profitable trades, paid in newly
+            # issued owner units (dilutes other holders going forward only).
+            if ev["amount"] > 0 and owner_key and 0 < owner_override_pct < 100 and nav_per_unit > 0:
+                fee = ev["amount"] * (owner_override_pct / 100.0)
+                fee_units = fee / nav_per_unit
+                investor_units[owner_key] = investor_units.get(owner_key, 0.0) + fee_units
+                total_units += fee_units
+                nav_per_unit = fund_value / total_units if total_units > 0 else nav_per_unit
+        else:  # capital event
+            name = ev["investor"]
+            safe_nav = nav_per_unit if nav_per_unit > 0 else 0.000001
+            if ev["ctype"] == "deposit":
+                units = ev["amount"] / safe_nav
+                investor_units[name] = investor_units.get(name, 0.0) + units
+                total_units += units
+                fund_value += ev["amount"]
+            else:  # withdrawal
+                units = ev["amount"] / safe_nav
+                investor_units[name] = investor_units.get(name, 0.0) - units
+                total_units -= units
+                fund_value -= ev["amount"]
+            if total_units > 0:
+                nav_per_unit = fund_value / total_units
+
+    # Seed the owner's value with any pre-ledger PnL (trading that happened
+    # before anyone's deposits were tracked).
+    owner_seed_value = pre_ledger_pnl if owner_key else 0.0
+
+    all_names = sorted(deposited_totals.keys() | withdrawn_totals.keys(), key=str.lower)
 
     balance = None
     if current_balance is not None:
@@ -317,6 +374,9 @@ def investor_breakdown(
         except (TypeError, ValueError):
             balance = None
 
+    total_net_contribution = round(
+        sum(deposited_totals.values()) - sum(withdrawn_totals.values()), 2
+    )
     overall_gain_loss = round(balance - total_net_contribution, 2) if balance is not None else None
     overall_roi_pct = (
         round((overall_gain_loss / total_net_contribution) * 100, 2)
@@ -325,30 +385,31 @@ def investor_breakdown(
     )
 
     investors = []
-    for name, b in sorted(per_investor.items(), key=lambda kv: kv[0].lower()):
-        net_contribution = round(b["deposited"] - b["withdrawn"], 2)
-        share_pct = round(final_share.get(name, 0.0), 2)
-        allocated_gain_loss = (
-            round(overall_gain_loss * (final_share.get(name, 0.0) / 100.0), 2)
-            if overall_gain_loss is not None
-            else None
-        )
-        current_value = (
-            round(net_contribution + allocated_gain_loss, 2)
-            if allocated_gain_loss is not None
-            else None
-        )
+    for name in all_names:
+        units = investor_units.get(name, 0.0)
+        share_pct = round((units / total_units) * 100.0, 2) if total_units > 0 else 0.0
+        base_value = units * nav_per_unit
+        if name == owner_key:
+            base_value += owner_seed_value
+        current_value = round(base_value, 2)
+
+        deposited = round(deposited_totals.get(name, 0.0), 2)
+        withdrawn = round(withdrawn_totals.get(name, 0.0), 2)
+        net_contribution = round(deposited - withdrawn, 2)
+
+        allocated_gain_loss = round(current_value - net_contribution, 2)
         roi_pct = (
             round((allocated_gain_loss / net_contribution) * 100, 2)
-            if allocated_gain_loss is not None and net_contribution not in (0, 0.0)
+            if net_contribution not in (0, 0.0)
             else None
         )
+
         investors.append({
             "investor": name,
-            "deposited": round(b["deposited"], 2),
-            "withdrawn": round(b["withdrawn"], 2),
+            "deposited": deposited,
+            "withdrawn": withdrawn,
             "net_contribution": net_contribution,
-            "capital_days": round(b["capital_days"], 1),
+            "units_held": round(units, 4),
             "share_pct": share_pct,
             "is_owner": name == owner_key,
             "allocated_gain_loss": allocated_gain_loss,
@@ -364,5 +425,5 @@ def investor_breakdown(
         "overall_roi_pct": overall_roi_pct,
         "owner_name": owner_key,
         "owner_override_pct": owner_override_pct if owner_key is not None else None,
-        "time_weighted": use_time_weighted,
+        "pre_ledger_pnl": owner_seed_value if owner_key else None,
     }

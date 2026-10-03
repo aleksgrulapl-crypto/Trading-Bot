@@ -13,6 +13,7 @@ import functools
 import time
 import math
 from statistics import mean
+from datetime import datetime, timedelta
 import logging
 import os
 from flask import Blueprint, request, render_template, redirect, jsonify
@@ -395,6 +396,55 @@ def _safe_analytics(analytics: dict) -> dict:
     return result
 
 
+def _naive_dt(dt):
+    """Normalize a datetime to naive (UTC-equivalent) by dropping tzinfo,
+    so comparisons across trade timestamps (which may include a 'Z'/offset)
+    and naive `datetime.utcnow()`-based cutoffs never raise."""
+    if dt is not None and dt.tzinfo is not None:
+        return dt.replace(tzinfo=None)
+    return dt
+
+
+def _trades_closed_since(trades, since_dt):
+    """Return closed trades whose exit (or entry, as fallback) time falls on
+    or after *since_dt*. Trades with no resolvable timestamp are excluded."""
+    out = []
+    for t in trades or []:
+        ts = _naive_dt(_parse_iso_like(t.get("time_exited")) or _parse_iso_like(t.get("time_entered")))
+        if ts is None:
+            continue
+        if ts >= since_dt:
+            out.append(t)
+    return out
+
+
+def _trade_pnl_events(trades):
+    """Build a chronological PnL event series (GBP, FX-converted) for closed
+    trades with a resolvable exit time, for use in investor NAV accounting."""
+    fx_rate = float(getattr(config, "FX_USD_GBP", 0.78) or 0.78)
+    events = []
+    for t in trades or []:
+        if not (t.get("status") == "CLOSED" or t.get("time_exited")):
+            continue
+        ts = _naive_dt(_parse_iso_like(t.get("time_exited")) or _parse_iso_like(t.get("time_entered")))
+        if ts is None:
+            continue
+        pnl_gbp_raw = t.get("pnl_gbp")
+        pnl_raw = t.get("pnl")
+        pnl = None
+        try:
+            if pnl_gbp_raw not in (None, ""):
+                pnl = float(pnl_gbp_raw)
+            elif pnl_raw not in (None, ""):
+                pnl = round(float(pnl_raw) * fx_rate, 2)
+        except Exception:
+            pnl = None
+        if pnl is None:
+            continue
+        events.append({"ts": ts, "pnl": pnl})
+    return events
+
+
 def _trade_hold_seconds(trade):
     """Seconds between time_entered and time_exited, or None if unavailable."""
     entered = _parse_iso_like(trade.get("time_entered"))
@@ -552,13 +602,24 @@ def _build_request_context():
         reverse=True,
     )
 
-    analytics = _safe_analytics(compute_analytics(filter_completed(combined_trades)))
+    completed_trades = filter_completed(combined_trades)
+    analytics = _safe_analytics(compute_analytics(completed_trades))
+
+    now = datetime.utcnow()
+    weekly_analytics = _safe_analytics(
+        compute_analytics(_trades_closed_since(completed_trades, now - timedelta(days=7)))
+    )
+    monthly_analytics = _safe_analytics(
+        compute_analytics(_trades_closed_since(completed_trades, now - timedelta(days=30)))
+    )
 
     return {
         "account": account,
         "positions": positions,
         "combined_trades": combined_trades,
         "analytics": analytics,
+        "weekly_analytics": weekly_analytics,
+        "monthly_analytics": monthly_analytics,
     }
 
 
@@ -589,8 +650,9 @@ def dashboard_home():
         cache_bust=time.time(),
         account=ctx["account"],
         positions=ctx["positions"],
-        trades=ctx["combined_trades"],
         analytics=ctx["analytics"],
+        weekly_analytics=ctx["weekly_analytics"],
+        monthly_analytics=ctx["monthly_analytics"],
         is_owner=current_role() == "owner",
     )
 
@@ -610,15 +672,15 @@ def dashboard_data():
             cache_bust=time.time(),
             account=ctx["account"],
             positions=ctx["positions"],
-            trades=ctx["combined_trades"],
             analytics=ctx["analytics"],
+            weekly_analytics=ctx["weekly_analytics"],
+            monthly_analytics=ctx["monthly_analytics"],
             is_owner=current_role() == "owner",
         )
         return jsonify({
             "html": html,
             "account": ctx["account"],
             "positions": ctx["positions"],
-            "trades": ctx["combined_trades"],
             "analytics": ctx["analytics"],
         })
     except Exception as exc:
@@ -628,6 +690,70 @@ def dashboard_data():
             "message": "Failed to render dashboard partial",
             "details": str(exc),
         }), 500
+
+
+@dashboard.route("/dashboard/trades")
+@login_required
+def dashboard_trades():
+    """Render the Trade Log page (moved off the main dashboard for a
+    tidier, more focused layout)."""
+    ctx = _build_request_context()
+
+    return render_template(
+        "trade_log.html",
+        title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
+        cache_bust=time.time(),
+        account=ctx["account"],
+        trades=ctx["combined_trades"],
+        is_owner=current_role() == "owner",
+    )
+
+
+@dashboard.route("/dashboard/trades/data")
+@login_required
+def dashboard_trades_data():
+    """Return fresh Trade Log data as JSON (with rendered HTML partial)."""
+    ctx = _build_request_context()
+
+    try:
+        html = render_template(
+            "trade_log_partial.html",
+            cache_bust=time.time(),
+            trades=ctx["combined_trades"],
+            is_owner=current_role() == "owner",
+        )
+        return jsonify({
+            "html": html,
+            "account": ctx["account"],
+            "trades": ctx["combined_trades"],
+        })
+    except Exception as exc:
+        logger.exception("dashboard/trades/data render failed: %s", exc)
+        return jsonify({
+            "error": "render_failed",
+            "message": "Failed to render trade log partial",
+            "details": str(exc),
+        }), 500
+
+
+@dashboard.route("/dashboard/investors")
+@login_required
+def dashboard_investors():
+    """Render a simple, visual-only list of investor names (no financial
+    figures) — visible to any logged-in user."""
+    ctx = _build_request_context()
+    entries = deposits.list_entries_sorted()
+    investors = deposits.list_investors(entries)
+
+    return render_template(
+        "investors.html",
+        title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
+        cache_bust=time.time(),
+        account=ctx["account"],
+        investors=investors,
+        owner_name=str(getattr(config, "OWNER_INVESTOR_NAME", "Aleks") or "").strip(),
+        is_owner=current_role() == "owner",
+    )
 
 
 @dashboard.route("/dashboard/analytics")
@@ -677,12 +803,14 @@ def dashboard_deposits():
 @owner_page_required
 def dashboard_roi():
     """Render the Owner-only ROI page: per-investor ownership share and
-    gain/loss, allocated proportionally to each investor's net contribution
-    against the broker account's current balance."""
+    gain/loss, computed via NAV-per-unit accounting against the chronological
+    deposit/withdrawal and trade-PnL timeline. An investor only participates
+    in gains/losses from trades closed after their own deposit."""
     ctx = _build_request_context()
     entries = deposits.list_entries_sorted()
     account = ctx["account"]
-    breakdown = deposits.investor_breakdown(entries, (account or {}).get("balance"))
+    pnl_events = _trade_pnl_events(ctx["combined_trades"])
+    breakdown = deposits.investor_breakdown(entries, pnl_events, (account or {}).get("balance"))
 
     return render_template(
         "roi.html",

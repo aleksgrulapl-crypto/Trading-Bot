@@ -112,85 +112,98 @@
     </div>
   </div>
 
-  <!-- Trade Log -->
-  <div class="grid-full" style="margin-top:16px;">
+  <!-- Weekly / Monthly Snapshots -->
+  <div class="grid-two" style="margin-top:16px;">
     <div class="card">
       <div class="card-header">
-        <div class="card-title">Trade Log</div>
+        <div class="card-title">Weekly Snapshot</div>
       </div>
 
-      {% if trades %}
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Time Entered</th>
-            <th>Time Exited</th>
-            <th>Ticker</th>
-            <th>Timeframe</th>
-            <th>Type</th>
-            <th>Side</th>
-            <th>Size</th>
-            <th>Entry</th>
-            <th>Exit</th>
-            <th>PnL (GBP)</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for t in trades %}
-          <tr>
-            <td class="small">{{ t.time_entered_human or t.time_entered or '—' }}</td>
-            <td class="small">{{ t.time_exited_human or t.time_exited or '—' }}</td>
-            <td>{{ t.ticker or '—' }}</td>
-            <td class="small">{{ t.timeframe or 'N/A' }}</td>
-            <td>
-              {% if is_owner and t._log_index is not none %}
-              <select class="type-select" onchange="updateTradeType({{ t._log_index }}, this.value)">
-                {% for value, label in [('tradingview', 'TradingView'), ('trader', 'Trader'), ('hedge', 'Hedge')] %}
-                <option value="{{ value }}" {% if (t.trade_type or 'Trader') == label %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
-              {% else %}
-              <span class="pill pill-status">{{ t.trade_type or 'Manual' }}</span>
-              {% endif %}
-            </td>
-            <td>
-              {% set side = t.side or t.direction %}
-              {% if side == 'Long' %}
-                <span class="pill pill-long">Long</span>
-              {% elif side == 'Short' %}
-                <span class="pill pill-short">Short</span>
-              {% else %}
-                <span class="pill pill-status">{{ side or '—' }}</span>
-              {% endif %}
-            </td>
-            <td>{{ t.size|default('—') }}</td>
-            <td>
-              {{ t.entry_price is not none and t.entry_price or t.get('entryPrice') or '—' }}
-            </td>
-            <td>
-              {{ t.exit_price is not none and t.exit_price or t.get('exitPrice') or '—' }}
-            </td>
-            {% set display_pnl = t.pnl_gbp %}
-            {% if display_pnl is none and t.pnl is not none %}
-              {% set display_pnl = (t.pnl * (config.FX_USD_GBP if config and config.FX_USD_GBP else 0.78))|round(2) %}
-            {% endif %}
-            <td class="{% if display_pnl is not none and display_pnl >= 0 %}pnl-pos{% elif display_pnl is not none %}pnl-neg{% endif %}">
-              {{ display_pnl if display_pnl is not none else '—' }}
-            </td>
-            <td>
-              {% if is_owner and t.can_delete and t._log_index is not none %}
-              <button class="button-danger" onclick="deleteTrade({{ t._log_index }})">Delete</button>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <div class="small">No trades recorded.</div>
-      {% endif %}
+      <div class="metrics-grid">
+        <div class="metric">
+          <div class="metric-label">Win Rate</div>
+          <div class="metric-value metric-neutral">
+            {{ weekly_analytics.win_rate is not none and weekly_analytics.win_rate or '—' }}%
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Trades</div>
+          <div class="metric-value metric-neutral">
+            {{ weekly_analytics.trade_count|default('—') }}
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Profit / Loss (GBP)</div>
+          <div class="metric-value {% if weekly_analytics.total_pl is not none and weekly_analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+            {{ weekly_analytics.total_pl is not none and weekly_analytics.total_pl or '—' }}
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Expectancy / Trade</div>
+          <div class="metric-value {% if weekly_analytics.expectancy is not none and weekly_analytics.expectancy >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+            {{ weekly_analytics.expectancy is not none and weekly_analytics.expectancy or '—' }}
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Max Drawdown</div>
+          <div class="metric-value metric-bad">
+            {{ weekly_analytics.max_drawdown|default('—') }}
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Average Win / Loss</div>
+          <div class="metric-value metric-neutral">
+            W {{ weekly_analytics.avg_win|default('—') }} / L {{ weekly_analytics.avg_loss|default('—') }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Monthly Snapshot</div>
+      </div>
+
+      <div class="metrics-grid">
+        <div class="metric">
+          <div class="metric-label">Win Rate</div>
+          <div class="metric-value metric-neutral">
+            {{ monthly_analytics.win_rate is not none and monthly_analytics.win_rate or '—' }}%
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Trades</div>
+          <div class="metric-value metric-neutral">
+            {{ monthly_analytics.trade_count|default('—') }}
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Profit / Loss (GBP)</div>
+          <div class="metric-value {% if monthly_analytics.total_pl is not none and monthly_analytics.total_pl >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+            {{ monthly_analytics.total_pl is not none and monthly_analytics.total_pl or '—' }}
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Expectancy / Trade</div>
+          <div class="metric-value {% if monthly_analytics.expectancy is not none and monthly_analytics.expectancy >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+            {{ monthly_analytics.expectancy is not none and monthly_analytics.expectancy or '—' }}
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Max Drawdown</div>
+          <div class="metric-value metric-bad">
+            {{ monthly_analytics.max_drawdown|default('—') }}
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Average Win / Loss</div>
+          <div class="metric-value metric-neutral">
+            W {{ monthly_analytics.avg_win|default('—') }} / L {{ monthly_analytics.avg_loss|default('—') }}
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
 </div>
+
