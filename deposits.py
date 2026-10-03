@@ -361,18 +361,30 @@ def investor_breakdown(
             if total_units > 0:
                 nav_per_unit = fund_value / total_units
 
-    # Seed the owner's value with any pre-ledger PnL (trading that happened
-    # before anyone's deposits were tracked).
-    owner_seed_value = pre_ledger_pnl if owner_key else 0.0
-
-    all_names = sorted(deposited_totals.keys() | withdrawn_totals.keys(), key=str.lower)
-
     balance = None
     if current_balance is not None:
         try:
             balance = float(current_balance)
         except (TypeError, ValueError):
             balance = None
+
+    # The ledger-simulated fund value (deposits/withdrawals + recorded
+    # trade PnL) can drift from the real, live broker balance — e.g. when
+    # some closed trades are missing from the trade log, or untracked
+    # fees/swaps apply. Left unreconciled, the headline "overall" gain/loss
+    # (driven by the real balance) can disagree with the sum of individual
+    # investors' allocated gain/loss (driven by the simulation), which is
+    # exactly the inconsistency investors would notice and flag. Attribute
+    # any such drift to the owner (same treatment as pre-ledger PnL) so the
+    # simulated total always reconciles exactly to the real balance.
+    tracked_total = fund_value + pre_ledger_pnl
+    reconciliation_adjustment = round(balance - tracked_total, 2) if balance is not None and owner_key else 0.0
+
+    # Seed the owner's value with any pre-ledger PnL (trading that happened
+    # before anyone's deposits were tracked) plus any live-balance drift.
+    owner_seed_value = (pre_ledger_pnl + reconciliation_adjustment) if owner_key else 0.0
+
+    all_names = sorted(deposited_totals.keys() | withdrawn_totals.keys(), key=str.lower)
 
     total_net_contribution = round(
         sum(deposited_totals.values()) - sum(withdrawn_totals.values()), 2
@@ -425,5 +437,6 @@ def investor_breakdown(
         "overall_roi_pct": overall_roi_pct,
         "owner_name": owner_key,
         "owner_override_pct": owner_override_pct if owner_key is not None else None,
-        "pre_ledger_pnl": owner_seed_value if owner_key else None,
+        "pre_ledger_pnl": pre_ledger_pnl if owner_key else None,
+        "reconciliation_adjustment": reconciliation_adjustment if owner_key else None,
     }
