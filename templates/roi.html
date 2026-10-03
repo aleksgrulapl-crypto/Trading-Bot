@@ -49,6 +49,13 @@
       generated before any deposits were tracked and has been credited to
       {{ breakdown.owner_name }} as pre-ledger equity.
       {% endif %}
+      {% if breakdown.reconciliation_adjustment %}
+      <br>Note: the live broker balance differs from the sum of recorded
+      trade PnL by £{{ "%.2f"|format(breakdown.reconciliation_adjustment) }}
+      (likely trades missing from the trade log, fees, or swaps). This has
+      been credited to {{ breakdown.owner_name }} so the Overall Gain/Loss
+      above always matches the sum of each investor's figures below.
+      {% endif %}
     </p>
   </div>
 
