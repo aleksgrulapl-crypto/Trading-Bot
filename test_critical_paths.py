@@ -1117,6 +1117,50 @@ class TestReconcileWithPositions:
         assert "dax" in _ticker_aliases("IX.D.DAX.IFD.IP", include_epic_symbol_alias=True)
         assert "eurusd" in _ticker_aliases("CS.D.EURUSD.CFD.IP", include_epic_symbol_alias=True)
 
+    def test_broker_synthetic_position_dealreference_does_not_block_rebind(self, tmp_path):
+        """Regression test for the GOOG-style phantom 'Trader' duplicate.
+
+        Capital.com's live positions snapshot can report an existing
+        TradingView position under a brand-new dealId alongside a
+        dealReference formatted as "p_<dealId>" - a broker-generated
+        position-side placeholder, not the original "o_<uuid>"-style
+        reference captured when the order was placed. A strict
+        dealReference equality check then always fails (the placeholder
+        never equals the stored reference), blocking the dealId rebind and
+        causing reconcile_with_positions() to log a brand-new duplicate
+        'Trader' row for a position that is already open and tracked.
+        """
+        from trade_log import reconcile_with_positions, load_raw_log, save_raw_log
+        path = str(tmp_path / "log.json")
+        save_raw_log([{
+            "dealId": "001cf3c7-0001-54c4-0000-000080ec000f",
+            "dealReference": "o_123f8910-652c-48e3-99b4-237207add515",
+            "ticker": "GOOG",
+            "side": "long",
+            "size": 1.81,
+            "entry_price": 344.37,
+            "time_entered": "2026-10-05T19:00:30.870461+01:00",
+            "status": "OPEN",
+            "trade_source": "tradingview",
+            "origin": "tradingview",
+        }], path=path)
+
+        live_positions = [{
+            "dealId": "001cf3c7-0001-54c4-0000-000080ec0010",
+            "dealReference": "p_001cf3c7-0001-54c4-0000-000080ec0010",
+            "ticker": "GOOG",
+            "side": "long",
+            "size": 1.8,
+            "entry_price": 344.37,
+        }]
+        result = reconcile_with_positions(live_positions, path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1, "Must rebind the existing TradingView row, not create a duplicate Trader row"
+        assert not result["added"]
+        assert trades[0]["dealId"] == "001cf3c7-0001-54c4-0000-000080ec0010"
+        assert trades[0]["trade_source"] == "tradingview"
+
 
 class TestCloseTradeByDealId:
     """Tests for trade_log.close_trade_by_dealId."""

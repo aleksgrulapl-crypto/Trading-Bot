@@ -753,6 +753,12 @@ def _find_open_trade_for_dealid_rebind(
     side_norm = _normalize_side(side)
     dealId_norm = str(dealId) if dealId is not None else None
     dealReference_norm = str(dealReference) if dealReference not in (None, "") else None
+    if dealReference_norm is not None and _dealreference_is_synthetic_position_ref(dealReference, dealId):
+        # Not a genuine business reference tied to the original order - treat
+        # it like a payload with no dealReference at all so a legitimate
+        # dealId rebind isn't blocked by comparing it against the stored
+        # row's original "o_<uuid>"-style reference.
+        dealReference_norm = None
     entry_val = _coerce_trade_float(entry_price)
     size_val = _coerce_trade_float(size)
 
@@ -995,6 +1001,25 @@ def _dealid_is_placeholder(deal_id: Any, deal_reference: Any) -> bool:
     if deal_id in (None, "") or deal_reference in (None, ""):
         return False
     return str(deal_id) == str(deal_reference)
+
+
+def _dealreference_is_synthetic_position_ref(deal_reference: Any, deal_id: Any) -> bool:
+    """Return True when *deal_reference* is just the broker's own position-side
+    placeholder, formatted as ``"p_<dealId>"``, rather than a genuine business
+    reference carried over from the original order/webhook alert.
+
+    Capital.com's live positions snapshot occasionally reports a position
+    under a brand-new dealId (distinct from the dealId confirmed when the
+    order was originally placed) alongside a dealReference of this synthetic
+    "p_<dealId>" shape instead of the original "o_<uuid>"-style reference. A
+    strict dealReference equality check against the stored TradingView row's
+    original reference then always fails, blocking the dealId rebind and
+    causing reconcile_with_positions() to log a brand-new duplicate "Trader"
+    row for a position that is already open and tracked under a different ID.
+    """
+    if deal_reference in (None, "") or deal_id in (None, ""):
+        return False
+    return str(deal_reference) == f"p_{deal_id}"
 
 
 def _times_within_window(a: Optional[str], b: Optional[str],
