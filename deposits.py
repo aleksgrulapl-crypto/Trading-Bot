@@ -271,6 +271,117 @@ def list_investors(entries: List[Dict[str, Any]]) -> List[str]:
     return sorted(names, key=str.lower)
 
 
+# -----------------------------------------------------------------------
+# "Become an Investor" pledges.
+#
+# A pledge is just a note-to-self: "<name> intends to pay in <amount>".
+# Submitting one does not move any real money — it lets a prospective
+# investor flag their intent on the Investors page so the Owner knows to
+# expect a bank transfer and can match it up once it actually arrives. Once
+# the Owner confirms a pledge as paid, a matching entry is added to the
+# deposits ledger and the pledge is marked "confirmed" for an audit trail.
+# -----------------------------------------------------------------------
+PLEDGES_PATH = os.environ.get("INVESTOR_PLEDGES_PATH") or (getattr(config, "INVESTOR_PLEDGES_PATH", None) if config else None) or "/data/investor_pledges.json"
+
+VALID_PLEDGE_STATUSES = frozenset(("pending", "confirmed", "declined"))
+
+_pledges_lock = threading.Lock()
+
+
+def load_pledges(path: str = PLEDGES_PATH) -> List[Dict[str, Any]]:
+    """Load the investor-pledge log. Returns [] if absent/invalid."""
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if not isinstance(data, list):
+                logger.warning("deposits: pledges file content not a list, returning empty list")
+                return []
+            return data
+    except Exception as exc:
+        logger.exception("deposits: failed to load pledges: %s", exc)
+        return []
+
+
+def save_pledges(pledges: List[Dict[str, Any]], path: str = PLEDGES_PATH) -> bool:
+    """Persist *pledges* to *path* via an atomic write."""
+    ok = _atomic_write(path, pledges)
+    if not ok:
+        logger.error("deposits: atomic write of pledges failed")
+    return ok
+
+
+def add_pledge(name: str, amount: Any, note: str = "", path: str = PLEDGES_PATH) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """Record a new "intent to invest" pledge. Returns (ok, record, status)."""
+    investor_name = str(name or "").strip()
+    if not investor_name:
+        return False, None, "invalid_investor"
+    investor_name = investor_name[:100]
+
+    amt = _coerce_amount(amount)
+    if amt is None:
+        return False, None, "invalid_amount"
+
+    record = {
+        "id": uuid.uuid4().hex,
+        "investor": investor_name,
+        "amount": amt,
+        "note": (str(note).strip() if note else "")[:500],
+        "status": "pending",
+        "created_at": _now_iso(),
+    }
+
+    with _pledges_lock:
+        pledges = load_pledges(path)
+        pledges.append(record)
+        if not save_pledges(pledges, path):
+            return False, None, "save_failed"
+        return True, record, "created"
+
+
+def list_pledges_sorted(path: str = PLEDGES_PATH) -> List[Dict[str, Any]]:
+    """Return pledges newest-first by ``created_at``."""
+    pledges = load_pledges(path)
+    return sorted(pledges, key=lambda p: str(p.get("created_at") or ""), reverse=True)
+
+
+def set_pledge_status(pledge_id: str, status: str, path: str = PLEDGES_PATH) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """Update a pledge's status (e.g. Owner confirming payment arrived)."""
+    target = str(pledge_id or "").strip()
+    if not target:
+        return False, None, "invalid_id"
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status not in VALID_PLEDGE_STATUSES:
+        return False, None, "invalid_status"
+
+    with _pledges_lock:
+        pledges = load_pledges(path)
+        for pledge in pledges:
+            if str(pledge.get("id")) == target:
+                pledge["status"] = normalized_status
+                if not save_pledges(pledges, path):
+                    return False, None, "save_failed"
+                return True, pledge, "updated"
+        return False, None, "not_found"
+
+
+def delete_pledge(pledge_id: str, path: str = PLEDGES_PATH) -> Tuple[bool, str]:
+    """Remove one pledge row by its ``id``."""
+    target = str(pledge_id or "").strip()
+    if not target:
+        return False, "invalid_id"
+
+    with _pledges_lock:
+        pledges = load_pledges(path)
+        remaining = [p for p in pledges if str(p.get("id")) != target]
+        if len(remaining) == len(pledges):
+            return False, "not_found"
+        if not save_pledges(remaining, path):
+            return False, "save_failed"
+        return True, "deleted"
+
+
 def _parse_entry_datetime(raw: Optional[str]) -> Optional[datetime]:
     """Parse an entry's ``occurred_at``/``created_at`` string into a naive
     (UTC-equivalent) datetime. Accepts plain dates ("2026-01-01") and
