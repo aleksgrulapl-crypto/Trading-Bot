@@ -233,6 +233,7 @@
         }
         .role-badge-owner { background: rgba(74, 222, 128, 0.1); color: var(--success); border: 1px solid rgba(74, 222, 128, 0.4); }
         .role-badge-viewer { background: rgba(250, 204, 21, 0.1); color: var(--warning); border: 1px solid rgba(250, 204, 21, 0.4); }
+        .role-badge-investor { background: rgba(96, 165, 250, 0.1); color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.4); }
         .type-select {
             background: rgba(56, 189, 248, 0.1);
             color: var(--accent);
@@ -343,16 +344,18 @@
         </span>
 
         <div class="nav">
-            <span class="role-badge {% if is_owner %}role-badge-owner{% else %}role-badge-viewer{% endif %}">
-                {{ 'Owner' if is_owner else 'Viewer' }}
+            <span class="role-badge {% if role == 'owner' %}role-badge-owner{% elif role == 'investor' %}role-badge-investor{% else %}role-badge-viewer{% endif %}">
+                {{ {'owner': 'Owner', 'investor': 'Investor'}.get(role, 'Viewer') }}
             </span>
             <a href="/dashboard">Dashboard</a>
             <a href="/dashboard/trades">Trade Log</a>
             <a href="/dashboard/analytics">Analytics</a>
             <a href="/dashboard/investors">Investors</a>
-            {% if is_owner %}
-            <a href="/dashboard/deposits">Deposits</a>
+            {% if role in ('owner', 'investor') %}
             <a href="/dashboard/roi">ROI</a>
+            {% endif %}
+            {% if role == 'owner' %}
+            <a href="/dashboard/deposits">Deposits</a>
             {% endif %}
             <a href="/dashboard/logout" class="logout">Logout</a>
         </div>

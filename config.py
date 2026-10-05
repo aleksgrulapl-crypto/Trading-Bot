@@ -102,6 +102,9 @@ DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "Killen123%")
 # to the original single DASHBOARD_PASSWORD so existing deployments keep working.
 DASHBOARD_OWNER_PASSWORD = os.getenv("DASHBOARD_OWNER_PASSWORD", DASHBOARD_PASSWORD)
 DASHBOARD_VIEWER_PASSWORD = os.getenv("DASHBOARD_VIEWER_PASSWORD", "Viewer123$")
+# "Investor" has the same read-only access as Viewer, plus the ROI page
+# (per-investor gain/loss breakdown) so investors can check their own returns.
+DASHBOARD_INVESTOR_PASSWORD = os.getenv("DASHBOARD_INVESTOR_PASSWORD", "Investor123$")
 
 # Timezone and reporting
 TIMEZONE = os.getenv("TIMEZONE", "Europe/London")

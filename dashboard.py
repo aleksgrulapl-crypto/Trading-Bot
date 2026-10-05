@@ -58,6 +58,7 @@ def dashboard_login_submit():
 
     owner_password = os.getenv("DASHBOARD_OWNER_PASSWORD", getattr(config, "DASHBOARD_OWNER_PASSWORD", None) or "Angelika140282")
     viewer_password = os.getenv("DASHBOARD_VIEWER_PASSWORD", getattr(config, "DASHBOARD_VIEWER_PASSWORD", None) or "Viewer123$")
+    investor_password = os.getenv("DASHBOARD_INVESTOR_PASSWORD", getattr(config, "DASHBOARD_INVESTOR_PASSWORD", None) or "Investor123$")
     if owner_password == "Angelika140282":
         logger.warning("Using default dashboard Owner password. Set DASHBOARD_OWNER_PASSWORD in environment to secure the dashboard.")
 
@@ -65,6 +66,8 @@ def dashboard_login_submit():
         role = "owner"
     elif username == "viewer" and password == viewer_password:
         role = "viewer"
+    elif username == "investor" and password == investor_password:
+        role = "investor"
     else:
         return render_template("login.html", title="Dashboard Login", error="Invalid username or password"), 401
 
@@ -95,21 +98,21 @@ def login_required(view):
 
 
 def current_role() -> str:
-    """Return the logged-in role: 'owner' or 'viewer'.
+    """Return the logged-in role: 'owner', 'viewer', or 'investor'.
 
     Legacy sessions (an auth cookie set before roles existed, or a cookie
     with an unrecognized value) are treated as 'owner' to preserve the
     original single-password behavior.
     """
     role = request.cookies.get("dashboard_role")
-    if role in ("owner", "viewer"):
+    if role in ("owner", "viewer", "investor"):
         return role
     return "owner"
 
 
 def owner_required(view):
     """Require the Owner role for mutating dashboard actions (close/delete/edit).
-    Viewer accounts are authenticated but limited to read-only pages."""
+    Viewer/Investor accounts are authenticated but limited to read-only pages."""
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
         if not request.cookies.get("dashboard_auth"):
@@ -125,13 +128,38 @@ def owner_required(view):
 
 def owner_page_required(view):
     """Require the Owner role for whole-page (non-JSON) dashboard routes.
-    Viewer accounts are authenticated but are redirected back to the main
-    dashboard instead of receiving a JSON 403."""
+    Viewer/Investor accounts are authenticated but are redirected back to the
+    main dashboard instead of receiving a JSON 403."""
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
         if not request.cookies.get("dashboard_auth"):
             return redirect("/dashboard/login")
         if current_role() != "owner":
+            return redirect("/dashboard")
+        return view(*args, **kwargs)
+    return wrapper
+
+
+@dashboard.context_processor
+def _inject_role():
+    """Make the logged-in role available to every dashboard template
+    without threading it through each render_template() call."""
+    try:
+        return {"role": current_role()}
+    except Exception:
+        return {"role": "owner"}
+
+
+def roi_access_required(view):
+    """Require the Owner or Investor role for the ROI page (whole-page,
+    non-JSON). Viewer accounts are authenticated but are redirected back to
+    the main dashboard — only Owner and Investor roles may see per-investor
+    gain/loss figures."""
+    @functools.wraps(view)
+    def wrapper(*args, **kwargs):
+        if not request.cookies.get("dashboard_auth"):
+            return redirect("/dashboard/login")
+        if current_role() not in ("owner", "investor"):
             return redirect("/dashboard")
         return view(*args, **kwargs)
     return wrapper
@@ -968,13 +996,14 @@ def _build_roi_breakdown(entries, combined_trades, balance):
 
 
 @dashboard.route("/dashboard/roi")
-@owner_page_required
+@roi_access_required
 def dashboard_roi():
-    """Render the Owner-only ROI page: per-investor ownership share and
-    gain/loss, computed via NAV-per-unit accounting against the chronological
-    deposit/withdrawal and trade-PnL timeline. An investor only participates
-    in gains/losses from trades closed after their own deposit, and only in
-    Trader-trade PnL if they have been granted "full" ROI tier."""
+    """Render the ROI page (Owner and Investor roles only): per-investor
+    ownership share and gain/loss, computed via NAV-per-unit accounting
+    against the chronological deposit/withdrawal and trade-PnL timeline. An
+    investor only participates in gains/losses from trades closed after
+    their own deposit, and only in Trader-trade PnL if they have been
+    granted "full" ROI tier."""
     ctx = _build_request_context()
     entries = deposits.list_entries_sorted()
     account = ctx["account"]
@@ -986,7 +1015,8 @@ def dashboard_roi():
         cache_bust=time.time(),
         account=account,
         breakdown=breakdown,
-        is_owner=True,
+        is_owner=current_role() == "owner",
+        role=current_role(),
     )
 
 
