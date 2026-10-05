@@ -487,6 +487,52 @@ class TestReconcileWithPositions:
         assert len(result["added"]) == 1
         assert {t["dealId"] for t in trades} == {"D-OLD", "D-NEW"}
 
+    def test_reconcile_mislabelled_trader_row_is_corrected_once_pending_append_lands(self, tmp_path):
+        """Regression test for the NBIS-style phantom 'Trader' duplicate.
+
+        If a dashboard auto-refresh's reconcile_with_positions() call races
+        ahead of order.py's own pending-row append (the broker fills and
+        reports the live position before this bot's own request thread has
+        written anything to the trade log), reconcile has nothing to match
+        against and must create a brand-new row - which _detect_trade_origin
+        always labels "trader" for a raw broker position. Once order.py's own
+        pending append (carrying a dealReference and a trustworthy
+        tradingview origin) catches up a moment later, it must merge into
+        that same row *and* correct the "trader" mislabel to "tradingview"
+        instead of leaving it stuck permanently wrong.
+        """
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        # Dashboard refresh lands first: broker already reports the live
+        # position, but order.py hasn't appended its own pending row yet.
+        live_positions = [{
+            "dealId": "DEAL-NBIS", "dealReference": None, "ticker": "NBIS", "side": "sell",
+            "size": 2.65, "entry_price": 235.51,
+        }]
+        reconcile_with_positions(live_positions, path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert trades[0]["trade_source"] == "trader"
+
+        # order.py's own pending append now lands moments later, carrying
+        # trustworthy TradingView provenance (dealReference + origin).
+        upsert_open_trade(
+            {"dealReference": "REF-NBIS", "ticker": "NBIS", "side": "sell",
+             "size": 2.65, "entry_price": 235.51, "origin": "tradingview"},
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert trades[0]["trade_source"] == "tradingview"
+        assert trades[0]["origin"] == "tradingview"
+        assert trades[0]["dealId"] == "DEAL-NBIS"
+        assert trades[0]["dealReference"] == "REF-NBIS"
+
     def test_dangling_tradingview_row_collapses_into_dealid_trader_duplicate(self, tmp_path):
         """Regression test for phantom 'Trader' duplicates of a TradingView trade.
 

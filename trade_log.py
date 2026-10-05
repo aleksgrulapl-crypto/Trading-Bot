@@ -1417,6 +1417,34 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
                 existing["size"] = size_val; updated = True
             if (existing.get("entry_price") in (None, "")) and entry_val > 0:
                 existing["entry_price"] = entry_val; updated = True
+            if not existing.get("trade_source"):
+                existing["trade_source"] = existing.get("origin") or origin
+                updated = True
+            elif origin and not existing.get("origin"):
+                existing["origin"] = origin
+                updated = True
+            elif (
+                trusted_origin
+                and origin
+                and existing.get("trade_source") != origin
+                and not _has_trusted_tradingview_provenance(existing)
+            ):
+                # This payload is confirmed to have come from the bot's own
+                # order.py/webhook.py flow (it carries a dealReference and a
+                # trustworthy tradingview/hedge origin). If *existing* only
+                # holds an untrusted guess - e.g. "trader", defaulted by
+                # reconcile_with_positions()'s _detect_trade_origin() when it
+                # had to create a row for a live broker position that raced
+                # ahead of this payload's own pending/confirmed append -
+                # correct the mislabel instead of leaving a genuine
+                # TradingView trade permanently shown as "Trader" on the
+                # dashboard.
+                existing["trade_source"] = origin
+                existing["origin"] = origin
+                updated = True
+            if trusted_origin and existing.get("trusted_origin") != trusted_origin:
+                existing["trusted_origin"] = trusted_origin
+                updated = True
             broker_confirmed_update = bool(dealId or dealReference) and _is_tradingview_origin_trade(existing)
             if matched_via_pending or broker_confirmed_update:
                 # The broker-confirmed values are the source of truth; correct any
@@ -1430,15 +1458,6 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
                 existing["time_entered"] = time_entered; updated = True
             if (existing.get("timeframe") in (None, "")) and timeframe:
                 existing["timeframe"] = timeframe; updated = True
-            if not existing.get("trade_source"):
-                existing["trade_source"] = existing.get("origin") or origin
-                updated = True
-            elif origin and not existing.get("origin"):
-                existing["origin"] = origin
-                updated = True
-            if trusted_origin and existing.get("trusted_origin") != trusted_origin:
-                existing["trusted_origin"] = trusted_origin
-                updated = True
             if _collapse_lingering_tradingview_duplicate(
                 trades, existing, ticker_candidates, side, dealId, dealReference, entry_val, size_val, time_entered
             ):
