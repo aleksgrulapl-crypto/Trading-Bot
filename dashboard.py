@@ -801,9 +801,11 @@ def dashboard_investors():
     is_owner_role = current_role() == "owner"
     pledges = deposits.list_pledges_sorted() if is_owner_role else []
     payment_details = {
-        "bank_account_name": getattr(config, "INVESTOR_BANK_ACCOUNT_NAME", "") or "",
-        "bank_sort_code": getattr(config, "INVESTOR_BANK_SORT_CODE", "") or "",
+        "bank_beneficiary": getattr(config, "INVESTOR_BANK_BENEFICIARY", "") or "",
+        "bank_payment_reference": getattr(config, "INVESTOR_BANK_PAYMENT_REFERENCE", "") or "",
         "bank_account_number": getattr(config, "INVESTOR_BANK_ACCOUNT_NUMBER", "") or "",
+        "bank_sort_code": getattr(config, "INVESTOR_BANK_SORT_CODE", "") or "",
+        "bank_name_address": getattr(config, "INVESTOR_BANK_NAME_ADDRESS", "") or "",
         "bank_payment_note": getattr(config, "INVESTOR_BANK_PAYMENT_NOTE", "") or "",
         "crypto_btc_address": getattr(config, "INVESTOR_CRYPTO_BTC_ADDRESS", "") or "",
         "crypto_eth_address": getattr(config, "INVESTOR_CRYPTO_ETH_ADDRESS", "") or "",

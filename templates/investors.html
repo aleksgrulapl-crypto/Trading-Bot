@@ -10,17 +10,20 @@
       Support this project in exchange for a share of trading profits, allocated pro-rata to
       your contributed capital (see the tier legend below). This is <strong>not</strong> a
       fixed or guaranteed-return scheme — your share rises and falls with real trading
-      performance, and capital is at risk. Pledge an amount below, then send payment using
-      the details shown; the Owner will confirm it once received.
+      performance, and capital is at risk. Funds are paid directly into the live trading
+      account below, so the balance updates automatically once received; pledge an amount
+      so it can be matched to you.
     </p>
 
     <div style="display: flex; flex-wrap: wrap; gap: 24px; margin-bottom: 14px;">
-      {% if payment_details.bank_account_name or payment_details.bank_account_number %}
+      {% if payment_details.bank_beneficiary or payment_details.bank_account_number %}
       <div>
-        <div class="small" style="font-weight: 600; margin-bottom: 4px;">Bank transfer</div>
-        {% if payment_details.bank_account_name %}<div class="small">Name: {{ payment_details.bank_account_name }}</div>{% endif %}
-        {% if payment_details.bank_sort_code %}<div class="small">Sort code: {{ payment_details.bank_sort_code }}</div>{% endif %}
+        <div class="small" style="font-weight: 600; margin-bottom: 4px;">Bank transfer (direct to trading account)</div>
+        {% if payment_details.bank_payment_reference %}<div class="small"><strong>Payment reference (required): {{ payment_details.bank_payment_reference }}</strong></div>{% endif %}
         {% if payment_details.bank_account_number %}<div class="small">Account number: {{ payment_details.bank_account_number }}</div>{% endif %}
+        {% if payment_details.bank_sort_code %}<div class="small">Sort code: {{ payment_details.bank_sort_code }}</div>{% endif %}
+        {% if payment_details.bank_beneficiary %}<div class="small">Beneficiary: {{ payment_details.bank_beneficiary }}</div>{% endif %}
+        {% if payment_details.bank_name_address %}<div class="small">Bank: {{ payment_details.bank_name_address }}</div>{% endif %}
         {% if payment_details.bank_payment_note %}<div class="small" style="margin-top: 4px;">{{ payment_details.bank_payment_note }}</div>{% endif %}
       </div>
       {% endif %}
@@ -31,7 +34,7 @@
         {% if payment_details.crypto_eth_address %}<div class="small">ETH: {{ payment_details.crypto_eth_address }}</div>{% endif %}
       </div>
       {% endif %}
-      {% if not (payment_details.bank_account_name or payment_details.bank_account_number or payment_details.crypto_btc_address or payment_details.crypto_eth_address) %}
+      {% if not (payment_details.bank_beneficiary or payment_details.bank_account_number or payment_details.crypto_btc_address or payment_details.crypto_eth_address) %}
       <div class="small">Payment details have not been configured yet — contact the Owner directly.</div>
       {% endif %}
     </div>

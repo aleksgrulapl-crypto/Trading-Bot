@@ -235,15 +235,24 @@ INVESTOR_TIERS_PATH = os.getenv("INVESTOR_TIERS_PATH", "/data/investor_tiers.jso
 INVESTOR_PLEDGES_PATH = os.getenv("INVESTOR_PLEDGES_PATH", "/data/investor_pledges.json")
 
 # Payment details shown on the "Become an Investor" card so people know
-# where to send funds. Leave blank (the default) to hide a given field;
-# set these via environment variables rather than committing real bank/
-# crypto details to source control.
-INVESTOR_BANK_ACCOUNT_NAME = os.getenv("INVESTOR_BANK_ACCOUNT_NAME", "")
-INVESTOR_BANK_SORT_CODE = os.getenv("INVESTOR_BANK_SORT_CODE", "")
+# where to send funds. These should be your Capital.com trading account's
+# own deposit details (Capital.com > Deposit > Bank transfer) so funds land
+# directly in the trading account and the balance updates automatically via
+# the dashboard's existing polling -- rather than a personal account that
+# would need a manual top-up afterwards. Leave blank (the default) to hide
+# a given field; set these via environment variables rather than committing
+# real account/reference details to source control.
+INVESTOR_BANK_BENEFICIARY = os.getenv("INVESTOR_BANK_BENEFICIARY", "")
+INVESTOR_BANK_PAYMENT_REFERENCE = os.getenv("INVESTOR_BANK_PAYMENT_REFERENCE", "")
 INVESTOR_BANK_ACCOUNT_NUMBER = os.getenv("INVESTOR_BANK_ACCOUNT_NUMBER", "")
+INVESTOR_BANK_SORT_CODE = os.getenv("INVESTOR_BANK_SORT_CODE", "")
+INVESTOR_BANK_NAME_ADDRESS = os.getenv("INVESTOR_BANK_NAME_ADDRESS", "")
 INVESTOR_BANK_PAYMENT_NOTE = os.getenv(
     "INVESTOR_BANK_PAYMENT_NOTE",
-    "Use your name as the payment reference so it can be matched to your pledge.",
+    "You must include the payment reference above exactly as shown, or "
+    "Capital.com cannot credit the deposit to this trading account. "
+    "Please also submit the pledge below so it can be matched to you once "
+    "the balance updates.",
 )
 INVESTOR_CRYPTO_BTC_ADDRESS = os.getenv("INVESTOR_CRYPTO_BTC_ADDRESS", "")
 INVESTOR_CRYPTO_ETH_ADDRESS = os.getenv("INVESTOR_CRYPTO_ETH_ADDRESS", "")
