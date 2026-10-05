@@ -188,7 +188,10 @@
           fill: true,
           tension: 0.25,
           pointRadius: 0,
-          pointHoverRadius: 3,
+          pointHoverRadius: 4,
+          pointHitRadius: 12,
+          pointHoverBackgroundColor: '#e5e7eb',
+          pointHoverBorderColor: '#111827',
         },
         {
           label: 'Break-even',
@@ -204,12 +207,40 @@
     },
     options: {
       responsive: true,
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
       plugins: {
-        legend: { labels: { color: '#e5e7eb' } }
+        legend: { labels: { color: '#e5e7eb' } },
+        tooltip: {
+          backgroundColor: 'rgba(17, 24, 39, 0.95)',
+          titleColor: '#e5e7eb',
+          bodyColor: '#e5e7eb',
+          borderColor: 'rgba(75, 85, 99, 0.6)',
+          borderWidth: 1,
+          padding: 10,
+          displayColors: false,
+          filter: (item) => item.datasetIndex === 0,
+          callbacks: {
+            title: (items) => items.length ? equityData[items[0].dataIndex].label : '',
+            label: (item) => {
+              const value = item.parsed.y;
+              const sign = value > 0 ? '+' : '';
+              return `Cumulative PnL: ${sign}£${value.toFixed(2)}`;
+            },
+          },
+        },
       },
       scales: {
         x: { ticks: { color: '#9ca3af', maxTicksLimit: 10 }, grid: { color: 'rgba(31,41,55,0.4)' } },
-        y: { ticks: { color: '#9ca3af' }, grid: { color: 'rgba(31,41,55,0.4)' } }
+        y: {
+          ticks: {
+            color: '#9ca3af',
+            callback: (value) => `£${value}`,
+          },
+          grid: { color: 'rgba(31,41,55,0.4)' },
+        }
       }
     }
   });
