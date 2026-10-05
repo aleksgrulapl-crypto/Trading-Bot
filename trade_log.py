@@ -181,6 +181,34 @@ def _normalize_side(side: Any) -> Optional[str]:
     return s or None
 
 
+def _normalize_timeframe(value: Any) -> Optional[str]:
+    """Normalize a timeframe label (e.g. "15m", "15M", "15") for comparison."""
+    if value in (None, ""):
+        return None
+    tf = str(value).strip().upper()
+    if tf in ("", "N/A"):
+        return None
+    if tf.endswith("M") or tf.endswith("H") or tf.endswith("D") or tf.endswith("W"):
+        tf = tf[:-1] + tf[-1]
+    return tf or None
+
+
+def _timeframes_conflict(a: Any, b: Any) -> bool:
+    """True when both rows carry a known timeframe and the timeframes differ.
+
+    Separate TradingView alerts on the same ticker/side fired from different
+    chart timeframes (e.g. 15M and 30M) are distinct real trades, not
+    duplicates of one another, even if they land within the same time window
+    at a similar entry price. Missing/"N/A" timeframes never conflict, since
+    that simply means the row hasn't been labeled yet.
+    """
+    tf_a = _normalize_timeframe(a)
+    tf_b = _normalize_timeframe(b)
+    if tf_a is None or tf_b is None:
+        return False
+    return tf_a != tf_b
+
+
 def _canonical_trade_source(value: Any) -> Optional[str]:
     if value in (None, ""):
         return None
@@ -1135,6 +1163,8 @@ def _is_dangling_tradingview_duplicate(a: Dict[str, Any], b: Dict[str, Any]) -> 
         side_p = _normalize_side(pending.get("side"))
         side_o = _normalize_side(other.get("side"))
         if side_p and side_o and side_p != side_o:
+            continue
+        if _timeframes_conflict(pending.get("timeframe"), other.get("timeframe")):
             continue
         if not _trade_entry_matches(pending.get("entry_price"), other.get("entry_price")):
             continue
