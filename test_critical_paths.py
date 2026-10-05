@@ -3298,6 +3298,128 @@ class TestDashboardRoles:
         assert "Viewer" in body
         assert "button onclick=\"closePosition" not in body
 
+    def test_investor_login_sets_investor_role_cookie(self, monkeypatch):
+        from flask import Flask
+        from dashboard import dashboard
+        import dashboard as dashboard_module
+
+        monkeypatch.delenv("DASHBOARD_OWNER_PASSWORD", raising=False)
+        monkeypatch.delenv("DASHBOARD_INVESTOR_PASSWORD", raising=False)
+        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_OWNER_PASSWORD", "owner-pw")
+        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_INVESTOR_PASSWORD", "investor-pw")
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+
+        response = client.post("/dashboard/login", data={"username": "investor", "password": "investor-pw"})
+
+        assert response.status_code == 302
+        set_cookie_headers = response.headers.get_all("Set-Cookie")
+        assert any("dashboard_role=investor" in h for h in set_cookie_headers)
+
+    def test_investor_role_is_blocked_from_close_endpoint(self, monkeypatch):
+        """Investor has the same read-only restrictions as Viewer."""
+        from flask import Flask
+        from dashboard import dashboard
+
+        monkeypatch.setattr("dashboard.close_live_position", lambda position_id: {"status": "success"})
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "investor")
+
+        response = client.post("/dashboard/close/D1")
+        data = response.get_json()
+
+        assert response.status_code == 403
+        assert data["message"] == "forbidden_viewer_role"
+
+    def test_investor_role_is_blocked_from_setting_investor_tier(self, monkeypatch):
+        """Only the Owner can change an investor's ROI tier."""
+        from flask import Flask
+        from dashboard import dashboard
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "investor")
+
+        response = client.post("/dashboard/investors/tier", data={"investor": "Carol", "tier": "full"})
+
+        assert response.status_code == 403
+
+    def test_investor_role_can_view_roi_page(self, monkeypatch):
+        from flask import Flask
+        import dashboard as dashboard_module
+        from dashboard import dashboard
+
+        monkeypatch.setattr(dashboard_module, "_build_request_context", lambda: {
+            "account": {"balance": 1000, "pnl": 0, "equity": 1000, "available": 1000},
+            "combined_trades": [],
+        })
+        monkeypatch.setattr(dashboard_module.deposits, "list_entries_sorted", lambda: [])
+
+        app = Flask(__name__, template_folder="templates")
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "investor")
+
+        response = client.get("/dashboard/roi")
+
+        assert response.status_code == 200
+
+    def test_viewer_role_is_redirected_away_from_roi_page(self, monkeypatch):
+        """Viewer accounts cannot see per-investor gain/loss figures."""
+        from flask import Flask
+        from dashboard import dashboard
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "viewer")
+
+        response = client.get("/dashboard/roi")
+
+        assert response.status_code == 302
+        assert response.headers["Location"] == "/dashboard"
+
+    def test_dashboard_home_marks_investor_role_badge_in_context(self, monkeypatch):
+        from flask import Flask
+        import dashboard as dashboard_module
+        from dashboard import dashboard
+
+        monkeypatch.setattr(dashboard_module, "_build_request_context", lambda: {
+            "account": {"pnl": 0},
+            "positions": [],
+            "combined_trades": [],
+            "analytics": {
+                "win_rate": 0, "expectancy": 0, "trade_count": 0,
+                "total_pl": 0, "max_drawdown": 0,
+            },
+            "weekly_analytics": dashboard_module._safe_analytics({}),
+            "monthly_analytics": dashboard_module._safe_analytics({}),
+        })
+
+        app = Flask(__name__, template_folder="templates")
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "investor")
+
+        response = client.get("/dashboard")
+        body = response.get_data(as_text=True)
+
+        assert response.status_code == 200
+        assert "Investor" in body
+        assert 'href="/dashboard/roi"' in body
+        assert 'href="/dashboard/deposits"' not in body
+
 
 class TestDashboardCloseEndpoint:
     def test_close_endpoint_calls_close_service(self, monkeypatch):
