@@ -4,6 +4,107 @@
 <div class="grid-full">
   <div class="card">
     <div class="card-header">
+      <div class="card-title">Become an Investor</div>
+    </div>
+    <p class="small" style="margin-bottom: 10px;">
+      Support this project in exchange for a share of trading profits, allocated pro-rata to
+      your contributed capital (see the tier legend below). This is <strong>not</strong> a
+      fixed or guaranteed-return scheme — your share rises and falls with real trading
+      performance, and capital is at risk. Funds are paid directly into the live trading
+      account below, so the balance updates automatically once received; pledge an amount
+      so it can be matched to you.
+    </p>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 24px; margin-bottom: 14px;">
+      {% if payment_details.bank_beneficiary or payment_details.bank_account_number %}
+      <div>
+        <div class="small" style="font-weight: 600; margin-bottom: 4px;">Bank transfer (direct to trading account)</div>
+        {% if payment_details.bank_payment_reference %}<div class="small"><strong>Payment reference (required): {{ payment_details.bank_payment_reference }}</strong></div>{% endif %}
+        {% if payment_details.bank_account_number %}<div class="small">Account number: {{ payment_details.bank_account_number }}</div>{% endif %}
+        {% if payment_details.bank_sort_code %}<div class="small">Sort code: {{ payment_details.bank_sort_code }}</div>{% endif %}
+        {% if payment_details.bank_beneficiary %}<div class="small">Beneficiary: {{ payment_details.bank_beneficiary }}</div>{% endif %}
+        {% if payment_details.bank_name_address %}<div class="small">Bank: {{ payment_details.bank_name_address }}</div>{% endif %}
+        {% if payment_details.bank_payment_note %}<div class="small" style="margin-top: 4px;">{{ payment_details.bank_payment_note }}</div>{% endif %}
+      </div>
+      {% endif %}
+      {% if payment_details.crypto_btc_address or payment_details.crypto_eth_address %}
+      <div>
+        <div class="small" style="font-weight: 600; margin-bottom: 4px;">Crypto</div>
+        {% if payment_details.crypto_btc_address %}<div class="small">BTC: {{ payment_details.crypto_btc_address }}</div>{% endif %}
+        {% if payment_details.crypto_eth_address %}<div class="small">ETH: {{ payment_details.crypto_eth_address }}</div>{% endif %}
+      </div>
+      {% endif %}
+      {% if not (payment_details.bank_beneficiary or payment_details.bank_account_number or payment_details.crypto_btc_address or payment_details.crypto_eth_address) %}
+      <div class="small">Payment details have not been configured yet — contact the Owner directly.</div>
+      {% endif %}
+    </div>
+
+    <form id="pledge-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;">
+      <div>
+        <label class="small" for="pledge-name">Your name</label><br>
+        <input type="text" id="pledge-name" maxlength="100" required placeholder="e.g. Jane Smith"
+               style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 160px;">
+      </div>
+      <div>
+        <label class="small" for="pledge-amount">Amount (£)</label><br>
+        <input type="number" step="0.01" min="0.01" id="pledge-amount" required placeholder="500"
+               style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 120px;">
+      </div>
+      <div style="flex: 1; min-width: 160px;">
+        <label class="small" for="pledge-note">Note (optional)</label><br>
+        <input type="text" id="pledge-note" maxlength="500" placeholder="Optional note"
+               style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 100%;">
+      </div>
+      <div>
+        <button type="submit">Pledge</button>
+      </div>
+    </form>
+    <div class="small" id="pledge-status" style="margin-top: 8px;"></div>
+  </div>
+
+  {% if is_owner %}
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Pending Pledges</div>
+    </div>
+    <table class="table table-spaced">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Name</th>
+          <th>Amount</th>
+          <th>Note</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in pledges %}
+        <tr>
+          <td>{{ p.created_at|default('—') }}</td>
+          <td>{{ p.investor }}</td>
+          <td>£{{ "%.2f"|format(p.amount or 0) }}</td>
+          <td>{{ p.note or '—' }}</td>
+          <td>{{ p.status|capitalize }}</td>
+          <td>
+            {% if p.status == 'pending' %}
+            <button onclick="confirmPledge('{{ p.id }}')">Mark Paid</button>
+            <button class="button-danger" onclick="declinePledge('{{ p.id }}')">Decline</button>
+            {% else %}
+            <button class="button-danger" onclick="deletePledge('{{ p.id }}')">Delete</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="small">No pledges recorded yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="card-header">
       <div class="card-title">Investors</div>
     </div>
 
@@ -61,6 +162,59 @@ function updateInvestorTier(select) {
             errorBanner.innerText = "Update tier error: " + err.message;
             errorBanner.style.display = "block";
         });
+}
+
+document.getElementById('pledge-form').addEventListener('submit', function (evt) {
+    evt.preventDefault();
+    const statusEl = document.getElementById('pledge-status');
+    const name = document.getElementById('pledge-name').value.trim();
+    const amount = document.getElementById('pledge-amount').value;
+    const note = document.getElementById('pledge-note').value.trim();
+
+    fetch('/dashboard/investors/pledge', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ investor: name, amount: amount, note: note })
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (!data || data.status !== 'success') {
+                statusEl.innerText = (data && data.message) || "Failed to record pledge.";
+                statusEl.style.color = "var(--bad, #e05d5d)";
+                return;
+            }
+            statusEl.innerText = "Thanks — your pledge has been recorded. Send payment using the details above.";
+            statusEl.style.color = "var(--good, #4caf50)";
+            document.getElementById('pledge-form').reset();
+        })
+        .catch(err => {
+            statusEl.innerText = "Pledge error: " + err.message;
+            statusEl.style.color = "var(--bad, #e05d5d)";
+        });
+});
+
+function confirmPledge(pledgeId) {
+    fetch(`/dashboard/investors/pledge/${encodeURIComponent(pledgeId)}/confirm`, { method: "POST" })
+        .then(r => r.json())
+        .then(() => window.location.reload())
+        .catch(err => console.error("Confirm pledge error:", err));
+}
+
+function declinePledge(pledgeId) {
+    fetch(`/dashboard/investors/pledge/${encodeURIComponent(pledgeId)}/decline`, { method: "POST" })
+        .then(r => r.json())
+        .then(() => window.location.reload())
+        .catch(err => console.error("Decline pledge error:", err));
+}
+
+function deletePledge(pledgeId) {
+    if (!window.confirm('Delete this pledge record?')) {
+        return;
+    }
+    fetch(`/dashboard/investors/pledge/${encodeURIComponent(pledgeId)}/delete`, { method: "POST" })
+        .then(r => r.json())
+        .then(() => window.location.reload())
+        .catch(err => console.error("Delete pledge error:", err));
 }
 </script>
 {% endblock %}

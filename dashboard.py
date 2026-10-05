@@ -798,6 +798,19 @@ def dashboard_investors():
         tier = "owner" if is_owner else deposits.get_investor_tier(name, tiers)
         investor_rows.append({"name": name, "tier": tier, "is_owner": is_owner})
 
+    is_owner_role = current_role() == "owner"
+    pledges = deposits.list_pledges_sorted() if is_owner_role else []
+    payment_details = {
+        "bank_beneficiary": getattr(config, "INVESTOR_BANK_BENEFICIARY", "") or "",
+        "bank_payment_reference": getattr(config, "INVESTOR_BANK_PAYMENT_REFERENCE", "") or "",
+        "bank_account_number": getattr(config, "INVESTOR_BANK_ACCOUNT_NUMBER", "") or "",
+        "bank_sort_code": getattr(config, "INVESTOR_BANK_SORT_CODE", "") or "",
+        "bank_name_address": getattr(config, "INVESTOR_BANK_NAME_ADDRESS", "") or "",
+        "bank_payment_note": getattr(config, "INVESTOR_BANK_PAYMENT_NOTE", "") or "",
+        "crypto_btc_address": getattr(config, "INVESTOR_CRYPTO_BTC_ADDRESS", "") or "",
+        "crypto_eth_address": getattr(config, "INVESTOR_CRYPTO_ETH_ADDRESS", "") or "",
+    }
+
     return render_template(
         "investors.html",
         title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
@@ -805,8 +818,78 @@ def dashboard_investors():
         account=ctx["account"],
         investor_rows=investor_rows,
         owner_name=owner_name,
-        is_owner=current_role() == "owner",
+        is_owner=is_owner_role,
+        pledges=pledges,
+        payment_details=payment_details,
     )
+
+
+@dashboard.route("/dashboard/investors/pledge", methods=["POST"])
+@login_required
+def dashboard_investors_add_pledge():
+    """Record a "Become an Investor" pledge (name + intended amount). This
+    does not move real money — it is a notice to the Owner that a bank
+    transfer is coming, so it can be matched up and confirmed later."""
+    payload = request.form if request.form else (request.get_json(silent=True) or {})
+    name = payload.get("investor", "") or payload.get("name", "")
+    amount = payload.get("amount")
+    note = payload.get("note", "")
+
+    ok, record, status = deposits.add_pledge(name, amount, note)
+
+    if request.is_json:
+        if ok:
+            return jsonify({"status": "success", "pledge": record}), 200
+        code = 400 if status in ("invalid_investor", "invalid_amount") else 500
+        return jsonify({"status": "error", "message": status}), code
+
+    return redirect("/dashboard/investors")
+
+
+@dashboard.route("/dashboard/investors/pledge/<pledge_id>/confirm", methods=["POST"])
+@owner_required
+def dashboard_investors_confirm_pledge(pledge_id: str):
+    """Owner-only: mark a pledge as paid and record the matching deposit."""
+    pledges = deposits.list_pledges_sorted()
+    pledge = next((p for p in pledges if str(p.get("id")) == str(pledge_id)), None)
+    if pledge is None:
+        return jsonify({"status": "error", "message": "not_found"}), 404
+
+    ok, _record, status = deposits.add_entry(
+        "deposit",
+        pledge.get("amount"),
+        pledge.get("investor", ""),
+        f"Confirmed investor pledge ({pledge.get('note') or 'no note'})",
+    )
+    if not ok:
+        return jsonify({"status": "error", "message": status}), 400
+
+    ok, record, status = deposits.set_pledge_status(pledge_id, "confirmed")
+    if ok:
+        return jsonify({"status": "success", "pledge": record}), 200
+    return jsonify({"status": "error", "message": status}), 500
+
+
+@dashboard.route("/dashboard/investors/pledge/<pledge_id>/decline", methods=["POST"])
+@owner_required
+def dashboard_investors_decline_pledge(pledge_id: str):
+    """Owner-only: mark a pledge as declined/not followed up (no deposit added)."""
+    ok, record, status = deposits.set_pledge_status(pledge_id, "declined")
+    if ok:
+        return jsonify({"status": "success", "pledge": record}), 200
+    code = 404 if status == "not_found" else 400
+    return jsonify({"status": "error", "message": status}), code
+
+
+@dashboard.route("/dashboard/investors/pledge/<pledge_id>/delete", methods=["POST"])
+@owner_required
+def dashboard_investors_delete_pledge(pledge_id: str):
+    """Owner-only: permanently remove a pledge row."""
+    ok, status = deposits.delete_pledge(pledge_id)
+    if ok:
+        return jsonify({"status": "success"}), 200
+    code = 404 if status == "not_found" else 400
+    return jsonify({"status": "error", "message": status}), code
 
 
 @dashboard.route("/dashboard/investors/tier", methods=["POST"])

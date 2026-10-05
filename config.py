@@ -227,6 +227,36 @@ OWNER_INVESTOR_OVERRIDE_PCT = float(os.getenv("OWNER_INVESTOR_OVERRIDE_PCT", 15)
 # (no performance fee applies to that sleeve — see deposits.investor_breakdown).
 INVESTOR_TIERS_PATH = os.getenv("INVESTOR_TIERS_PATH", "/data/investor_tiers.json")
 
+# "Become an Investor" pledge log (visible to any logged-in user on the
+# Investors page). Logged-in users can record a pledge (name + amount) of
+# funds they intend to pay in via bank transfer; the Owner then confirms it
+# once payment is actually received, which creates a matching entry in the
+# deposits ledger. No real money moves through the app itself.
+INVESTOR_PLEDGES_PATH = os.getenv("INVESTOR_PLEDGES_PATH", "/data/investor_pledges.json")
+
+# Payment details shown on the "Become an Investor" card so people know
+# where to send funds. These should be your Capital.com trading account's
+# own deposit details (Capital.com > Deposit > Bank transfer) so funds land
+# directly in the trading account and the balance updates automatically via
+# the dashboard's existing polling -- rather than a personal account that
+# would need a manual top-up afterwards. Leave blank (the default) to hide
+# a given field; set these via environment variables rather than committing
+# real account/reference details to source control.
+INVESTOR_BANK_BENEFICIARY = os.getenv("INVESTOR_BANK_BENEFICIARY", "")
+INVESTOR_BANK_PAYMENT_REFERENCE = os.getenv("INVESTOR_BANK_PAYMENT_REFERENCE", "")
+INVESTOR_BANK_ACCOUNT_NUMBER = os.getenv("INVESTOR_BANK_ACCOUNT_NUMBER", "")
+INVESTOR_BANK_SORT_CODE = os.getenv("INVESTOR_BANK_SORT_CODE", "")
+INVESTOR_BANK_NAME_ADDRESS = os.getenv("INVESTOR_BANK_NAME_ADDRESS", "")
+INVESTOR_BANK_PAYMENT_NOTE = os.getenv(
+    "INVESTOR_BANK_PAYMENT_NOTE",
+    "You must include the payment reference above exactly as shown, or "
+    "Capital.com cannot credit the deposit to this trading account. "
+    "Please also submit the pledge below so it can be matched to you once "
+    "the balance updates.",
+)
+INVESTOR_CRYPTO_BTC_ADDRESS = os.getenv("INVESTOR_CRYPTO_BTC_ADDRESS", "")
+INVESTOR_CRYPTO_ETH_ADDRESS = os.getenv("INVESTOR_CRYPTO_ETH_ADDRESS", "")
+
 # Cache and timing
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 2))
 
