@@ -3,9 +3,18 @@
 # TradingView Alert Parser (STRICT + EXIT-SIGNAL BLOCKING + NORMALIZED TF)
 # ============================
 
+import re
 from typing import Any, Dict, Optional
 
 PLACEHOLDER_VALUES = {"{{alert_message}}", "", None}
+
+# Matches a bare timeframe token with no "TF:"/"TF=" prefix, e.g. "15M", "1H",
+# "30m", "240" (minutes-only, handled separately by normalize_timeframe).
+# Alert Helper-style alerts emit the timeframe as a plain positional token
+# (e.g. "BUY|BE|15M|SL:284.39|TP:298.04") rather than a "TF:"-prefixed one, so
+# without this the timeframe was silently dropped by the generic parsing
+# below (it only recognised "KEY VALUE" pairs separated by whitespace).
+_BARE_TIMEFRAME_RE = re.compile(r"^\d{1,4}[MH]$", re.IGNORECASE)
 
 
 def parse_tradingview_alert(data: Any) -> Dict[str, Any]:
@@ -69,6 +78,10 @@ def parse_raw_alert_strict(raw: str) -> Dict[str, Any]:
             tp = safe_float_or_none(part.split(":", 1)[-1].split("=", 1)[-1].strip())
         elif up.startswith("TF:") or up.startswith("TF="):
             timeframe = normalize_timeframe(part.split(":", 1)[-1].split("=", 1)[-1].strip())
+        elif _BARE_TIMEFRAME_RE.match(up):
+            # Plain positional timeframe token (no "TF:" prefix), e.g. the
+            # Alert Helper's "BUY|BE|15M|SL:...|TP:..." format.
+            timeframe = normalize_timeframe(up)
         # allow payloads that include key=value pairs separated by spaces
         else:
             # try to detect inline tokens like "SL 123" or "TP 130"
@@ -201,6 +214,8 @@ def parse_payload_strict(payload: Optional[str]) -> Dict[str, Any]:
             tp = safe_float_or_none(part.split(":", 1)[-1].split("=", 1)[-1].strip())
         elif up.startswith("TF:") or up.startswith("TF="):
             timeframe = normalize_timeframe(part.split(":", 1)[-1].split("=", 1)[-1].strip())
+        elif _BARE_TIMEFRAME_RE.match(up):
+            timeframe = normalize_timeframe(up)
         else:
             tokens = part.split()
             if len(tokens) >= 2:

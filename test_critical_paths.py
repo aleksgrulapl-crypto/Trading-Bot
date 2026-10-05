@@ -533,6 +533,43 @@ class TestReconcileWithPositions:
         assert trades[0]["dealId"] == "DEAL-NBIS"
         assert trades[0]["dealReference"] == "REF-NBIS"
 
+    def test_reconcile_na_timeframe_placeholder_is_corrected_by_later_upsert(self, tmp_path):
+        """Regression test: reconcile's 'N/A' timeframe placeholder must not
+        block a later payload's real parsed timeframe from ever being applied.
+
+        reconcile_with_positions() always stamps timeframe="N/A" on a row it
+        creates for a live broker position (it has no concept of timeframe).
+        upsert_open_trade()'s merge previously only filled in timeframe when
+        the field was empty/None, so once "N/A" was set it was treated as an
+        already-known value and the real timeframe from order.py's own
+        pending/confirmed append could never overwrite it.
+        """
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        live_positions = [{
+            "dealId": "DEAL-BE", "dealReference": None, "ticker": "BE", "side": "buy",
+            "size": 2.14, "entry_price": 291.96,
+        }]
+        reconcile_with_positions(live_positions, path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert trades[0]["timeframe"] == "N/A"
+
+        upsert_open_trade(
+            {"dealReference": "REF-BE", "ticker": "BE", "side": "buy",
+             "size": 2.14, "entry_price": 291.96, "origin": "tradingview",
+             "timeframe": "15M"},
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1
+        assert trades[0]["timeframe"] == "15M"
+
     def test_dangling_tradingview_row_collapses_into_dealid_trader_duplicate(self, tmp_path):
         """Regression test for phantom 'Trader' duplicates of a TradingView trade.
 
@@ -3474,3 +3511,38 @@ class TestTickerOrderLock:
         # request for the same ticker can proceed normally.
         assert lock.acquire(blocking=False) is True
         lock.release()
+
+
+class TestTradingViewAlertParserTimeframe:
+    """Regression tests for bare (non 'TF:'-prefixed) timeframe tokens, e.g.
+    the Alert Helper format "BUY|BE|15M|SL:284.39|TP:298.04", which were
+    previously silently dropped since the parser only recognised an explicit
+    "TF:"/"TF=" prefix or a space-separated "TF value" pair.
+    """
+
+    def test_bare_timeframe_token_is_parsed_from_raw_alert(self):
+        from parser import parse_tradingview_alert
+        result = parse_tradingview_alert("BUY|BE|15M|SL:284.3892857143|TP:298.0421428571")
+        assert result["blocked"] is False
+        assert result["timeframe"] == "15M"
+        assert result["symbol"] == "BE"
+        assert result["action"] == "buy"
+
+    def test_bare_hourly_timeframe_token_is_parsed(self):
+        from parser import parse_tradingview_alert
+        result = parse_tradingview_alert("SELL|NVDA|1H|SL:120|TP:110")
+        assert result["blocked"] is False
+        assert result["timeframe"] == "1H"
+
+    def test_prefixed_tf_token_still_parses(self):
+        """Explicit 'TF:' prefix must keep working alongside the bare form."""
+        from parser import parse_tradingview_alert
+        result = parse_tradingview_alert("BUY|NVDA|SL:120|TP:130|TF:30M")
+        assert result["blocked"] is False
+        assert result["timeframe"] == "30M"
+
+    def test_missing_timeframe_token_still_parses_without_one(self):
+        from parser import parse_tradingview_alert
+        result = parse_tradingview_alert("BUY|NVDA|SL:120|TP:130")
+        assert result["blocked"] is False
+        assert result["timeframe"] is None
