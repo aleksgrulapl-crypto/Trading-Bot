@@ -383,6 +383,63 @@ class TestReconcileWithPositions:
         assert len(result["added"]) == 1
         assert {t["dealId"] for t in trades} == {"D-OLD", "D-NEW"}
 
+    def test_dangling_tradingview_row_collapses_into_dealid_trader_duplicate(self, tmp_path):
+        """Regression test for phantom 'Trader' duplicates of a TradingView trade.
+
+        Reproduces the dashboard screenshot bug: a webhook-sourced pending row
+        (no dealId, origin=tradingview) is left open forever while a second,
+        dealId'd row for the same ticker/side/entry price gets created shortly
+        after (e.g. via reconcile's live-position import) and mislabelled
+        "Trader" because its origin could not be determined. Both rows must
+        collapse into a single row with TradingView provenance preserved.
+        """
+        from trade_log import reconcile_with_positions, load_raw_log, save_raw_log
+
+        path = str(tmp_path / "log.json")
+        save_raw_log([
+            {
+                "dealId": None,
+                "dealReference": "refMSFT1",
+                "ticker": "MSFT",
+                "side": "long",
+                "size": 0.32,
+                "entry_price": 518.02,
+                "time_entered": "2026-10-05T11:31:02+01:00",
+                "status": "OPEN",
+                "trade_source": "tradingview",
+                "origin": "tradingview",
+                "notes": "Imported from webhook (tradingview)",
+            },
+            {
+                "dealId": "D-MSFT-REAL",
+                "dealReference": None,
+                "ticker": "MSFT",
+                "side": "long",
+                "size": 0.32,
+                "entry_price": 518.02,
+                "time_entered": "2026-10-05T11:39:15+01:00",
+                "status": "CLOSED",
+                "exit_price": 519.39,
+                "time_exited": "2026-10-05T13:20:44+01:00",
+                "pnl": 0.32,
+                "trade_source": "trader",
+                "origin": "trader",
+                "notes": "Imported from live positions",
+            },
+        ], path=path)
+
+        # No live positions (the trade already closed) – reconcile should still
+        # self-heal the duplicate via its canonicalize_trade_log() dedupe pass.
+        reconcile_with_positions([], path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 1, "Dangling TradingView row and its dealId'd duplicate must merge into one"
+        merged = trades[0]
+        assert merged["dealId"] == "D-MSFT-REAL"
+        assert merged["status"] == "CLOSED"
+        assert merged["trade_source"] == "tradingview"
+        assert merged["origin"] == "tradingview"
+
     def test_live_position_rebinds_tradingview_row_with_stale_local_dealid(self, tmp_path):
         from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
         path = str(tmp_path / "log.json")
