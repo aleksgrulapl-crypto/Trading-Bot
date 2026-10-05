@@ -658,7 +658,8 @@ def _find_open_trade_by_dealid(trades: List[Dict[str, Any]], dealId: Any) -> Opt
 
 
 def _find_open_trade_by_ticker_any_dealid(trades: List[Dict[str, Any]], ticker: Any,
-                                           side: Optional[str], dealId: Any) -> Optional[Dict[str, Any]]:
+                                           side: Optional[str], dealId: Any,
+                                           dealReference: Any = None) -> Optional[Dict[str, Any]]:
     """Find any still-open trade for *ticker* (+ *side*) other than one already
     carrying *dealId*, regardless of whether it has a dealId of its own.
 
@@ -670,16 +671,34 @@ def _find_open_trade_by_ticker_any_dealid(trades: List[Dict[str, Any]], ticker: 
     the normal order.place_order() flow – gets logged as a second, duplicate
     entry for a ticker that already has a genuine open position, instead of
     being recognised as the same real trade.
+
+    When *dealReference* is supplied, a candidate that already carries its own
+    *different* dealReference is excluded. Without this guard, two genuinely
+    distinct signals for the same ticker/side (e.g. a scale-in, or a Pine
+    alert that re-fires while a position is still pending broker confirmation)
+    would collapse into a single row here: the second signal's dealReference
+    gets silently discarded, and its real dealId later fails to match
+    anything once confirmed – creating an orphaned "Trader"-labelled
+    duplicate instead of being recognised as its own trade.
     """
     ticker_aliases = _ticker_candidate_aliases(ticker)
     if not ticker_aliases:
         return None
     dealId_norm = str(dealId) if dealId is not None else None
+    dealReference_norm = str(dealReference) if dealReference not in (None, "") else None
+
+    def _dealref_compatible(t: Dict[str, Any]) -> bool:
+        if dealReference_norm is None:
+            return True
+        existing_ref = t.get("dealReference")
+        return existing_ref in (None, "") or str(existing_ref) == dealReference_norm
+
     candidates = [
         t for t in trades
         if t.get("status") != "CLOSED"
         and _ticker_aliases(t.get("ticker")).intersection(ticker_aliases)
         and (dealId_norm is None or str(t.get("dealId")) != dealId_norm)
+        and _dealref_compatible(t)
     ]
     if side:
         side_norm = _normalize_side(side)
@@ -714,11 +733,18 @@ def _find_open_trade_for_dealid_rebind(
     entry_price: Any,
     size: Any,
     time_entered: Any,
+    live_dealids: Optional[set] = None,
 ) -> Optional[Dict[str, Any]]:
     """Find a likely TradingView row to rebind to a broker-confirmed dealId.
 
     Guards against duplicate "Trader" imports when an existing TradingView row
     already represents the same position but still carries a stale local ID.
+
+    *live_dealids*, when supplied (reconcile_with_positions passes the full
+    set of dealIds reported live in the current batch), excludes candidates
+    whose own dealId is itself a currently-live broker position – such a row
+    is a separate, already-confirmed trade (e.g. a genuine scale-in), not a
+    stale placeholder waiting to be rebound.
     """
     ticker_aliases = _ticker_candidate_aliases(ticker)
     if not ticker_aliases:
@@ -755,6 +781,20 @@ def _find_open_trade_for_dealid_rebind(
         if not _is_tradingview_origin_trade(t):
             continue
         if dealId_norm is not None and t.get("dealId") is not None and str(t.get("dealId")) == dealId_norm:
+            continue
+        existing_deal_id = t.get("dealId")
+        if (
+            live_dealids is not None
+            and existing_deal_id not in (None, "")
+            and str(existing_deal_id) in live_dealids
+            and (dealId_norm is None or str(existing_deal_id) != dealId_norm)
+        ):
+            # This candidate's dealId is itself reported as a currently-live
+            # broker position in this same reconcile batch – it is an
+            # already-confirmed, separate position (e.g. a genuine scale-in),
+            # not a stale/local row waiting to be rebound. Merging it here
+            # would silently discard its real identity and collapse two
+            # legitimate trades into one.
             continue
 
         existing_entry = _coerce_trade_float(t.get("entry_price"))
@@ -865,6 +905,7 @@ def _collapse_lingering_tradingview_duplicate(
     entry_price: Any,
     size: Any,
     time_entered: Any,
+    live_dealids: Optional[set] = None,
 ) -> bool:
     """Remove a leftover TradingView OPEN row once a broker row already exists."""
     if not canonical:
@@ -907,7 +948,8 @@ def _collapse_lingering_tradingview_duplicate(
         duplicate = _find_pending_trade_by_ticker(trades, ticker, side)
     if duplicate is None:
         duplicate = _find_open_trade_for_dealid_rebind(
-            trades, ticker, side, dealId, dealReference, entry_price, size, time_entered
+            trades, ticker, side, dealId, dealReference, entry_price, size, time_entered,
+            live_dealids=live_dealids,
         )
     if duplicate is None or duplicate is canonical or not _is_tradingview_origin_trade(duplicate):
         return False
@@ -1359,7 +1401,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
             # matched_via_pending: an entry found this way may already hold
             # broker-confirmed size/entry_price values that must not be
             # overwritten by this payload's own (possibly estimated) figures.
-            existing = _find_open_trade_by_ticker_any_dealid(trades, ticker_candidates, side, dealId)
+            existing = _find_open_trade_by_ticker_any_dealid(trades, ticker_candidates, side, dealId, dealReference)
 
         if existing:
             updated = False
@@ -1687,7 +1729,8 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                 if dealId:
                     exact = _find_open_trade_by_dealid(trades, dealId)
                     if exact is not None and _collapse_lingering_tradingview_duplicate(
-                        trades, exact, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered
+                        trades, exact, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered,
+                        live_dealids=live_ids,
                     ):
                         existing_signatures.add(
                             _make_signature(
@@ -1715,7 +1758,8 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                 matched = _find_pending_trade_by_ticker(trades, ticker_candidates or ticker, side)
             if matched is None and dealId:
                 matched = _find_open_trade_for_dealid_rebind(
-                    trades, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered
+                    trades, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered,
+                    live_dealids=live_ids,
                 )
                 matched_requires_dealid_rebind = matched is not None
 
@@ -1738,7 +1782,8 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                 if not matched.get("timeframe"):
                     matched["timeframe"] = "N/A"; changed = True
                 if _collapse_lingering_tradingview_duplicate(
-                    trades, matched, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered
+                    trades, matched, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered,
+                    live_dealids=live_ids,
                 ):
                     changed = True
                 if changed:

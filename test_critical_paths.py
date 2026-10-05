@@ -287,6 +287,110 @@ class TestUpsertOpenTrade:
         assert trades[0]["entry_price"] == pytest.approx(494.05)
         assert trades[0]["trade_source"] == "tradingview"
 
+    def test_second_pending_scale_in_does_not_merge_into_first_pending_row(self, tmp_path):
+        """Two distinct TradingView signals for the same ticker/side (e.g. a
+        persistent Supertrend condition re-firing, or a deliberate scale-in)
+        each log their own pending (dealId-less) row keyed by dealReference.
+
+        Before the fix, order.py's second pending_payload append (dealId=None,
+        dealReference=refB) would incorrectly merge into the first still-open
+        row (dealReference=refA) via _find_open_trade_by_ticker_any_dealid's
+        "not dealId and dealReference" fallback, because that fallback ignored
+        dealReference entirely. This silently discarded refB and corrupted the
+        first row's entry_price/size, leaving the second order's real dealId
+        to later orphan into a brand-new 'Trader'-labeled duplicate once
+        reconcile_with_positions() saw it.
+        """
+        from trade_log import upsert_open_trade, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {
+                "dealId": None, "dealReference": "refA", "ticker": "ORCL", "side": "long",
+                "size": 0.6, "entry_price": 146.73, "trade_source": "tradingview",
+                "time_entered": "2026-10-10T14:45:05Z",
+            },
+            path=path,
+        )
+        upsert_open_trade(
+            {
+                "dealId": None, "dealReference": "refB", "ticker": "ORCL", "side": "long",
+                "size": 0.6, "entry_price": 146.80, "trade_source": "tradingview",
+                "time_entered": "2026-10-10T14:45:55Z",
+            },
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 2
+        refs = {t.get("dealReference") for t in trades}
+        assert refs == {"refA", "refB"}
+        for t in trades:
+            assert t["trade_source"] == "tradingview"
+            assert t["status"] == "OPEN"
+
+    def test_two_scale_in_signals_full_lifecycle_never_creates_trader_orphan(self, tmp_path):
+        """End-to-end reproduction of the ORCL/PLTR duplicate: two TradingView
+        signals for the same ticker/side, each going through order.py's real
+        pending -> confirmed-dealId lifecycle, followed by a reconcile pass
+        that sees both broker positions. Neither signal should ever surface as
+        an 'Imported from live positions' row defaulted to trade_source
+        'trader'."""
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        # Signal 1 pending, then confirmed with its real dealId.
+        upsert_open_trade(
+            {"dealId": None, "dealReference": "refA", "ticker": "ORCL", "side": "long",
+             "size": 0.6, "entry_price": 146.73, "trade_source": "tradingview",
+             "time_entered": "2026-10-10T14:45:05Z"},
+            path=path,
+        )
+        # Signal 2 fires before signal 1's confirms poll completes.
+        upsert_open_trade(
+            {"dealId": None, "dealReference": "refB", "ticker": "ORCL", "side": "long",
+             "size": 0.6, "entry_price": 146.80, "trade_source": "tradingview",
+             "time_entered": "2026-10-10T14:45:55Z"},
+            path=path,
+        )
+        # Signal 1's confirms poll resolves.
+        upsert_open_trade(
+            {"dealId": "DEAL-ORCL-1", "dealReference": "refA", "ticker": "ORCL", "side": "long",
+             "size": 0.6, "entry_price": 146.73, "trade_source": "tradingview",
+             "time_entered": "2026-10-10T14:45:05Z"},
+            path=path,
+        )
+        # Signal 2's confirms poll resolves.
+        upsert_open_trade(
+            {"dealId": "DEAL-ORCL-2", "dealReference": "refB", "ticker": "ORCL", "side": "long",
+             "size": 0.6, "entry_price": 146.80, "trade_source": "tradingview",
+             "time_entered": "2026-10-10T14:45:55Z"},
+            path=path,
+        )
+
+        trades = load_raw_log(path)
+        assert len(trades) == 2
+        assert {t["dealId"] for t in trades} == {"DEAL-ORCL-1", "DEAL-ORCL-2"}
+        assert all(t["trade_source"] == "tradingview" for t in trades)
+
+        # A later dashboard load reconciles both live broker positions.
+        result = reconcile_with_positions([
+            {"dealId": "DEAL-ORCL-1", "epic": "ORCL", "side": "buy", "size": 0.6,
+             "entry_price": 146.73, "time_entered": "2026-10-10T14:45:05Z"},
+            {"dealId": "DEAL-ORCL-2", "epic": "ORCL", "side": "buy", "size": 0.6,
+             "entry_price": 146.80, "time_entered": "2026-10-10T14:45:55Z"},
+        ], path=path)
+
+        trades = load_raw_log(path)
+        assert len(trades) == 2, "reconcile must not create a phantom third row"
+        assert not result["added"]
+        assert all(t["trade_source"] == "tradingview" for t in trades)
+        assert all(t["status"] == "OPEN" for t in trades)
+
 
 class TestReconcileWithPositions:
     """Tests for trade_log.reconcile_with_positions duplicate-prevention."""
