@@ -185,6 +185,14 @@ def _trade_type_label(trade):
     return "Trader"
 
 
+# ROI-tier trade-source groupings. "Full" tier investors (and the Owner)
+# additionally share in TRADER_TRADE_SOURCES PnL; every investor shares in
+# AUTOMATED_TRADE_SOURCES PnL (Hedge is automated risk management, not a
+# human discretionary trade, so it is grouped with TradingView here).
+AUTOMATED_TRADE_SOURCES = frozenset(("TradingView", "Hedge"))
+TRADER_TRADE_SOURCES = frozenset(("Trader",))
+
+
 def normalize_trades(trades):
     """
     Normalize trade dicts for display and analytics.
@@ -418,13 +426,20 @@ def _trades_closed_since(trades, since_dt):
     return out
 
 
-def _trade_pnl_events(trades):
+def _trade_pnl_events(trades, sources=None):
     """Build a chronological PnL event series (GBP, FX-converted) for closed
-    trades with a resolvable exit time, for use in investor NAV accounting."""
+    trades with a resolvable exit time, for use in investor NAV accounting.
+
+    ``sources``, when given, restricts events to trades whose
+    ``_trade_type_label`` is in that set (e.g. ``{"TradingView", "Hedge"}``
+    for the automated sleeve, or ``{"Trader"}`` for the discretionary
+    sleeve) — used to compute per-tier ROI."""
     fx_rate = float(getattr(config, "FX_USD_GBP", 0.78) or 0.78)
     events = []
     for t in trades or []:
         if not (t.get("status") == "CLOSED" or t.get("time_exited")):
+            continue
+        if sources is not None and _trade_type_label(t) not in sources:
             continue
         ts = _naive_dt(_parse_iso_like(t.get("time_exited")) or _parse_iso_like(t.get("time_entered")))
         if ts is None:
@@ -740,37 +755,83 @@ def dashboard_trades_data():
 @login_required
 def dashboard_investors():
     """Render a simple, visual-only list of investor names (no financial
-    figures) — visible to any logged-in user."""
+    figures) — visible to any logged-in user. Each investor is tagged with
+    their ROI tier (owner / full / tradingview) for colour-coding; the tier
+    is only changeable by the Owner."""
     ctx = _build_request_context()
     entries = deposits.list_entries_sorted()
     investors = deposits.list_investors(entries)
+    owner_name = str(getattr(config, "OWNER_INVESTOR_NAME", "Aleks") or "").strip()
+    tiers = deposits.load_tiers()
+
+    investor_rows = []
+    for name in investors:
+        is_owner = bool(owner_name) and name.strip().lower() == owner_name.strip().lower()
+        tier = "owner" if is_owner else deposits.get_investor_tier(name, tiers)
+        investor_rows.append({"name": name, "tier": tier, "is_owner": is_owner})
 
     return render_template(
         "investors.html",
         title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
         cache_bust=time.time(),
         account=ctx["account"],
-        investors=investors,
-        owner_name=str(getattr(config, "OWNER_INVESTOR_NAME", "Aleks") or "").strip(),
+        investor_rows=investor_rows,
+        owner_name=owner_name,
         is_owner=current_role() == "owner",
     )
+
+
+@dashboard.route("/dashboard/investors/tier", methods=["POST"])
+@owner_required
+def dashboard_investors_set_tier():
+    """Owner-only: set an investor's ROI tier ("tradingview" or "full")."""
+    payload = request.form if request.form else (request.get_json(silent=True) or {})
+    name = payload.get("investor", "")
+    tier = payload.get("tier", "")
+
+    ok, status = deposits.set_investor_tier(name, tier)
+
+    if request.is_json:
+        if ok:
+            return jsonify({"status": "success", "investor": name, "tier": tier}), 200
+        code = 400 if status in ("invalid_investor", "invalid_tier") else 500
+        return jsonify({"status": "error", "message": status}), code
+
+    return redirect("/dashboard/investors")
 
 
 @dashboard.route("/dashboard/analytics")
 @login_required
 def dashboard_analytics():
     """Render the in-depth Analytics page: best/worst trade, per-ticker
-    win/loss breakdown, equity curve, and average hold time."""
+    win/loss breakdown, equity curve, and average hold time.
+
+    Supports a ``?group=`` query param to break the analytics down by trade
+    source: "tradingview" (TradingView + Hedge), "trader" (discretionary
+    trades only), or "all" (default — current behaviour, every trade)."""
     ctx = _build_request_context()
-    detailed = compute_detailed_analytics(ctx["combined_trades"])
+    group = str(request.args.get("group") or "all").strip().lower()
+    if group not in ("all", "tradingview", "trader"):
+        group = "all"
+
+    if group == "all":
+        group_trades = ctx["combined_trades"]
+        analytics = ctx["analytics"]
+    else:
+        sources = AUTOMATED_TRADE_SOURCES if group == "tradingview" else TRADER_TRADE_SOURCES
+        group_trades = [t for t in ctx["combined_trades"] if _trade_type_label(t) in sources]
+        analytics = _safe_analytics(compute_analytics(group_trades))
+
+    detailed = compute_detailed_analytics(group_trades)
 
     return render_template(
         "analytics.html",
         title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
         cache_bust=time.time(),
         account=ctx["account"],
-        analytics=ctx["analytics"],
+        analytics=analytics,
         detailed=detailed,
+        group=group,
         is_owner=current_role() == "owner",
     )
 
@@ -799,18 +860,125 @@ def dashboard_deposits():
     )
 
 
+def _is_full_tier_investor(name, owner_name, tiers):
+    """True if *name* is the Owner or has been granted "full" ROI tier
+    (sharing in Trader/discretionary-trade PnL, not just TradingView/Hedge)."""
+    name = str(name or "").strip()
+    if owner_name and name.lower() == owner_name.strip().lower():
+        return True
+    return deposits.get_investor_tier(name, tiers) == "full"
+
+
+def _build_roi_breakdown(entries, combined_trades, balance):
+    """Compute per-investor ROI split into two sleeves:
+
+    - A "TradingView" sleeve (TradingView + Hedge PnL) that every investor
+      shares in pro-rata, with the Owner's configured performance fee.
+    - A "Trader" sleeve (discretionary trade PnL) that only the Owner and
+      "full" tier investors share in pro-rata, with no performance fee.
+
+    Each investor's combined gain/loss/ROI is the sum of whichever sleeves
+    they participate in; the two sleeves are reconciled against the real
+    account balance once, combined, and any drift is credited to the Owner
+    (consistent with the single-sleeve reconciliation behaviour)."""
+    owner_name = str(getattr(config, "OWNER_INVESTOR_NAME", "Aleks") or "").strip()
+    tiers = deposits.load_tiers()
+
+    tv_pnl_events = _trade_pnl_events(combined_trades, sources=AUTOMATED_TRADE_SOURCES)
+    trader_pnl_events = _trade_pnl_events(combined_trades, sources=TRADER_TRADE_SOURCES)
+
+    tv = deposits.investor_breakdown(entries, tv_pnl_events, current_balance=None)
+
+    full_tier_entries = [
+        e for e in entries
+        if _is_full_tier_investor(str((e or {}).get("investor") or "").strip() or "Unassigned", owner_name, tiers)
+    ]
+    trader = deposits.investor_breakdown(
+        full_tier_entries, trader_pnl_events, current_balance=None, owner_override_pct_override=0,
+    )
+
+    owner_key = tv.get("owner_name")
+    # Each sleeve's own "tracked_total" includes its OWN capital flows plus
+    # its PnL — but both sleeves share the SAME underlying capital (the
+    # same real deposits), just exposed to two different PnL streams.
+    # Summing the two tracked_totals directly would double-count full-tier
+    # investors' capital. Instead, combine capital once (from the TV sleeve,
+    # which spans every investor) and add each sleeve's PnL delta on top.
+    tv_pnl_delta = (tv.get("tracked_total") or 0.0) - (tv.get("total_net_contribution") or 0.0)
+    trader_pnl_delta = (trader.get("tracked_total") or 0.0) - (trader.get("total_net_contribution") or 0.0)
+    combined_tracked_total = round(
+        (tv.get("total_net_contribution") or 0.0) + tv_pnl_delta + trader_pnl_delta, 2
+    )
+    reconciliation_adjustment = (
+        round(balance - combined_tracked_total, 2) if balance is not None and owner_key else 0.0
+    )
+
+    trader_by_name = {inv["investor"].strip().lower(): inv for inv in trader.get("investors", [])}
+
+    investors_out = []
+    for inv in tv.get("investors", []):
+        name = inv["investor"]
+        is_full = bool(inv.get("is_owner")) or _is_full_tier_investor(name, owner_name, tiers)
+        tier = "owner" if inv.get("is_owner") else ("full" if is_full else "tradingview")
+
+        trader_inv = trader_by_name.get(name.strip().lower())
+        trader_gain = round(trader_inv["allocated_gain_loss"], 2) if trader_inv and trader_inv.get("allocated_gain_loss") is not None else 0.0
+        owner_bonus = reconciliation_adjustment if inv.get("is_owner") else 0.0
+
+        net_contribution = inv["net_contribution"]
+        combined_gain_loss = round(inv["allocated_gain_loss"] + trader_gain + owner_bonus, 2)
+        combined_roi_pct = (
+            round((combined_gain_loss / net_contribution) * 100, 2)
+            if net_contribution not in (0, 0.0) else None
+        )
+
+        row = dict(inv)
+        row["tier"] = tier
+        row["tv_allocated_gain_loss"] = inv["allocated_gain_loss"]
+        row["trader_allocated_gain_loss"] = trader_gain if is_full else None
+        row["allocated_gain_loss"] = combined_gain_loss
+        row["current_value"] = round(inv["current_value"] + trader_gain + owner_bonus, 2)
+        row["roi_pct"] = combined_roi_pct
+        investors_out.append(row)
+
+    total_net_contribution = tv.get("total_net_contribution")
+    overall_gain_loss = (
+        round(balance - total_net_contribution, 2)
+        if balance is not None and total_net_contribution is not None
+        else None
+    )
+    overall_roi_pct = (
+        round((overall_gain_loss / total_net_contribution) * 100, 2)
+        if overall_gain_loss is not None and total_net_contribution not in (0, 0.0)
+        else None
+    )
+
+    return {
+        "investors": investors_out,
+        "total_net_contribution": total_net_contribution,
+        "current_balance": balance,
+        "overall_gain_loss": overall_gain_loss,
+        "overall_roi_pct": overall_roi_pct,
+        "owner_name": owner_key,
+        "owner_override_pct": tv.get("owner_override_pct"),
+        "pre_ledger_pnl": tv.get("pre_ledger_pnl"),
+        "trader_pre_ledger_pnl": trader.get("pre_ledger_pnl"),
+        "reconciliation_adjustment": reconciliation_adjustment if owner_key else None,
+    }
+
+
 @dashboard.route("/dashboard/roi")
 @owner_page_required
 def dashboard_roi():
     """Render the Owner-only ROI page: per-investor ownership share and
     gain/loss, computed via NAV-per-unit accounting against the chronological
     deposit/withdrawal and trade-PnL timeline. An investor only participates
-    in gains/losses from trades closed after their own deposit."""
+    in gains/losses from trades closed after their own deposit, and only in
+    Trader-trade PnL if they have been granted "full" ROI tier."""
     ctx = _build_request_context()
     entries = deposits.list_entries_sorted()
     account = ctx["account"]
-    pnl_events = _trade_pnl_events(ctx["combined_trades"])
-    breakdown = deposits.investor_breakdown(entries, pnl_events, (account or {}).get("balance"))
+    breakdown = _build_roi_breakdown(entries, ctx["combined_trades"], (account or {}).get("balance"))
 
     return render_template(
         "roi.html",

@@ -7,11 +7,23 @@
       <div class="card-title">Investors</div>
     </div>
 
-    {% if investors %}
+    <p class="small" style="margin-bottom: 10px;">
+      <span class="tier-dot tier-dot-owner"></span> Owner — receives the backend/hosting performance fee and shares in all trade PnL.
+      <span class="tier-dot tier-dot-tradingview" style="margin-left: 14px;"></span> TradingView tier — shares only in automated TradingView/Hedge trade PnL.
+      <span class="tier-dot tier-dot-full" style="margin-left: 14px;"></span> Full tier — additionally shares in Trader (discretionary) trade PnL.
+    </p>
+
+    {% if investor_rows %}
     <div class="investor-list">
-      {% for name in investors %}
-      <span class="investor-chip {% if owner_name and name.strip().lower() == owner_name.strip().lower() %}investor-owner{% endif %}">
-        {{ name }}
+      {% for row in investor_rows %}
+      <span class="investor-chip investor-tier-{{ row.tier }}">
+        {{ row.name }}
+        {% if is_owner and not row.is_owner %}
+        <select class="type-select tier-select" style="margin-left: 8px;" data-investor="{{ row.name }}" onchange="updateInvestorTier(this)">
+          <option value="tradingview" {% if row.tier == 'tradingview' %}selected{% endif %}>TradingView</option>
+          <option value="full" {% if row.tier == 'full' %}selected{% endif %}>Full (+ Trader)</option>
+        </select>
+        {% endif %}
       </span>
       {% endfor %}
     </div>
@@ -20,4 +32,35 @@
     {% endif %}
   </div>
 </div>
+
+<script>
+function updateInvestorTier(select) {
+    const errorBanner = document.getElementById('error-banner');
+    const investor = select.getAttribute('data-investor');
+    const tier = select.value;
+
+    fetch('/dashboard/investors/tier', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ investor: investor, tier: tier })
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (!data || data.status !== 'success') {
+                errorBanner.innerText = (data && data.message) || "Failed to update investor tier.";
+                errorBanner.style.display = "block";
+                return;
+            }
+            const chip = select.closest('.investor-chip');
+            if (chip) {
+                chip.classList.remove('investor-tier-tradingview', 'investor-tier-full');
+                chip.classList.add('investor-tier-' + tier);
+            }
+        })
+        .catch(err => {
+            errorBanner.innerText = "Update tier error: " + err.message;
+            errorBanner.style.display = "block";
+        });
+}
+</script>
 {% endblock %}

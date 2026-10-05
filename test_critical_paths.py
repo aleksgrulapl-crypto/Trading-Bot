@@ -3546,3 +3546,149 @@ class TestTradingViewAlertParserTimeframe:
         result = parse_tradingview_alert("BUY|NVDA|SL:120|TP:130")
         assert result["blocked"] is False
         assert result["timeframe"] is None
+
+
+class TestInvestorTiers:
+    """Tests for deposits.py's investor ROI tier store."""
+
+    def test_default_tier_is_tradingview_when_unset(self, tmp_path):
+        import deposits
+        path = str(tmp_path / "tiers.json")
+        assert deposits.get_investor_tier("Bob", path=path) == "tradingview"
+
+    def test_set_and_get_tier_round_trips_case_insensitively(self, tmp_path):
+        import deposits
+        path = str(tmp_path / "tiers.json")
+        ok, status = deposits.set_investor_tier("Carol", "full", path=path)
+        assert ok is True
+        assert status == "updated"
+        assert deposits.get_investor_tier("CAROL", path=path) == "full"
+        assert deposits.get_investor_tier("carol  ", path=path) == "full"
+
+    def test_set_tier_rejects_invalid_tier_name(self, tmp_path):
+        import deposits
+        path = str(tmp_path / "tiers.json")
+        ok, status = deposits.set_investor_tier("Carol", "platinum", path=path)
+        assert ok is False
+        assert status == "invalid_tier"
+
+    def test_set_tier_rejects_empty_investor_name(self, tmp_path):
+        import deposits
+        path = str(tmp_path / "tiers.json")
+        ok, status = deposits.set_investor_tier("   ", "full", path=path)
+        assert ok is False
+        assert status == "invalid_investor"
+
+
+class TestInvestorBreakdownOwnerFeeOverride:
+    """Tests for the owner_override_pct_override parameter added to
+    deposits.investor_breakdown() for the Trader ROI sleeve (no performance
+    fee should apply there)."""
+
+    def test_override_zero_disables_owner_fee_on_profitable_trade(self):
+        import deposits
+        entries = [
+            {"type": "deposit", "amount": 1000, "investor": "Aleks", "occurred_at": "2026-01-01"},
+            {"type": "deposit", "amount": 1000, "investor": "Carol", "occurred_at": "2026-01-01"},
+        ]
+        pnl_events = [{"ts": "2026-01-02T00:00:00", "pnl": 200.0}]
+        result = deposits.investor_breakdown(entries, pnl_events, owner_override_pct_override=0)
+        assert result["owner_override_pct"] == 0
+        by_name = {i["investor"]: i for i in result["investors"]}
+        # With no fee, the 200 profit splits evenly 50/50 by equal capital.
+        assert by_name["Aleks"]["allocated_gain_loss"] == pytest.approx(100.0, abs=0.01)
+        assert by_name["Carol"]["allocated_gain_loss"] == pytest.approx(100.0, abs=0.01)
+
+    def test_tracked_total_is_always_exposed(self):
+        import deposits
+        entries = [{"type": "deposit", "amount": 500, "investor": "Aleks", "occurred_at": "2026-01-01"}]
+        result = deposits.investor_breakdown(entries, [], current_balance=None)
+        assert result["tracked_total"] == 500.0
+
+
+class TestRoiTierBreakdown:
+    """Tests for dashboard._build_roi_breakdown's two-sleeve ROI split:
+    every investor shares TradingView/Hedge PnL, but only the Owner and
+    "full" tier investors additionally share Trader (discretionary) PnL,
+    with the real account balance reconciling exactly across both sleeves."""
+
+    def _entries(self):
+        return [
+            {"type": "deposit", "amount": 1000, "investor": "Aleks", "occurred_at": "2026-01-01"},
+            {"type": "deposit", "amount": 1000, "investor": "Bob", "occurred_at": "2026-01-02"},
+            {"type": "deposit", "amount": 1000, "investor": "Carol", "occurred_at": "2026-01-02"},
+        ]
+
+    def _trades(self):
+        return [
+            {"status": "CLOSED", "trade_source": "TradingView", "pnl_gbp": 300, "time_exited": "2026-01-03T00:00:00Z"},
+            {"status": "CLOSED", "trade_source": "Trader", "pnl_gbp": 200, "time_exited": "2026-01-03T00:00:00Z"},
+        ]
+
+    def test_tradingview_tier_investor_excluded_from_trader_pnl(self, monkeypatch, tmp_path):
+        import dashboard, deposits
+        monkeypatch.setattr(deposits, "TIERS_PATH", str(tmp_path / "tiers.json"))
+
+        breakdown = dashboard._build_roi_breakdown(self._entries(), self._trades(), balance=3500)
+        by_name = {i["investor"]: i for i in breakdown["investors"]}
+
+        assert by_name["Bob"]["tier"] == "tradingview"
+        assert by_name["Bob"]["trader_allocated_gain_loss"] is None
+        # Bob's gain/loss comes only from the TradingView sleeve.
+        assert by_name["Bob"]["allocated_gain_loss"] == pytest.approx(85.2, abs=0.01)
+
+    def test_full_tier_investor_shares_trader_pnl_pro_rata(self, monkeypatch, tmp_path):
+        import dashboard, deposits
+        monkeypatch.setattr(deposits, "TIERS_PATH", str(tmp_path / "tiers.json"))
+        deposits.set_investor_tier("Carol", "full")
+
+        breakdown = dashboard._build_roi_breakdown(self._entries(), self._trades(), balance=3500)
+        by_name = {i["investor"]: i for i in breakdown["investors"]}
+
+        assert by_name["Carol"]["tier"] == "full"
+        # Trader sleeve is split pro-rata between Aleks and Carol only (1000 each).
+        assert by_name["Carol"]["trader_allocated_gain_loss"] == pytest.approx(100.0, abs=0.01)
+        assert by_name["Aleks"]["trader_allocated_gain_loss"] == pytest.approx(100.0, abs=0.01)
+        assert by_name["Aleks"]["tier"] == "owner"
+
+    def test_owner_receives_no_trader_sleeve_performance_fee(self, monkeypatch, tmp_path):
+        """The 15% Owner performance fee applies only to the TradingView
+        sleeve; the Trader sleeve is split purely pro-rata."""
+        import dashboard, deposits
+        monkeypatch.setattr(deposits, "TIERS_PATH", str(tmp_path / "tiers.json"))
+        deposits.set_investor_tier("Carol", "full")
+
+        breakdown = dashboard._build_roi_breakdown(self._entries(), self._trades(), balance=3500)
+        by_name = {i["investor"]: i for i in breakdown["investors"]}
+        # Trader sleeve: 200 profit split evenly between Aleks and Carol
+        # (1000 capital each) with no fee skimmed off the top.
+        assert by_name["Aleks"]["trader_allocated_gain_loss"] == pytest.approx(100.0, abs=0.01)
+        assert by_name["Carol"]["trader_allocated_gain_loss"] == pytest.approx(100.0, abs=0.01)
+
+    def test_combined_figures_reconcile_exactly_to_real_balance(self, monkeypatch, tmp_path):
+        """Regardless of tier mix, the sum of every investor's combined
+        current_value/allocated_gain_loss must reconcile exactly to the
+        real account balance/overall gain-loss (no double-counted capital)."""
+        import dashboard, deposits
+        monkeypatch.setattr(deposits, "TIERS_PATH", str(tmp_path / "tiers.json"))
+        deposits.set_investor_tier("Carol", "full")
+
+        breakdown = dashboard._build_roi_breakdown(self._entries(), self._trades(), balance=3500)
+
+        assert breakdown["reconciliation_adjustment"] in (0, 0.0, None) or abs(breakdown["reconciliation_adjustment"]) < 0.01
+        total_current_value = sum(i["current_value"] for i in breakdown["investors"])
+        total_allocated = sum(i["allocated_gain_loss"] for i in breakdown["investors"])
+        assert total_current_value == pytest.approx(3500.0, abs=0.01)
+        assert total_allocated == pytest.approx(500.0, abs=0.01)
+
+    def test_hedge_trades_are_shared_by_every_investor(self, monkeypatch, tmp_path):
+        """Hedge-labelled trades count as automated/TradingView-sleeve PnL,
+        so TradingView-tier investors (not just Owner/full-tier) share it."""
+        import dashboard, deposits
+        monkeypatch.setattr(deposits, "TIERS_PATH", str(tmp_path / "tiers.json"))
+
+        trades = [{"status": "CLOSED", "trade_source": "hedge", "pnl_gbp": 300, "time_exited": "2026-01-03T00:00:00Z"}]
+        breakdown = dashboard._build_roi_breakdown(self._entries(), trades, balance=3300)
+        by_name = {i["investor"]: i for i in breakdown["investors"]}
+        assert by_name["Bob"]["tv_allocated_gain_loss"] == pytest.approx(85.2, abs=0.01)
+

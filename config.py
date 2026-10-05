@@ -216,6 +216,14 @@ DEPOSITS_LOG_PATH = os.getenv("DEPOSITS_LOG_PATH", "/data/deposits_log.json")
 OWNER_INVESTOR_NAME = os.getenv("OWNER_INVESTOR_NAME", "Aleks")
 OWNER_INVESTOR_OVERRIDE_PCT = float(os.getenv("OWNER_INVESTOR_OVERRIDE_PCT", 15))
 
+# Per-investor ROI tier store (Owner-only, changeable from the Investors
+# page). By default every non-owner investor is "tradingview" tier: they
+# only share in PnL from TradingView/Hedge (automated) trades, never from
+# "Trader" (manual/discretionary) trades. The Owner can upgrade an investor
+# to "full" tier so they additionally share pro-rata in Trader-trade PnL
+# (no performance fee applies to that sleeve — see deposits.investor_breakdown).
+INVESTOR_TIERS_PATH = os.getenv("INVESTOR_TIERS_PATH", "/data/investor_tiers.json")
+
 # Cache and timing
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 2))
 
