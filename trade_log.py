@@ -1456,7 +1456,18 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
                     existing["entry_price"] = entry_val; updated = True
             if (existing.get("time_entered") in (None, "")) and time_entered:
                 existing["time_entered"] = time_entered; updated = True
-            if (existing.get("timeframe") in (None, "")) and timeframe:
+            if (
+                str(existing.get("timeframe") or "").strip().upper() in ("", "N/A")
+                and timeframe
+                and str(timeframe).strip().upper() != "N/A"
+            ):
+                # "N/A" is the placeholder reconcile_with_positions() stamps
+                # on a row it creates for a live broker position (which has
+                # no timeframe concept at all), and order.py itself falls
+                # back to "N/A" when no timeframe was supplied. Once a later
+                # payload supplies the real parsed timeframe, replace the
+                # placeholder instead of treating "N/A" as an already-known
+                # value that blocks it forever.
                 existing["timeframe"] = timeframe; updated = True
             if _collapse_lingering_tradingview_duplicate(
                 trades, existing, ticker_candidates, side, dealId, dealReference, entry_val, size_val, time_entered
@@ -1809,6 +1820,36 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                     existing_signatures.add(_make_signature(matched.get("dealId"), matched.get("dealReference"), matched.get("ticker"), matched.get("entry_price")))
                     matched_updates.append(matched)
                 continue
+
+            # No match found by dealId, pending-row, or dealId-rebind lookups
+            # above - this live position is about to be logged as a brand-new
+            # "Imported from live positions" row (trade_source="trader"),
+            # which happens even for a genuine TradingView trade whenever
+            # none of those matches recognise it as the same position (see
+            # the race documented on upsert_open_trade's trusted-origin
+            # correction branch). Log full context plus any still-open rows
+            # for the same ticker alias, so a recurrence can be root-caused
+            # from production logs instead of guessing.
+            try:
+                same_ticker_open = [
+                    {
+                        "dealId": t.get("dealId"), "dealReference": t.get("dealReference"),
+                        "ticker": t.get("ticker"), "side": t.get("side"),
+                        "entry_price": t.get("entry_price"), "size": t.get("size"),
+                        "time_entered": t.get("time_entered"), "trade_source": t.get("trade_source"),
+                    }
+                    for t in trades
+                    if t.get("status") != "CLOSED"
+                    and _ticker_aliases(t.get("ticker")).intersection(_ticker_candidate_aliases(ticker_candidates or ticker))
+                ]
+                logger.warning(
+                    "reconcile_with_positions: no match for live position (ticker=%s dealId=%s dealReference=%s "
+                    "side=%s entry_price=%s size=%s) - creating new %r row. live_dealids=%s other open rows for "
+                    "this ticker=%s",
+                    ticker, dealId, dealReference, side, entry_price, size, trade_source, sorted(live_ids), same_ticker_open,
+                )
+            except Exception:
+                logger.exception("reconcile_with_positions: failed to log diagnostic context before creating new row")
 
             try:
                 new_pos = {
