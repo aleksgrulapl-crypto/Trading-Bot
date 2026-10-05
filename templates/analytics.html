@@ -2,6 +2,11 @@
 
 {% block content %}
 <div class="analytics-wrap">
+<div class="analytics-tabs">
+  <a href="/dashboard/analytics?group=all" class="{% if group == 'all' %}active{% endif %}">General (All Trades)</a>
+  <a href="/dashboard/analytics?group=tradingview" class="{% if group == 'tradingview' %}active{% endif %}">TradingView</a>
+  <a href="/dashboard/analytics?group=trader" class="{% if group == 'trader' %}active{% endif %}">Trader</a>
+</div>
 <div class="analytics-top-grid">
   <div class="card">
     <div class="card-header">

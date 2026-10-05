@@ -41,13 +41,21 @@
       {% if breakdown.owner_name %}
       <strong>{{ breakdown.owner_name }}</strong> additionally receives a
       {{ "%.0f"|format(breakdown.owner_override_pct) }}% performance fee on
-      profitable closed trades (for covering backend/hosting costs as account
-      owner), paid in newly issued units at that trade's NAV.
+      profitable closed <strong>TradingView/Hedge</strong> trades only (for
+      covering backend/hosting costs as account owner), paid in newly issued
+      units at that trade's NAV — this fee is separate from and does not
+      apply to Trader-sleeve profits.
       {% endif %}
       {% if breakdown.pre_ledger_pnl %}
-      <br>Note: £{{ "%.2f"|format(breakdown.pre_ledger_pnl) }} of PnL was
-      generated before any deposits were tracked and has been credited to
-      {{ breakdown.owner_name }} as pre-ledger equity.
+      <br>Note: £{{ "%.2f"|format(breakdown.pre_ledger_pnl) }} of TradingView
+      PnL was generated before any deposits were tracked and has been
+      credited to {{ breakdown.owner_name }} as pre-ledger equity.
+      {% endif %}
+      {% if breakdown.trader_pre_ledger_pnl %}
+      <br>Note: £{{ "%.2f"|format(breakdown.trader_pre_ledger_pnl) }} of
+      Trader-sleeve PnL was generated before any full-tier deposits were
+      tracked and has been credited to {{ breakdown.owner_name }} as
+      pre-ledger equity.
       {% endif %}
       {% if breakdown.reconciliation_adjustment %}
       <br>Note: the live broker balance differs from the sum of recorded
@@ -72,7 +80,9 @@
           <th>Net Contribution</th>
           <th>Units Held</th>
           <th>Ownership Share</th>
-          <th>Allocated Gain / Loss</th>
+          <th>TradingView P&amp;L</th>
+          <th>Trader P&amp;L</th>
+          <th>Combined Gain / Loss</th>
           <th>Current Value</th>
           <th>ROI</th>
         </tr>
@@ -82,13 +92,20 @@
         <tr>
           <td>
             {{ inv.investor }}
-            {% if inv.is_owner %}<span class="pill pill-status" title="Receives a {{ '%.0f'|format(breakdown.owner_override_pct) }}% performance fee on profitable trades">Owner +{{ "%.0f"|format(breakdown.owner_override_pct) }}%</span>{% endif %}
+            <span class="tier-badge tier-badge-{{ inv.tier }}">{{ inv.tier }}</span>
+            {% if inv.is_owner %}<span class="pill pill-status" title="Receives a {{ '%.0f'|format(breakdown.owner_override_pct) }}% performance fee on profitable TradingView trades">+{{ "%.0f"|format(breakdown.owner_override_pct) }}%</span>{% endif %}
           </td>
           <td>£{{ "%.2f"|format(inv.deposited) }}</td>
           <td>£{{ "%.2f"|format(inv.withdrawn) }}</td>
           <td>£{{ "%.2f"|format(inv.net_contribution) }}</td>
           <td class="small">{{ "%.2f"|format(inv.units_held) }}</td>
           <td>{% if inv.share_pct is not none %}{{ "%.2f"|format(inv.share_pct) }}%{% else %}—{% endif %}</td>
+          <td class="{% if inv.tv_allocated_gain_loss is not none and inv.tv_allocated_gain_loss >= 0 %}pnl-pos{% elif inv.tv_allocated_gain_loss is not none %}pnl-neg{% endif %}">
+            {% if inv.tv_allocated_gain_loss is not none %}£{{ "%.2f"|format(inv.tv_allocated_gain_loss) }}{% else %}—{% endif %}
+          </td>
+          <td class="{% if inv.trader_allocated_gain_loss is not none and inv.trader_allocated_gain_loss >= 0 %}pnl-pos{% elif inv.trader_allocated_gain_loss is not none %}pnl-neg{% endif %}">
+            {% if inv.trader_allocated_gain_loss is not none %}£{{ "%.2f"|format(inv.trader_allocated_gain_loss) }}{% else %}<span class="small">n/a</span>{% endif %}
+          </td>
           <td class="{% if inv.allocated_gain_loss is not none and inv.allocated_gain_loss >= 0 %}pnl-pos{% elif inv.allocated_gain_loss is not none %}pnl-neg{% endif %}">
             {% if inv.allocated_gain_loss is not none %}£{{ "%.2f"|format(inv.allocated_gain_loss) }}{% else %}—{% endif %}
           </td>
@@ -98,10 +115,19 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="9" class="small">No investor contributions recorded yet. Add entries on the <a href="/dashboard/deposits">Deposits page</a>.</td></tr>
+        <tr><td colspan="11" class="small">No investor contributions recorded yet. Add entries on the <a href="/dashboard/deposits">Deposits page</a>.</td></tr>
         {% endfor %}
       </tbody>
     </table>
+    <p class="small" style="margin-top: 10px;">
+      "TradingView P&amp;L" is every investor's pro-rata share of
+      automated TradingView/Hedge trade PnL (the Owner's performance fee is
+      skimmed from this sleeve only). "Trader P&amp;L" is the discretionary
+      trade PnL, shared only between the Owner and investors granted
+      <strong>Full</strong> tier on the <a href="/dashboard/investors">Investors page</a> —
+      shown as "n/a" for TradingView-tier investors, who do not participate
+      in it. Tiers can only be changed by the Owner.
+    </p>
   </div>
 
 </div>

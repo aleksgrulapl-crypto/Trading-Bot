@@ -35,6 +35,76 @@ VALID_TYPES = frozenset(("deposit", "withdrawal"))
 # Module-level lock protecting all read-modify-write operations on the deposits log file.
 _deposits_lock = threading.Lock()
 
+# -----------------------------------------------------------------------
+# Investor ROI tiers (Owner-only, changeable from the Investors page).
+#
+# "tradingview" (default): the investor only shares in PnL from
+#   TradingView/Hedge (automated) trades.
+# "full": the investor additionally shares pro-rata in "Trader"
+#   (manual/discretionary) trade PnL, alongside the Owner.
+#
+# The Owner is always implicitly "full" tier and is never stored here —
+# tier membership for the Owner is derived from OWNER_INVESTOR_NAME.
+# -----------------------------------------------------------------------
+TIERS_PATH = os.environ.get("INVESTOR_TIERS_PATH") or (getattr(config, "INVESTOR_TIERS_PATH", None) if config else None) or "/data/investor_tiers.json"
+
+VALID_TIERS = frozenset(("tradingview", "full"))
+DEFAULT_TIER = "tradingview"
+
+_tiers_lock = threading.Lock()
+
+
+def load_tiers(path: str = TIERS_PATH) -> Dict[str, str]:
+    """Load the investor-tier map (lowercased investor name -> tier). Returns {} if absent/invalid."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if not isinstance(data, dict):
+                logger.warning("deposits: tiers file content not a dict, returning empty map")
+                return {}
+            return {str(k).strip().lower(): str(v) for k, v in data.items()}
+    except Exception as exc:
+        logger.exception("deposits: failed to load tiers: %s", exc)
+        return {}
+
+
+def save_tiers(tiers: Dict[str, str], path: str = TIERS_PATH) -> bool:
+    """Persist *tiers* to *path* via an atomic write."""
+    ok = _atomic_write(path, tiers)
+    if not ok:
+        logger.error("deposits: atomic write of tiers failed")
+    return ok
+
+
+def get_investor_tier(name: str, tiers: Optional[Dict[str, str]] = None, path: str = TIERS_PATH) -> str:
+    """Return the stored tier for *name* ("tradingview" or "full"), defaulting
+    to "tradingview" when unset/invalid. Lookup is case-insensitive."""
+    key = str(name or "").strip().lower()
+    if not key:
+        return DEFAULT_TIER
+    tiers = tiers if tiers is not None else load_tiers(path)
+    tier = tiers.get(key)
+    return tier if tier in VALID_TIERS else DEFAULT_TIER
+
+
+def set_investor_tier(name: str, tier: str, path: str = TIERS_PATH) -> Tuple[bool, str]:
+    """Set the ROI tier for investor *name*. Returns (ok, status)."""
+    key = str(name or "").strip().lower()
+    if not key:
+        return False, "invalid_investor"
+    tier = str(tier or "").strip().lower()
+    if tier not in VALID_TIERS:
+        return False, "invalid_tier"
+
+    with _tiers_lock:
+        tiers = load_tiers(path)
+        tiers[key] = tier
+        if not save_tiers(tiers, path):
+            return False, "save_failed"
+        return True, "updated"
+
 
 def _now_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
@@ -226,6 +296,7 @@ def investor_breakdown(
     trade_pnl_events: Optional[List[Dict[str, Any]]] = None,
     current_balance: Optional[float] = None,
     as_of: Optional[datetime] = None,
+    owner_override_pct_override: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Compute each investor's ownership and ROI using NAV-per-unit accounting.
 
@@ -258,11 +329,20 @@ def investor_breakdown(
     investors hold units, and credited to the owner as additional units at
     that moment's NAV (covering backend/hosting costs) — this dilutes other
     unit holders only going forward, never retroactively.
+
+    ``owner_override_pct_override``, when given, replaces the configured
+    percentage for this call only — used by dashboard.py to run a second,
+    "Trader-sleeve" simulation (restricted to full-tier investors) with the
+    fee disabled, since that sleeve's profits are split purely pro-rata.
     """
     as_of = as_of or datetime.utcnow()
 
     owner_name = str(getattr(config, "OWNER_INVESTOR_NAME", "Aleks") or "").strip()
-    owner_override_pct = float(getattr(config, "OWNER_INVESTOR_OVERRIDE_PCT", 15) or 0)
+    owner_override_pct = (
+        float(owner_override_pct_override)
+        if owner_override_pct_override is not None
+        else float(getattr(config, "OWNER_INVESTOR_OVERRIDE_PCT", 15) or 0)
+    )
 
     # Build the chronological event timeline: capital flows + trade PnL.
     capital_events = []
@@ -439,4 +519,8 @@ def investor_breakdown(
         "owner_override_pct": owner_override_pct if owner_key is not None else None,
         "pre_ledger_pnl": pre_ledger_pnl if owner_key else None,
         "reconciliation_adjustment": reconciliation_adjustment if owner_key else None,
+        # Simulated total (fund_value + pre-ledger PnL), exposed so callers
+        # running multiple parallel sleeves (e.g. TradingView + Trader) can
+        # combine them and reconcile against the real balance themselves.
+        "tracked_total": round(tracked_total, 2),
     }
