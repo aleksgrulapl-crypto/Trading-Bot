@@ -1039,11 +1039,52 @@ def _select_timestamp(entries: List[Dict[str, Any]], key: str, pick_latest: bool
     return best[1] if best else None
 
 
+def _is_dangling_tradingview_duplicate(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    """True when one row is a still-open, dealId-less TradingView/hedge row and
+    the other is a dealId'd row for the same ticker/side/entry price.
+
+    This covers the case where the original webhook-sourced pending entry was
+    never rebound to its broker-confirmed dealId (e.g. reconcile_with_positions
+    ran before order.py's own confirms polling attached it, or ticker-alias
+    matching otherwise missed it), leaving a second, dealId'd row (surfaced in
+    the UI as a "Trader" trade) tracking the same real position while the
+    original lingers open forever with no exit – i.e. the same trade appears
+    twice. Size is deliberately not compared: a dealId'd row can legitimately
+    carry a broker-confirmed fill size that differs from the pre-fill estimate
+    while still being the same real position; entry price plus a close
+    time-of-entry is a far more reliable invariant for "same real trade".
+    """
+    for pending, other in ((a, b), (b, a)):
+        if pending.get("status") == "CLOSED":
+            continue
+        if pending.get("dealId") not in (None, ""):
+            continue
+        if not _is_tradingview_origin_trade(pending):
+            continue
+        if other.get("dealId") in (None, ""):
+            continue
+        if not _ticker_aliases_overlap(pending.get("ticker"), other.get("ticker")):
+            continue
+        side_p = _normalize_side(pending.get("side"))
+        side_o = _normalize_side(other.get("side"))
+        if side_p and side_o and side_p != side_o:
+            continue
+        if not _trade_entry_matches(pending.get("entry_price"), other.get("entry_price")):
+            continue
+        if not _times_within_window(pending.get("time_entered"), other.get("time_entered")):
+            continue
+        return True
+    return False
+
+
 def _is_probable_duplicate_trade(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     ref_a = a.get("dealReference")
     ref_b = b.get("dealReference")
     if ref_a and ref_b:
         return str(ref_a) == str(ref_b)
+
+    if _is_dangling_tradingview_duplicate(a, b):
+        return True
 
     deal_a = a.get("dealId")
     deal_b = b.get("dealId")
