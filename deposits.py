@@ -324,6 +324,11 @@ def add_pledge(name: str, amount: Any, note: str = "", path: str = PLEDGES_PATH)
     if amt is None:
         return False, None, "invalid_amount"
 
+    min_amount = float(getattr(config, "PLEDGE_MIN_AMOUNT", 50.0) or 50.0) if config else 50.0
+    max_amount = float(getattr(config, "PLEDGE_MAX_AMOUNT", 500.0) or 500.0) if config else 500.0
+    if amt < min_amount or amt > max_amount:
+        return False, None, "amount_out_of_range"
+
     record = {
         "id": uuid.uuid4().hex,
         "investor": investor_name,
@@ -810,6 +815,14 @@ def detect_and_record_balance_change(
                 if not ok:
                     result["status"] = status
         else:
+            withdrawal_min = float(getattr(config, "BALANCE_AUTO_DETECT_WITHDRAWAL_MIN", 100.0) or 100.0) if config else 100.0
+            if abs(delta) < withdrawal_min:
+                # Too small to be a real withdrawal (e.g. overnight/swap
+                # fees) — leave the baseline as-is so this drift keeps
+                # accumulating across checks until it's either explained by
+                # future trade PnL or grows past the threshold, rather than
+                # cluttering the Deposits ledger with noise.
+                return {"action": "below_withdrawal_threshold", "delta": delta}
             ok, _entry, status = add_entry(
                 "withdrawal",
                 abs(delta),
