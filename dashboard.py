@@ -838,6 +838,8 @@ def dashboard_investors():
         pending_pledges=pending_pledges,
         completed_pledges=completed_pledges,
         payment_details=payment_details,
+        pledge_min_amount=float(getattr(config, "PLEDGE_MIN_AMOUNT", 50.0) or 50.0),
+        pledge_max_amount=float(getattr(config, "PLEDGE_MAX_AMOUNT", 500.0) or 500.0),
     )
 
 
@@ -857,7 +859,7 @@ def dashboard_investors_add_pledge():
     if request.is_json:
         if ok:
             return jsonify({"status": "success", "pledge": record}), 200
-        code = 400 if status in ("invalid_investor", "invalid_amount") else 500
+        code = 400 if status in ("invalid_investor", "invalid_amount", "amount_out_of_range") else 500
         return jsonify({"status": "error", "message": status}), code
 
     return redirect("/dashboard/investors")

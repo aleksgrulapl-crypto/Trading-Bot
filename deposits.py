@@ -21,6 +21,14 @@ try:
 except Exception:
     config = None  # type: ignore
 
+# Optional timezone support — mirrors trade_log.py so deposit/pledge
+# timestamps display in UK local time (GMT/BST) rather than raw UTC.
+try:
+    import pytz  # type: ignore
+    UK_TZ = pytz.timezone("Europe/London")
+except Exception:
+    UK_TZ = None
+
 logger = logging.getLogger("deposits")
 logger.setLevel(logging.INFO)
 if not logger.handlers:
@@ -108,6 +116,13 @@ def set_investor_tier(name: str, tier: str, path: str = TIERS_PATH) -> Tuple[boo
 
 
 def _now_iso() -> str:
+    """Return the current time as an ISO-8601 string in UK local time
+    (GMT/BST) when pytz is available, matching trade_log.py's behaviour."""
+    if UK_TZ:
+        try:
+            return datetime.now(UK_TZ).isoformat()
+        except Exception:
+            pass
     return datetime.utcnow().isoformat() + "Z"
 
 
@@ -324,6 +339,11 @@ def add_pledge(name: str, amount: Any, note: str = "", path: str = PLEDGES_PATH)
     if amt is None:
         return False, None, "invalid_amount"
 
+    min_amount = float(getattr(config, "PLEDGE_MIN_AMOUNT", 50.0) or 50.0) if config else 50.0
+    max_amount = float(getattr(config, "PLEDGE_MAX_AMOUNT", 500.0) or 500.0) if config else 500.0
+    if amt < min_amount or amt > max_amount:
+        return False, None, "amount_out_of_range"
+
     record = {
         "id": uuid.uuid4().hex,
         "investor": investor_name,
@@ -407,6 +427,19 @@ def delete_pledge(pledge_id: str, path: str = PLEDGES_PATH) -> Tuple[bool, str]:
         return True, "deleted"
 
 
+def _now_naive_uk() -> datetime:
+    """Return the current time as a naive datetime using UK local wall-clock
+    values (GMT/BST), matching the naive values produced by
+    ``_parse_entry_datetime``/trade_log's exit timestamps — so comparisons
+    between the two are on the same clock, not off by the UTC/UK offset."""
+    if UK_TZ:
+        try:
+            return datetime.now(UK_TZ).replace(tzinfo=None)
+        except Exception:
+            pass
+    return datetime.utcnow()
+
+
 def _parse_entry_datetime(raw: Optional[str]) -> Optional[datetime]:
     """Parse an entry's ``occurred_at``/``created_at`` string into a naive
     (UTC-equivalent) datetime. Accepts plain dates ("2026-01-01") and
@@ -471,7 +504,7 @@ def investor_breakdown(
     "Trader-sleeve" simulation (restricted to full-tier investors) with the
     fee disabled, since that sleeve's profits are split purely pro-rata.
     """
-    as_of = as_of or datetime.utcnow()
+    as_of = as_of or _now_naive_uk()
 
     owner_name = str(getattr(config, "OWNER_INVESTOR_NAME", "Aleks") or "").strip()
     owner_override_pct = (
@@ -769,7 +802,7 @@ def detect_and_record_balance_change(
             last_balance = float(state.get("balance"))
         except (TypeError, ValueError):
             last_balance = current_balance
-        last_as_of = _parse_entry_datetime(state.get("as_of")) or datetime.utcnow()
+        last_as_of = _parse_entry_datetime(state.get("as_of")) or _now_naive_uk()
 
         pnl_since = sum(
             ev.get("pnl", 0.0) for ev in (trade_pnl_events or [])
@@ -786,6 +819,13 @@ def detect_and_record_balance_change(
         result: Dict[str, Any] = {"delta": delta}
 
         if delta > 0:
+            deposit_min = float(getattr(config, "PLEDGE_MIN_AMOUNT", 50.0) or 50.0) if config else 50.0
+            if delta < deposit_min:
+                # Too small to be a confident deposit signal (e.g. rounding,
+                # interest) — leave the baseline as-is so it keeps
+                # accumulating across checks, same noise filter as the
+                # withdrawal side below, rather than cluttering Deposits.
+                return {"action": "below_deposit_threshold", "delta": delta}
             matched = _find_matching_pending_pledge(delta)
             if matched:
                 ok, _entry, status = add_entry(
@@ -810,6 +850,14 @@ def detect_and_record_balance_change(
                 if not ok:
                     result["status"] = status
         else:
+            withdrawal_min = float(getattr(config, "BALANCE_AUTO_DETECT_WITHDRAWAL_MIN", 100.0) or 100.0) if config else 100.0
+            if abs(delta) < withdrawal_min:
+                # Too small to be a real withdrawal (e.g. overnight/swap
+                # fees) — leave the baseline as-is so this drift keeps
+                # accumulating across checks until it's either explained by
+                # future trade PnL or grows past the threshold, rather than
+                # cluttering the Deposits ledger with noise.
+                return {"action": "below_withdrawal_threshold", "delta": delta}
             ok, _entry, status = add_entry(
                 "withdrawal",
                 abs(delta),
