@@ -248,13 +248,18 @@ PLEDGE_MAX_AMOUNT = float(os.getenv("PLEDGE_MAX_AMOUNT", 500.0))
 # pledge's amount matches the detected change, that pledge is auto-confirmed
 # and attributed to its investor instead of logged as "Unassigned".
 BALANCE_STATE_PATH = os.getenv("BALANCE_STATE_PATH", "/data/balance_state.json")
-# Minimum unexplained balance delta (GBP) before it's treated as a real
-# deposit rather than FX/rounding noise.
+# Base unexplained balance delta (GBP, either direction) below which it's
+# ignored entirely as FX/rounding noise. The real deposit/withdrawal floors
+# below are higher still, to keep the Deposits ledger free of clutter.
 BALANCE_AUTO_DETECT_TOLERANCE = float(os.getenv("BALANCE_AUTO_DETECT_TOLERANCE", 1.0))
+# Minimum unexplained balance *increase* (GBP) before it's recorded as a
+# deposit. Uses the same floor as PLEDGE_MIN_AMOUNT below, since a real
+# deposit is expected to be at least a minimum pledge's worth; anything
+# smaller is treated as drift and left to accumulate.
 # Minimum unexplained balance *decrease* (GBP) before it's recorded as a
-# withdrawal. Higher than the deposit tolerance to filter out small
-# everyday noise (overnight/swap fees, spread drift, etc.) that isn't a
-# real withdrawal and would otherwise clutter the Deposits ledger.
+# withdrawal. Filters out small everyday noise (overnight/swap fees, spread
+# drift, etc.) that isn't a real withdrawal and would otherwise clutter the
+# Deposits ledger.
 BALANCE_AUTO_DETECT_WITHDRAWAL_MIN = float(os.getenv("BALANCE_AUTO_DETECT_WITHDRAWAL_MIN", 100.0))
 # Maximum GBP difference between a detected change and a pending pledge's
 # amount for them to be considered a match.
