@@ -67,7 +67,11 @@ def _round_stop(stop: float, position: dict) -> float:
 
 def _effective_trail_percent(profit_perc: float, activation_perc: float, base_trail_perc: float) -> float:
     """
-    Tighten the trailing stop as profit extends further beyond activation.
+    Tighten the trailing stop as profit extends further beyond activation, so
+    the SL hugs price more closely the deeper a trade goes in-profit. The
+    tightening is uncapped in how many "steps" it can take (previously capped
+    at 3x the activation threshold) and ramps faster per step, reaching the
+    TRAIL_MAX_PERC ceiling sooner than before.
     """
     try:
         profit_perc_f = float(profit_perc)
@@ -79,10 +83,12 @@ def _effective_trail_percent(profit_perc: float, activation_perc: float, base_tr
     if activation_perc_f <= 0:
         return base_trail_perc_f
 
+    max_trail_perc = max(base_trail_perc_f, _normalize_percent(getattr(config, "TRAIL_MAX_PERC", 0.95), 0.95))
+
     profit_multiple = profit_perc_f / activation_perc_f
-    tighten_steps = min(max(profit_multiple - 1.0, 0.0), 3.0)
-    max_trail_perc = max(base_trail_perc_f, 0.90)
-    return min(max_trail_perc, base_trail_perc_f + (0.10 * tighten_steps))
+    tighten_steps = max(profit_multiple - 1.0, 0.0)
+    tighten_step_perc = _normalize_percent(getattr(config, "TRAIL_TIGHTEN_STEP_PERC", 0.15), 0.15)
+    return min(max_trail_perc, base_trail_perc_f + (tighten_step_perc * tighten_steps))
 
 
 def _extract_tp_level(position: dict, side: str) -> Optional[float]:

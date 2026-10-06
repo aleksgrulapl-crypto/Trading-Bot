@@ -332,4 +332,12 @@ EPIC_MAP = {
 # Trailing stop defaults
 TRAIL_ACTIVATION_PERC = float(os.getenv("TRAIL_ACTIVATION_PERC", 0.02))
 TRAIL_ACTIVATION_TP_FRACTION = float(os.getenv("TRAIL_ACTIVATION_TP_FRACTION", 0.25))
-TRAIL_SL_PERC = float(os.getenv("TRAIL_SL_PERC", 0.50))
+# Fraction of unrealized profit locked in by the SL as soon as trailing
+# activates (e.g. 0.65 -> SL sits at entry + 65% of the profit made so far).
+TRAIL_SL_PERC = float(os.getenv("TRAIL_SL_PERC", 0.65))
+# As profit extends further beyond the activation threshold, the locked-in
+# fraction ramps up by TRAIL_TIGHTEN_STEP_PERC per "activation multiple"
+# past 1x, up to the TRAIL_MAX_PERC ceiling — so the SL hugs price more
+# closely the deeper a trade goes in-profit.
+TRAIL_TIGHTEN_STEP_PERC = float(os.getenv("TRAIL_TIGHTEN_STEP_PERC", 0.15))
+TRAIL_MAX_PERC = float(os.getenv("TRAIL_MAX_PERC", 0.95))

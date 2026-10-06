@@ -50,8 +50,11 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `MAX_EXPOSURE_PER_TRADE` | Maximum leveraged exposure per trade in GBP (default `1000`) | ⬜ |
 | `FIXED_SL_PERC` | Stop-loss distance as a fraction of entry price (default `0.20` = `20%`, capping loss at £200 on £1000 max exposure) | ⬜ |
 | `FIXED_TP_PERC` | Take-profit distance as a fraction of entry price (default `0.40` = `40%`, capping gain at £400 on £1000 max exposure) | ⬜ |
-| `TRAIL_ACTIVATION_PERC` | Profit threshold to activate trailing SL (default `0.005` = `0.5%`) | ⬜ |
-| `TRAIL_SL_PERC` | Portion of unrealized profit locked by trailing SL (default `0.30` = `30%`) | ⬜ |
+| `TRAIL_ACTIVATION_PERC` | Profit threshold to activate trailing SL (default `0.02` = `2%`) | ⬜ |
+| `TRAIL_ACTIVATION_TP_FRACTION` | Fraction of the TP move used as an alternative (often earlier) activation threshold (default `0.25` = `25%`) | ⬜ |
+| `TRAIL_SL_PERC` | Portion of unrealized profit locked by trailing SL as soon as it activates (default `0.65` = `65%`) | ⬜ |
+| `TRAIL_TIGHTEN_STEP_PERC` | How much the locked-in portion ramps up per activation-multiple of profit beyond 1x, so the SL follows more closely the deeper a trade goes in-profit (default `0.15` = `15%` per step) | ⬜ |
+| `TRAIL_MAX_PERC` | Ceiling on the locked-in portion as profit keeps extending (default `0.95` = `95%`) | ⬜ |
 
 ### Run locally
 

@@ -106,7 +106,8 @@
         #dashboard-content { padding: 20px 24px 32px; }
         .grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; }
         .grid-full { display: grid; grid-template-columns: 1fr; margin: 0 auto; max-width: 1200px; }
-        .grid-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+        .grid-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+        .grid-two .card { display: flex; flex-direction: column; }
         @media (max-width: 1024px) {
             .grid-two { grid-template-columns: minmax(0, 1fr); }
         }
