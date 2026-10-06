@@ -10,6 +10,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -346,8 +347,26 @@ def list_pledges_sorted(path: str = PLEDGES_PATH) -> List[Dict[str, Any]]:
     return sorted(pledges, key=lambda p: str(p.get("created_at") or ""), reverse=True)
 
 
-def set_pledge_status(pledge_id: str, status: str, path: str = PLEDGES_PATH) -> Tuple[bool, Optional[Dict[str, Any]], str]:
-    """Update a pledge's status (e.g. Owner confirming payment arrived)."""
+def split_pledges(pledges: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Split *pledges* into (pending, completed) — "completed" meaning
+    confirmed or declined, i.e. anything the Owner (or auto-detection) has
+    already resolved one way or the other."""
+    pending = [p for p in pledges if str(p.get("status")) == "pending"]
+    completed = [p for p in pledges if str(p.get("status")) != "pending"]
+    return pending, completed
+
+
+def set_pledge_status(
+    pledge_id: str,
+    status: str,
+    path: str = PLEDGES_PATH,
+    resolved_by: str = "owner",
+) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """Update a pledge's status (e.g. Owner confirming payment arrived).
+
+    *resolved_by* records who/what resolved a non-pending status — "owner"
+    for a manual confirm/decline from the dashboard, or "auto" when the
+    balance-change detector matched it automatically."""
     target = str(pledge_id or "").strip()
     if not target:
         return False, None, "invalid_id"
@@ -360,6 +379,12 @@ def set_pledge_status(pledge_id: str, status: str, path: str = PLEDGES_PATH) -> 
         for pledge in pledges:
             if str(pledge.get("id")) == target:
                 pledge["status"] = normalized_status
+                if normalized_status != "pending":
+                    pledge["resolved_at"] = _now_iso()
+                    pledge["resolved_by"] = resolved_by
+                else:
+                    pledge.pop("resolved_at", None)
+                    pledge.pop("resolved_by", None)
                 if not save_pledges(pledges, path):
                     return False, None, "save_failed"
                 return True, pledge, "updated"
@@ -635,3 +660,166 @@ def investor_breakdown(
         # combine them and reconcile against the real balance themselves.
         "tracked_total": round(tracked_total, 2),
     }
+
+
+# -----------------------------------------------------------------------
+# Automatic balance-change detection.
+#
+# On each dashboard refresh the live broker balance is compared against
+# what closed-trade PnL alone would explain since the last check. If the
+# balance moved abruptly with no matching trades/fees (e.g. 1500 -> 1600
+# with nothing closed in between), that's money the Owner moved in/out of
+# the account outside the app, so it's recorded automatically in the
+# Deposits ledger — matched to a pending pledge's investor when the amount
+# lines up, otherwise logged as "Unassigned" for the Owner to reassign.
+# -----------------------------------------------------------------------
+BALANCE_STATE_PATH = os.environ.get("BALANCE_STATE_PATH") or (getattr(config, "BALANCE_STATE_PATH", None) if config else None) or "/data/balance_state.json"
+
+_balance_lock = threading.Lock()
+_last_balance_check_monotonic = 0.0
+
+
+def _load_balance_state(path: str = BALANCE_STATE_PATH) -> Optional[Dict[str, Any]]:
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict) and "balance" in data:
+                return data
+    except Exception as exc:
+        logger.exception("deposits: failed to load balance state: %s", exc)
+    return None
+
+
+def _save_balance_state(balance: float, as_of: str, path: str = BALANCE_STATE_PATH) -> bool:
+    ok = _atomic_write(path, {"balance": round(balance, 2), "as_of": as_of})
+    if not ok:
+        logger.error("deposits: atomic write of balance state failed")
+    return ok
+
+
+def _find_matching_pending_pledge(amount: float, path: str = PLEDGES_PATH) -> Optional[Dict[str, Any]]:
+    """Return the pending pledge whose amount is closest to *amount*,
+    within ``config.PLEDGE_MATCH_TOLERANCE`` GBP, or ``None``."""
+    tolerance = float(getattr(config, "PLEDGE_MATCH_TOLERANCE", 2.0) or 2.0) if config else 2.0
+    candidates = []
+    for p in load_pledges(path):
+        if str(p.get("status")) != "pending":
+            continue
+        try:
+            pledge_amount = float(p.get("amount"))
+        except (TypeError, ValueError):
+            continue
+        diff = abs(pledge_amount - amount)
+        if diff <= tolerance:
+            candidates.append((diff, p))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: c[0])
+    return candidates[0][1]
+
+
+def detect_and_record_balance_change(
+    current_balance: Optional[float],
+    trade_pnl_events: Optional[List[Dict[str, Any]]] = None,
+    min_interval_seconds: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Compare *current_balance* against the last observed balance plus any
+    closed-trade PnL since then. Record an unexplained delta as a deposit
+    (balance rose) or withdrawal (balance fell) — auto-confirming a
+    matching pending pledge when one exists.
+
+    ``trade_pnl_events`` should be the full (not per-sleeve) closed-trade
+    PnL series in GBP, e.g. ``dashboard._trade_pnl_events(combined_trades)``.
+
+    Cheap to call on every dashboard refresh: throttled to at most once per
+    ``min_interval_seconds`` (default ``config.BALANCE_AUTO_DETECT_MIN_INTERVAL_SECONDS``)
+    and a no-op once the balance is already reconciled.
+    """
+    global _last_balance_check_monotonic
+
+    if current_balance is None:
+        return {"action": "skipped", "reason": "no_balance"}
+    try:
+        current_balance = float(current_balance)
+    except (TypeError, ValueError):
+        return {"action": "skipped", "reason": "invalid_balance"}
+
+    interval = (
+        min_interval_seconds
+        if min_interval_seconds is not None
+        else float(getattr(config, "BALANCE_AUTO_DETECT_MIN_INTERVAL_SECONDS", 15) or 15) if config else 15.0
+    )
+
+    with _balance_lock:
+        now_monotonic = time.monotonic()
+        if _last_balance_check_monotonic and (now_monotonic - _last_balance_check_monotonic) < interval:
+            return {"action": "throttled"}
+        _last_balance_check_monotonic = now_monotonic
+
+        state = _load_balance_state()
+        now_iso = _now_iso()
+        if state is None:
+            # First-ever observation: just establish the baseline, nothing to detect yet.
+            _save_balance_state(current_balance, now_iso)
+            return {"action": "baseline_set", "balance": current_balance}
+
+        try:
+            last_balance = float(state.get("balance"))
+        except (TypeError, ValueError):
+            last_balance = current_balance
+        last_as_of = _parse_entry_datetime(state.get("as_of")) or datetime.utcnow()
+
+        pnl_since = sum(
+            ev.get("pnl", 0.0) for ev in (trade_pnl_events or [])
+            if isinstance(ev.get("ts"), datetime) and ev["ts"] >= last_as_of
+        )
+        expected_balance = last_balance + pnl_since
+        delta = round(current_balance - expected_balance, 2)
+
+        tolerance = float(getattr(config, "BALANCE_AUTO_DETECT_TOLERANCE", 1.0) or 1.0) if config else 1.0
+        if abs(delta) <= tolerance:
+            _save_balance_state(current_balance, now_iso)
+            return {"action": "noop", "delta": delta}
+
+        result: Dict[str, Any] = {"delta": delta}
+
+        if delta > 0:
+            matched = _find_matching_pending_pledge(delta)
+            if matched:
+                ok, _entry, status = add_entry(
+                    "deposit",
+                    matched.get("amount"),
+                    matched.get("investor", ""),
+                    f"Auto-confirmed: balance increase of £{delta:.2f} matched pending pledge ({matched.get('note') or 'no note'})",
+                )
+                if ok:
+                    set_pledge_status(matched.get("id"), "confirmed", resolved_by="auto")
+                    result.update({"action": "pledge_matched", "pledge_id": matched.get("id"), "investor": matched.get("investor")})
+                else:
+                    result.update({"action": "failed", "status": status})
+            else:
+                ok, _entry, status = add_entry(
+                    "deposit",
+                    delta,
+                    "Unassigned",
+                    "Auto-detected balance increase (no matching trade or pledge found)",
+                )
+                result["action"] = "auto_deposit" if ok else "failed"
+                if not ok:
+                    result["status"] = status
+        else:
+            ok, _entry, status = add_entry(
+                "withdrawal",
+                abs(delta),
+                "Unassigned",
+                "Auto-detected balance decrease (no matching trade found)",
+            )
+            result["action"] = "auto_withdrawal" if ok else "failed"
+            if not ok:
+                result["status"] = status
+
+        _save_balance_state(current_balance, now_iso)
+        logger.info("deposits: balance auto-detection result: %s", result)
+        return result

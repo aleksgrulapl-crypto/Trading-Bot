@@ -94,7 +94,7 @@
       <tbody>
         {% for e in entries %}
         <tr>
-          <td>{{ e.occurred_at|default('—') }}</td>
+          <td>{{ e.occurred_at_human or e.occurred_at|default('—') }}</td>
           <td>{{ e.investor|default('Unassigned') }}</td>
           <td>
             <span class="pill {% if e.type == 'deposit' %}pill-long{% else %}pill-short{% endif %}">

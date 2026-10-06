@@ -234,6 +234,24 @@ INVESTOR_TIERS_PATH = os.getenv("INVESTOR_TIERS_PATH", "/data/investor_tiers.jso
 # deposits ledger. No real money moves through the app itself.
 INVESTOR_PLEDGES_PATH = os.getenv("INVESTOR_PLEDGES_PATH", "/data/investor_pledges.json")
 
+# Automatic balance-change detection: on each dashboard refresh, the live
+# broker balance is compared against what trading PnL alone would explain
+# since the last check. An unexplained jump (no corresponding closed
+# trades/fees) is treated as money moved in/out of the account outside the
+# app and is recorded automatically in the Deposits ledger. If a pending
+# pledge's amount matches the detected change, that pledge is auto-confirmed
+# and attributed to its investor instead of logged as "Unassigned".
+BALANCE_STATE_PATH = os.getenv("BALANCE_STATE_PATH", "/data/balance_state.json")
+# Minimum unexplained balance delta (GBP) before it's treated as a real
+# deposit/withdrawal rather than FX/rounding noise.
+BALANCE_AUTO_DETECT_TOLERANCE = float(os.getenv("BALANCE_AUTO_DETECT_TOLERANCE", 1.0))
+# Maximum GBP difference between a detected change and a pending pledge's
+# amount for them to be considered a match.
+PLEDGE_MATCH_TOLERANCE = float(os.getenv("PLEDGE_MATCH_TOLERANCE", 2.0))
+# Minimum seconds between balance-change checks, to avoid redundant file
+# I/O when the dashboard is polled frequently.
+BALANCE_AUTO_DETECT_MIN_INTERVAL_SECONDS = float(os.getenv("BALANCE_AUTO_DETECT_MIN_INTERVAL_SECONDS", 15))
+
 # Payment details shown on the "Become an Investor" card so people know
 # where to send funds. These should be your Capital.com trading account's
 # own deposit details (Capital.com > Deposit > Bank transfer) so funds land
