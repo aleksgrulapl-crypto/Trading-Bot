@@ -21,6 +21,7 @@ from flask import Blueprint, request, render_template, redirect, jsonify
 import session
 import config
 import deposits
+from display_helpers import format_human
 from close_position import close_position as close_live_position
 from trade_log import (
     delete_trade_log_entry,
@@ -648,6 +649,17 @@ def _build_request_context():
     completed_trades = filter_completed(combined_trades)
     analytics = _safe_analytics(compute_analytics(completed_trades))
 
+    # Auto-detect balance changes unexplained by trading (manual deposits/
+    # withdrawals made outside the app) and record them in the ledger,
+    # auto-confirming a matching pending pledge when one exists.
+    try:
+        deposits.detect_and_record_balance_change(
+            (account or {}).get("balance"),
+            _trade_pnl_events(combined_trades),
+        )
+    except Exception:
+        logger.exception("dashboard: balance auto-detection failed")
+
     now = datetime.utcnow()
     weekly_analytics = _safe_analytics(
         compute_analytics(_trades_closed_since(completed_trades, now - timedelta(days=7)))
@@ -800,6 +812,10 @@ def dashboard_investors():
 
     is_owner_role = current_role() == "owner"
     pledges = deposits.list_pledges_sorted() if is_owner_role else []
+    for p in pledges:
+        p["created_at_human"] = format_human(p.get("created_at")) or p.get("created_at")
+        p["resolved_at_human"] = format_human(p.get("resolved_at")) or p.get("resolved_at")
+    pending_pledges, completed_pledges = deposits.split_pledges(pledges)
     payment_details = {
         "bank_beneficiary": getattr(config, "INVESTOR_BANK_BENEFICIARY", "") or "",
         "bank_payment_reference": getattr(config, "INVESTOR_BANK_PAYMENT_REFERENCE", "") or "",
@@ -819,7 +835,8 @@ def dashboard_investors():
         investor_rows=investor_rows,
         owner_name=owner_name,
         is_owner=is_owner_role,
-        pledges=pledges,
+        pending_pledges=pending_pledges,
+        completed_pledges=completed_pledges,
         payment_details=payment_details,
     )
 
@@ -958,6 +975,8 @@ def dashboard_deposits():
     entries = deposits.list_entries_sorted()
     totals = deposits.summarize(entries)
     investors = deposits.list_investors(entries)
+    for e in entries:
+        e["occurred_at_human"] = format_human(e.get("occurred_at")) or e.get("occurred_at")
 
     return render_template(
         "deposits.html",

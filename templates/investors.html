@@ -79,29 +79,73 @@
         </tr>
       </thead>
       <tbody>
-        {% for p in pledges %}
+        {% for p in pending_pledges %}
         <tr>
-          <td>{{ p.created_at|default('—') }}</td>
+          <td>{{ p.created_at_human or p.created_at|default('—') }}</td>
           <td>{{ p.investor }}</td>
           <td>£{{ "%.2f"|format(p.amount or 0) }}</td>
           <td>{{ p.note or '—' }}</td>
           <td>{{ p.status|capitalize }}</td>
           <td>
-            {% if p.status == 'pending' %}
             <button onclick="confirmPledge('{{ p.id }}')">Mark Paid</button>
             <button class="button-danger" onclick="declinePledge('{{ p.id }}')">Decline</button>
-            {% else %}
-            <button class="button-danger" onclick="deletePledge('{{ p.id }}')">Delete</button>
-            {% endif %}
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="small">No pledges recorded yet.</td></tr>
+        <tr><td colspan="6" class="small">No pending pledges.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Completed Pledges</div>
+    </div>
+    <p class="small" style="margin-top: -4px;">
+      Pledges that have been confirmed or declined — this history is only visible to you as Owner.
+      "Auto" entries were matched and confirmed automatically from a detected balance change.
+    </p>
+    <table class="table table-spaced">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Name</th>
+          <th>Amount</th>
+          <th>Note</th>
+          <th>Status</th>
+          <th>Resolved</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in completed_pledges %}
+        <tr>
+          <td>{{ p.created_at_human or p.created_at|default('—') }}</td>
+          <td>{{ p.investor }}</td>
+          <td>£{{ "%.2f"|format(p.amount or 0) }}</td>
+          <td>{{ p.note or '—' }}</td>
+          <td>
+            <span class="pill {% if p.status == 'confirmed' %}pill-long{% else %}pill-short{% endif %}">
+              {{ p.status|capitalize }}
+            </span>
+          </td>
+          <td class="small">
+            {{ p.resolved_at_human or p.resolved_at or '—' }}
+            {% if p.resolved_by %}({{ p.resolved_by|capitalize }}){% endif %}
+          </td>
+          <td>
+            <button class="button-danger" onclick="deletePledge('{{ p.id }}')">Delete</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="small">No completed pledges yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% endif %}
+
 
   <div class="card">
     <div class="card-header">
