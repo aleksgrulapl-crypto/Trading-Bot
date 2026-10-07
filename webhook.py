@@ -805,20 +805,37 @@ def webhook():
         entry_price = float(offer) if str(action).strip().lower() == "buy" else float(bid)
         logger.debug("[cid=%s] Entry price (actual): %s", cid, entry_price)
 
-        # Compute SL/TP from fixed risk percentages of entry price (config.FIXED_SL_PERC /
-        # FIXED_TP_PERC), overriding whatever levels the TradingView alert supplied, so
-        # every trade risks a consistent, predictable amount regardless of the signal.
-        if str(action).strip().lower() == "buy":
-            fixed_sl, fixed_tp = FixedSLTP.long_levels(entry_price)
+        # Use the TradingView alert's own SL/TP levels directly — the
+        # strategy's signals depend on those levels, so the bot's own fixed
+        # risk-percentage SL/TP is switched off. The only guard applied is a
+        # hard cap on the loss the SL can imply (MAX_SL_PERC_OF_EQUITY of the
+        # equity used for the trade); the TP is never touched. Fixed SL/TP is
+        # kept only as a defensive fallback for an alert that doesn't supply
+        # its own sl/tp.
+        alert_sl = alert.get("sl")
+        alert_tp = alert.get("tp")
+
+        if alert_sl is not None and alert_tp is not None:
+            try:
+                capped_sl = FixedSLTP.cap_sl_to_equity_risk(entry_price, float(alert_sl), action)
+                sl_price, tp_price = capped_sl, float(alert_tp)
+            except Exception:
+                logger.exception("[cid=%s] Failed to apply SL cap to alert levels", cid)
+                return _ok_response({"status": "error", "message": "sl_tp_calculation_failed", "entry": entry_price, "cid": cid})
+            logger.info("[cid=%s] TradingView SL/TP applied → sl=%s tp=%s (alert sl=%s tp=%s)", cid, sl_price, tp_price, alert_sl, alert_tp)
         else:
-            fixed_sl, fixed_tp = FixedSLTP.short_levels(entry_price)
+            logger.warning("[cid=%s] Alert missing sl/tp (sl=%s tp=%s) — falling back to fixed SL/TP", cid, alert_sl, alert_tp)
+            if str(action).strip().lower() == "buy":
+                fixed_sl, fixed_tp = FixedSLTP.long_levels(entry_price)
+            else:
+                fixed_sl, fixed_tp = FixedSLTP.short_levels(entry_price)
 
-        if fixed_sl is None or fixed_tp is None:
-            logger.warning("[cid=%s] Failed to compute fixed SL/TP for %s @ %s", cid, symbol, entry_price)
-            return _ok_response({"status": "error", "message": "sl_tp_calculation_failed", "entry": entry_price, "cid": cid})
+            if fixed_sl is None or fixed_tp is None:
+                logger.warning("[cid=%s] Failed to compute fixed SL/TP for %s @ %s", cid, symbol, entry_price)
+                return _ok_response({"status": "error", "message": "sl_tp_calculation_failed", "entry": entry_price, "cid": cid})
 
-        sl_price, tp_price = fixed_sl, fixed_tp
-        logger.info("[cid=%s] Fixed SL/TP applied → sl=%s tp=%s (alert sl=%s tp=%s)", cid, sl_price, tp_price, alert.get("sl"), alert.get("tp"))
+            sl_price, tp_price = fixed_sl, fixed_tp
+            logger.info("[cid=%s] Fixed SL/TP fallback applied → sl=%s tp=%s", cid, sl_price, tp_price)
 
         size_info = calculate_size(
             entry_price=entry_price,

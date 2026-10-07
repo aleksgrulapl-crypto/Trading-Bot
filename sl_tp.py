@@ -79,6 +79,44 @@ class FixedSLTP:
             return None, None
 
     @staticmethod
+    def cap_sl_to_equity_risk(entry_price: float, sl_price: float, direction: str) -> Optional[float]:
+        """Pull an overly wide TradingView-alert SL in so the loss it implies
+        never exceeds config.MAX_SL_PERC_OF_EQUITY of the equity used for the
+        trade (not the full leveraged exposure). A SL that already sits
+        within that cap is returned unchanged — this only ever tightens an
+        alert's SL toward entry, never widens it. TP is never touched here;
+        the TradingView strategy's TP is used as-is by callers.
+        """
+        try:
+            if entry_price is None or sl_price is None:
+                return sl_price
+            entry = float(entry_price)
+            sl = float(sl_price)
+            if entry <= 0:
+                return sl
+
+            max_sl_perc_of_equity = float(getattr(config, "MAX_SL_PERC_OF_EQUITY", 0.20))
+            leverage = float(getattr(config, "LEVERAGE", 1)) or 1.0
+            # Same equity-to-price-move conversion as _get_percents(): a raw
+            # price move of (equity_perc / leverage) produces a £ loss of
+            # exactly equity_perc * equity_used, regardless of leverage.
+            max_sl_price_perc = max_sl_perc_of_equity / leverage
+
+            direction_norm = str(direction or "").strip().lower()
+            if direction_norm in ("buy", "long", "b"):
+                implied_perc = (entry - sl) / entry
+                if implied_perc > max_sl_price_perc:
+                    sl = entry * (1.0 - max_sl_price_perc)
+            elif direction_norm in ("sell", "short", "s"):
+                implied_perc = (sl - entry) / entry
+                if implied_perc > max_sl_price_perc:
+                    sl = entry * (1.0 + max_sl_price_perc)
+            return round(sl, 4)
+        except Exception as e:
+            logger.exception("cap_sl_to_equity_risk error: %s", e)
+            return sl_price
+
+    @staticmethod
     def get_levels(ticker: str, side: str) -> Tuple[Optional[float], Optional[float]]:
         if not ticker or not side:
             logger.debug("get_levels: missing ticker or side")

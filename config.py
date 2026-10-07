@@ -44,15 +44,45 @@ LEVERAGE = int(os.getenv("LEVERAGE", 5))
 #   MAX_EQUITY_PER_TRADE    – equity (before leverage) allocated to one trade
 #   MAX_EQUITY_PER_TICKER   – combined equity allowed across all open trades for one ticker
 #   MAX_EXPOSURE_PER_TRADE  – leveraged exposure allocated to one trade
-# Defaults: up to £125 equity per trade (£625 exposure at 5x leverage), and
-# up to £375 combined equity per ticker across its 3 timeframes (3 x £125).
-MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 125))
-MAX_EQUITY_PER_TICKER = float(os.getenv("MAX_EQUITY_PER_TICKER", 375))
-MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 625))
+# Defaults: up to £200 equity per trade/timeframe (£1000 exposure at 5x
+# leverage), and up to £600 combined equity per ticker across its 3
+# timeframes (3 x £200). These are the CEILING values for a ticker with a
+# strong (or not-yet-known) win rate; sizing.py scales them down per ticker
+# based on TICKER_EQUITY_SCALE_MIN / the ticker's TradingView win rate below.
+MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 200))
+MAX_EQUITY_PER_TICKER = float(os.getenv("MAX_EQUITY_PER_TICKER", 600))
+MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 1000))
 
-# SL/TP expressed as a percentage of the EQUITY USED for the trade (not the
-# leveraged exposure/full account balance), so risk is predictable regardless
-# of leverage. E.g. with MAX_EQUITY_PER_TRADE=£250: FIXED_SL_PERC=0.10 (10%)
+# Per-ticker equity scaling by win rate: sizing.calculate_size() scales the
+# equity caps above down for tickers with a weaker TradingView/Hedge win
+# rate (from the Analytics "TradingView" tab), so a consistently losing
+# ticker is allocated less equity than a consistently winning one, rather
+# than both risking the same size. The scale factor is clamp(win_rate, MIN,
+# 1.0) — e.g. a ticker with a 45% win rate gets 45% of the ceiling above. A
+# ticker with no decided (win/loss) TradingView/Hedge trades yet (i.e. not
+# yet present in the Analytics tab) is exempt and gets the full ceiling.
+# TICKER_EQUITY_SCALE_MIN is a floor so a losing ticker is scaled down, not
+# starved to £0 (which would permanently lock it out of ever recovering).
+TICKER_EQUITY_SCALE_MIN = float(os.getenv("TICKER_EQUITY_SCALE_MIN", 0.3))
+
+# SL cap: the strategy now uses the TradingView alert's own SL/TP levels
+# directly (see webhook.py) instead of overriding them with a fixed
+# risk-percentage calculation, since the strategy's signals depend on those
+# levels. The TP is used as-is, uncapped. The SL, however, is capped so the
+# loss it implies never exceeds MAX_SL_PERC_OF_EQUITY of the equity used for
+# the trade (not the full leveraged exposure) — an overly wide alert SL is
+# pulled in to this cap; a tighter SL passes through unchanged. sl_tp.
+# FixedSLTP.cap_sl_to_equity_risk() converts this equity-based percentage
+# into the actual price-move percentage by dividing by LEVERAGE (since
+# exposure = equity_used * LEVERAGE, a price move of equity_perc/LEVERAGE
+# yields exactly equity_perc * equity_used in £ terms).
+MAX_SL_PERC_OF_EQUITY = float(os.getenv("MAX_SL_PERC_OF_EQUITY", 0.20))
+
+# Fixed SL/TP are kept only as a defensive fallback for the rare alert that
+# doesn't supply its own sl/tp levels (see webhook.py), expressed as a
+# percentage of the EQUITY USED for the trade (not the leveraged
+# exposure/full account balance), so risk is predictable regardless of
+# leverage. E.g. with MAX_EQUITY_PER_TRADE=£250: FIXED_SL_PERC=0.10 (10%)
 # caps the loss at £25 (10% of the £250 equity used) and FIXED_TP_PERC=0.40
 # (40%) caps the gain at £100 (40% of the £250 equity used). sl_tp.FixedSLTP
 # converts these equity-based percentages into the actual price-move

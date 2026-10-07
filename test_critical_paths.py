@@ -1759,6 +1759,47 @@ class TestFxRateValidation:
         assert rate == pytest.approx(0.738)
 
 
+class TestFixedSLTPEquityCap:
+    """TradingView alert SL/TP is now used directly (sl_tp.FixedSLTP's own
+    fixed-percentage levels are only a fallback, see webhook.py); the SL is
+    capped so its implied loss never exceeds MAX_SL_PERC_OF_EQUITY of the
+    equity used, while TP is never touched."""
+
+    def test_buy_sl_within_cap_is_unchanged(self, monkeypatch):
+        import sl_tp
+
+        monkeypatch.setattr(sl_tp.config, "MAX_SL_PERC_OF_EQUITY", 0.20)
+        monkeypatch.setattr(sl_tp.config, "LEVERAGE", 5)
+        # Implied price move: (100-98)/100 = 2% < cap of 20%/5 = 4% -> unchanged.
+        result = sl_tp.FixedSLTP.cap_sl_to_equity_risk(100.0, 98.0, "buy")
+        assert result == pytest.approx(98.0)
+
+    def test_buy_sl_beyond_cap_is_pulled_in(self, monkeypatch):
+        import sl_tp
+
+        monkeypatch.setattr(sl_tp.config, "MAX_SL_PERC_OF_EQUITY", 0.20)
+        monkeypatch.setattr(sl_tp.config, "LEVERAGE", 5)
+        # Alert SL implies a 50% price move, way past the 4% cap -> pulled to 96.0.
+        result = sl_tp.FixedSLTP.cap_sl_to_equity_risk(100.0, 50.0, "buy")
+        assert result == pytest.approx(96.0)
+
+    def test_sell_sl_beyond_cap_is_pulled_in(self, monkeypatch):
+        import sl_tp
+
+        monkeypatch.setattr(sl_tp.config, "MAX_SL_PERC_OF_EQUITY", 0.20)
+        monkeypatch.setattr(sl_tp.config, "LEVERAGE", 5)
+        result = sl_tp.FixedSLTP.cap_sl_to_equity_risk(100.0, 150.0, "sell")
+        assert result == pytest.approx(104.0)
+
+    def test_sell_sl_within_cap_is_unchanged(self, monkeypatch):
+        import sl_tp
+
+        monkeypatch.setattr(sl_tp.config, "MAX_SL_PERC_OF_EQUITY", 0.20)
+        monkeypatch.setattr(sl_tp.config, "LEVERAGE", 5)
+        result = sl_tp.FixedSLTP.cap_sl_to_equity_risk(100.0, 102.0, "sell")
+        assert result == pytest.approx(102.0)
+
+
 class TestSizing:
     def test_uses_equity_percent_and_leverage_without_cap(self, monkeypatch):
         import sizing
@@ -2081,6 +2122,125 @@ class TestSizing:
 
         assert result["blocked"] is False
         assert result["size"] == pytest.approx(1.66)
+
+    def test_ticker_with_no_closed_tradingview_trades_is_unscaled(self, monkeypatch):
+        """A ticker not yet present in the Analytics "TradingView" tab (no
+        decided closed trades) is skipped from equity scaling entirely."""
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 600)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [])
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA", ticker="NVDA")
+
+        assert result["blocked"] is False
+        assert result["ticker_equity_scale"] == pytest.approx(1.0)
+        assert result["equity_used"] == pytest.approx(200.0)
+
+    def test_winning_ticker_keeps_full_equity_cap(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 600)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"NVDA": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "NVDA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": 10.0},
+            {"ticker": "NVDA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": 15.0},
+            {"ticker": "NVDA", "status": "CLOSED", "trade_source": "hedge", "pnl_gbp": 5.0},
+        ])
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA", ticker="NVDA")
+
+        assert result["blocked"] is False
+        assert result["ticker_equity_scale"] == pytest.approx(1.0)
+        assert result["equity_used"] == pytest.approx(200.0)
+
+    def test_losing_ticker_equity_is_scaled_down_but_not_to_zero(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 600)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
+        monkeypatch.setattr(sizing.config, "TICKER_EQUITY_SCALE_MIN", 0.3)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"AMD": {"min_size": 0.1}})
+        # 0 wins, 4 losses -> win rate 0.0, floored at TICKER_EQUITY_SCALE_MIN.
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "AMD", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": -10.0}
+            for _ in range(4)
+        ])
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="AMD", ticker="AMD")
+
+        assert result["blocked"] is False
+        assert result["ticker_equity_scale"] == pytest.approx(0.3)
+        assert result["equity_used"] == pytest.approx(60.0)
+
+    def test_mixed_win_rate_scales_equity_proportionally(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 600)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
+        monkeypatch.setattr(sizing.config, "TICKER_EQUITY_SCALE_MIN", 0.3)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"TSLA": {"min_size": 0.1}})
+        # 3 wins, 2 losses -> 60% win rate.
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "TSLA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": 10.0},
+            {"ticker": "TSLA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": 10.0},
+            {"ticker": "TSLA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": 10.0},
+            {"ticker": "TSLA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": -5.0},
+            {"ticker": "TSLA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": -5.0},
+        ])
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="TSLA", ticker="TSLA")
+
+        assert result["blocked"] is False
+        assert result["ticker_equity_scale"] == pytest.approx(0.6)
+        assert result["equity_used"] == pytest.approx(120.0)
+
+    def test_open_and_non_tradingview_trades_are_excluded_from_win_rate(self, monkeypatch):
+        """Only CLOSED TradingView/Hedge trades count; OPEN trades and
+        "Trader" (manual/discretionary) trades don't affect the scale."""
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 200)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 600)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"MSFT": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "MSFT", "status": "OPEN", "trade_source": "tradingview", "pnl_gbp": -500.0},
+            {"ticker": "MSFT", "status": "CLOSED", "trade_source": "manual", "pnl_gbp": -500.0},
+        ])
+
+        result = sizing.calculate_size(100, 95, 110, "buy", symbol="MSFT", ticker="MSFT")
+
+        assert result["blocked"] is False
+        assert result["ticker_equity_scale"] == pytest.approx(1.0)
+        assert result["equity_used"] == pytest.approx(200.0)
 
 
 class TestThreadSafety:
@@ -2944,6 +3104,95 @@ class TestWebhookProcessing:
         assert resp.status_code == 200
         assert body.get("status") == "ok"
         assert captured["trade_source"] == "tradingview"
+
+    def test_alert_sl_is_capped_and_tp_passes_through_unchanged(self, monkeypatch):
+        """The alert's own SL/TP is used (the fixed SL/TP override is
+        switched off): an overly wide SL is pulled in to MAX_SL_PERC_OF_EQUITY
+        of equity used, while the alert's TP is forwarded untouched."""
+        import webhook
+
+        monkeypatch.setattr(webhook.config, "MAX_SL_PERC_OF_EQUITY", 0.20)
+        monkeypatch.setattr(webhook.config, "LEVERAGE", 5)
+        monkeypatch.setattr(webhook, "load_raw_log", lambda: [])
+        monkeypatch.setattr(webhook.session, "verify_epic", lambda symbol: {"epic": "INTC", "source": "mock"})
+        monkeypatch.setattr(webhook, "_is_duplicate_alert", lambda *_: False)
+        monkeypatch.setattr(webhook, "_is_trade_locked_now", lambda: False)
+        monkeypatch.setattr(
+            webhook,
+            "parse_tradingview_alert",
+            lambda payload: {"symbol": "INTC", "action": "buy", "sl": 50.0, "tp": 200.0, "timeframe": "5M"},
+        )
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda *args, **kwargs: type("Resp", (), {"status_code": 200, "json": lambda self: {"snapshot": {"bid": 99.8, "offer": 100.0}}})(),
+        )
+        monkeypatch.setattr(webhook.session, "update_last_trade", lambda: None)
+
+        captured = {}
+
+        def _fake_calculate_size(**kwargs):
+            captured["sl_price"] = kwargs.get("sl_price")
+            captured["tp_price"] = kwargs.get("tp_price")
+            return {"blocked": False, "size": 1.0}
+
+        def _fake_place_order(epic, action, size, sl, tp, timeframe=None, trade_source="tradingview"):
+            captured["order_sl"] = sl
+            captured["order_tp"] = tp
+            return {"status": "ok"}
+
+        monkeypatch.setattr(webhook, "calculate_size", _fake_calculate_size)
+        monkeypatch.setattr(webhook, "place_order", _fake_place_order)
+
+        client = webhook.app.test_client()
+        resp = client.post("/webhook", json={"symbol": "INTC", "action": "buy"})
+        body = resp.get_json() or {}
+
+        assert resp.status_code == 200
+        assert body.get("status") == "ok"
+        # entry=100 (buy uses offer), cap = 20%/5 leverage = 4% -> 100*(1-0.04)=96.0
+        assert captured["sl_price"] == pytest.approx(96.0)
+        assert captured["tp_price"] == pytest.approx(200.0)
+        assert captured["order_sl"] == pytest.approx(96.0)
+        assert captured["order_tp"] == pytest.approx(200.0)
+
+    def test_alert_missing_sl_tp_falls_back_to_fixed_sl_tp(self, monkeypatch):
+        """When the alert doesn't supply its own sl/tp, the bot falls back
+        to the fixed risk-percentage calculation so the trade is never
+        placed without protection."""
+        import webhook
+
+        monkeypatch.setattr(webhook, "load_raw_log", lambda: [])
+        monkeypatch.setattr(webhook.session, "verify_epic", lambda symbol: {"epic": "INTC", "source": "mock"})
+        monkeypatch.setattr(webhook, "_is_duplicate_alert", lambda *_: False)
+        monkeypatch.setattr(webhook, "_is_trade_locked_now", lambda: False)
+        monkeypatch.setattr(webhook, "parse_tradingview_alert", lambda payload: {"symbol": "INTC", "action": "buy"})
+        monkeypatch.setattr(
+            webhook.session,
+            "request",
+            lambda *args, **kwargs: type("Resp", (), {"status_code": 200, "json": lambda self: {"snapshot": {"bid": 99.8, "offer": 100.0}}})(),
+        )
+        monkeypatch.setattr(webhook.session, "update_last_trade", lambda: None)
+        monkeypatch.setattr(webhook.FixedSLTP, "long_levels", staticmethod(lambda entry_price: (90.0, 140.0)))
+
+        captured = {}
+
+        def _fake_calculate_size(**kwargs):
+            captured["sl_price"] = kwargs.get("sl_price")
+            captured["tp_price"] = kwargs.get("tp_price")
+            return {"blocked": False, "size": 1.0}
+
+        monkeypatch.setattr(webhook, "calculate_size", _fake_calculate_size)
+        monkeypatch.setattr(webhook, "place_order", lambda *a, **k: {"status": "ok"})
+
+        client = webhook.app.test_client()
+        resp = client.post("/webhook", json={"symbol": "INTC", "action": "buy"})
+        body = resp.get_json() or {}
+
+        assert resp.status_code == 200
+        assert body.get("status") == "ok"
+        assert captured["sl_price"] == pytest.approx(90.0)
+        assert captured["tp_price"] == pytest.approx(140.0)
 
 
 # ======================================================================== #
