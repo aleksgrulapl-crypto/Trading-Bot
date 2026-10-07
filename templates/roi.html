@@ -30,6 +30,10 @@
           {% if breakdown.overall_roi_pct is not none %}{{ "%.2f"|format(breakdown.overall_roi_pct) }}%{% else %}—{% endif %}
         </div>
       </div>
+      <div class="metric">
+        <div class="metric-label">Total Fees Deducted</div>
+        <div class="metric-value metric-bad">£{{ "%.2f"|format(breakdown.total_fees or 0) }}</div>
+      </div>
     </div>
     <p class="small" style="margin-top: 10px;">
       Each investor's gain/loss is computed with <strong>NAV-per-unit
@@ -63,6 +67,12 @@
       (likely trades missing from the trade log, fees, or swaps). This has
       been credited to {{ breakdown.owner_name }} so the Overall Gain/Loss
       above always matches the sum of each investor's figures below.
+      {% endif %}
+      {% if breakdown.total_fees %}
+      <br>£{{ "%.2f"|format(breakdown.total_fees) }} of manually-logged broker
+      fees (e.g. Capital.com commission/financing charges) has been shared
+      across investors holding units at the time each fee was incurred,
+      and is reflected in the Overall Gain/Loss and ROI above.
       {% endif %}
     </p>
   </div>
@@ -115,7 +125,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="11" class="small">No investor contributions recorded yet. Add entries on the <a href="/dashboard/deposits">Deposits page</a>.</td></tr>
+        <tr><td colspan="11" class="small">No investor contributions recorded yet. Add entries on the <a href="/dashboard/transactions">Transactions page</a>.</td></tr>
         {% endfor %}
       </tbody>
     </table>

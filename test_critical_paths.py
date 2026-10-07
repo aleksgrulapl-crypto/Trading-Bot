@@ -3462,7 +3462,7 @@ class TestDashboardRoles:
         assert response.status_code == 200
         assert "Investor" in body
         assert 'href="/dashboard/roi"' in body
-        assert 'href="/dashboard/deposits"' not in body
+        assert 'href="/dashboard/transactions"' not in body
 
 
 class TestDashboardCloseEndpoint:
