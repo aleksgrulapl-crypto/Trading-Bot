@@ -39,7 +39,13 @@ if not logger.handlers:
 
 LOG_PATH = os.environ.get("DEPOSITS_LOG_PATH") or (getattr(config, "DEPOSITS_LOG_PATH", None) if config else None) or "/data/deposits_log.json"
 
-VALID_TYPES = frozenset(("deposit", "withdrawal"))
+VALID_TYPES = frozenset(("deposit", "withdrawal", "fee"))
+
+# Fee entries aren't tied to a specific investor's capital — they're
+# broker-level costs (e.g. Capital.com commission/financing charges) that
+# reduce the fund as a whole. Entries of type "fee" default to this label
+# when no investor is supplied.
+FEE_ENTRY_LABEL = "Fund"
 
 # Module-level lock protecting all read-modify-write operations on the deposits log file.
 _deposits_lock = threading.Lock()
@@ -190,12 +196,15 @@ def add_entry(
     occurred_at: Optional[str] = None,
     path: str = LOG_PATH,
 ) -> Tuple[bool, Optional[Dict[str, Any]], str]:
-    """Append a new deposit/withdrawal row to the ledger.
+    """Append a new deposit/withdrawal/fee row to the ledger.
 
     *amount* must be a positive number; direction is carried by *entry_type*
-    ("deposit" or "withdrawal"), not by the sign of the amount. *investor*
-    identifies whose capital this entry belongs to, so ROI/ownership share
-    can be calculated per-person.
+    ("deposit", "withdrawal", or "fee"), not by the sign of the amount.
+    *investor* identifies whose capital this entry belongs to, so
+    ROI/ownership share can be calculated per-person. Fee entries are a
+    broker-level cost (e.g. Capital.com commission/financing charges)
+    rather than one investor's capital, so *investor* may be left blank
+    for them and defaults to ``FEE_ENTRY_LABEL``.
     """
     normalized_type = str(entry_type or "").strip().lower()
     if normalized_type not in VALID_TYPES:
@@ -207,7 +216,10 @@ def add_entry(
 
     investor_name = str(investor or "").strip()
     if not investor_name:
-        return False, None, "invalid_investor"
+        if normalized_type == "fee":
+            investor_name = FEE_ENTRY_LABEL
+        else:
+            return False, None, "invalid_investor"
     investor_name = investor_name[:100]
 
     # Accept a caller-supplied date (YYYY-MM-DD or ISO datetime); fall back to now.
@@ -248,9 +260,10 @@ def delete_entry(entry_id: str, path: str = LOG_PATH) -> Tuple[bool, str]:
 
 
 def summarize(entries: List[Dict[str, Any]]) -> Dict[str, float]:
-    """Compute totals: total deposited, total withdrawn, and net contribution."""
+    """Compute totals: total deposited, total withdrawn, total fees, and net contribution."""
     total_deposits = 0.0
     total_withdrawals = 0.0
+    total_fees = 0.0
     for e in entries or []:
         if not isinstance(e, dict):
             continue
@@ -263,11 +276,38 @@ def summarize(entries: List[Dict[str, Any]]) -> Dict[str, float]:
             total_deposits += amt
         elif e.get("type") == "withdrawal":
             total_withdrawals += amt
+        elif e.get("type") == "fee":
+            total_fees += amt
     return {
         "total_deposits": round(total_deposits, 2),
         "total_withdrawals": round(total_withdrawals, 2),
+        "total_fees": round(total_fees, 2),
         "net": round(total_deposits - total_withdrawals, 2),
     }
+
+
+def fee_pnl_events(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Build a ``{"ts": datetime, "pnl": -amount}`` event per recorded fee
+    entry, so manually-logged broker fees (Capital.com commission/financing
+    charges) can be merged into the same NAV-per-unit timeline as trade
+    PnL in :func:`investor_breakdown`. This spreads each fee's cost across
+    whoever holds fund units at the time it was incurred, rather than
+    letting it silently show up as unexplained reconciliation drift
+    credited entirely to the Owner."""
+    events = []
+    for e in entries or []:
+        if not isinstance(e, dict) or e.get("type") != "fee":
+            continue
+        amt = e.get("amount") or 0
+        try:
+            amt = float(amt)
+        except (TypeError, ValueError):
+            continue
+        ts = _parse_entry_datetime(e.get("occurred_at")) or _parse_entry_datetime(e.get("created_at"))
+        if ts is None:
+            continue
+        events.append({"ts": ts, "pnl": -amt})
+    return events
 
 
 def list_entries_sorted(path: str = LOG_PATH) -> List[Dict[str, Any]]:
@@ -281,8 +321,14 @@ def list_entries_sorted(path: str = LOG_PATH) -> List[Dict[str, Any]]:
 
 
 def list_investors(entries: List[Dict[str, Any]]) -> List[str]:
-    """Return a sorted list of distinct investor names seen in *entries*."""
-    names = {str(e.get("investor") or "").strip() for e in entries or [] if isinstance(e, dict)}
+    """Return a sorted list of distinct investor names seen in *entries*
+    (deposits/withdrawals only — fee entries are broker-level costs, not
+    an investor's own capital, so they're excluded from this list)."""
+    names = {
+        str(e.get("investor") or "").strip()
+        for e in entries or []
+        if isinstance(e, dict) and e.get("type") in ("deposit", "withdrawal")
+    }
     names.discard("")
     return sorted(names, key=str.lower)
 

@@ -5,7 +5,7 @@
 
   <div class="card">
     <div class="card-header">
-      <div class="card-title">Deposit / Withdrawal Summary</div>
+      <div class="card-title">Transactions Summary</div>
     </div>
     <div class="metrics-row">
       <div class="metric">
@@ -17,6 +17,10 @@
         <div class="metric-value metric-bad">£{{ "%.2f"|format(totals.total_withdrawals) }}</div>
       </div>
       <div class="metric">
+        <div class="metric-label">Total Fees</div>
+        <div class="metric-value metric-bad">£{{ "%.2f"|format(totals.total_fees) }}</div>
+      </div>
+      <div class="metric">
         <div class="metric-label">Net Contribution</div>
         <div class="metric-value {% if totals.net >= 0 %}metric-good{% else %}metric-bad{% endif %}">
           £{{ "%.2f"|format(totals.net) }}
@@ -25,8 +29,10 @@
     </div>
     <p class="small" style="margin-top: 10px;">
       This is a manual bookkeeping ledger only — entries here do not move real money.
-      Record actual deposits/withdrawals you make directly with your broker so the
-      figures above stay accurate for your own tracking.
+      Record actual deposits/withdrawals you make directly with your broker, and log
+      broker fees (e.g. Capital.com commission/financing charges) here so they stay
+      out of the trade log/analytics as noise but are still reflected in the
+      <a href="/dashboard/roi">ROI page</a>, deducted from the Overall P&amp;L.
     </p>
   </div>
 
@@ -34,12 +40,13 @@
     <div class="card-header">
       <div class="card-title">Add Entry</div>
     </div>
-    <form method="post" action="/dashboard/deposits/add" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;">
+    <form method="post" action="/dashboard/transactions/add" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;">
       <div>
         <label class="small" for="type">Type</label><br>
-        <select name="type" id="type" style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border);">
+        <select name="type" id="type" onchange="onTransactionTypeChange()" style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border);">
           <option value="deposit">Deposit</option>
           <option value="withdrawal">Withdrawal</option>
+          <option value="fee">Fee</option>
         </select>
       </div>
       <div>
@@ -47,7 +54,7 @@
         <input type="number" step="0.01" min="0.01" name="amount" id="amount" required
                style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 120px;">
       </div>
-      <div>
+      <div id="investor-field">
         <label class="small" for="investor">Investor</label><br>
         <input type="text" name="investor" id="investor" list="investor-list" maxlength="100" required placeholder="e.g. Aleks"
                style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 140px;">
@@ -97,7 +104,7 @@
           <td>{{ e.occurred_at_human or e.occurred_at|default('—') }}</td>
           <td>{{ e.investor|default('Unassigned') }}</td>
           <td>
-            <span class="pill {% if e.type == 'deposit' %}pill-long{% else %}pill-short{% endif %}">
+            <span class="pill {% if e.type == 'deposit' %}pill-long{% elif e.type == 'withdrawal' %}pill-short{% else %}pill-status{% endif %}">
               {{ e.type|capitalize }}
             </span>
           </td>
@@ -106,11 +113,11 @@
           </td>
           <td>{{ e.note or '—' }}</td>
           <td>
-            <button class="button-danger" onclick="deleteDepositEntry('{{ e.id }}')">Delete</button>
+            <button class="button-danger" onclick="deleteTransactionEntry('{{ e.id }}')">Delete</button>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="small">No deposit/withdrawal entries yet.</td></tr>
+        <tr><td colspan="6" class="small">No deposit/withdrawal/fee entries yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -119,14 +126,25 @@
 </div>
 
 <script>
-function deleteDepositEntry(entryId) {
+function onTransactionTypeChange() {
+    const type = document.getElementById("type").value;
+    const investorInput = document.getElementById("investor");
+    const investorField = document.getElementById("investor-field");
+    // Fees are a broker-level cost (not one investor's capital), so the
+    // investor field is optional for them and defaults server-side to "Fund".
+    const isFee = type === "fee";
+    investorInput.required = !isFee;
+    investorField.style.opacity = isFee ? "0.6" : "1";
+}
+
+function deleteTransactionEntry(entryId) {
     if (!window.confirm('Delete this entry from the ledger?')) {
         return;
     }
-    fetch(`/dashboard/deposits/${encodeURIComponent(entryId)}/delete`, { method: "POST" })
+    fetch(`/dashboard/transactions/${encodeURIComponent(entryId)}/delete`, { method: "POST" })
         .then(r => r.json())
         .then(() => window.location.reload())
-        .catch(err => console.error("Delete deposit entry error:", err));
+        .catch(err => console.error("Delete transaction entry error:", err));
 }
 </script>
 {% endblock %}

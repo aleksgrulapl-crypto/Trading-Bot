@@ -966,13 +966,16 @@ def dashboard_analytics():
     )
 
 
-@dashboard.route("/dashboard/deposits")
+@dashboard.route("/dashboard/transactions")
 @owner_page_required
-def dashboard_deposits():
-    """Render the Owner-only deposit/withdrawal bookkeeping page.
+def dashboard_transactions():
+    """Render the Owner-only transactions ledger: deposits, withdrawals,
+    and manually-logged broker fees (e.g. Capital.com commission/financing
+    charges).
 
     This is a manual ledger for tracking money moved in/out of the broker
-    account for accurate equity context; it does not move real funds."""
+    account (plus fees charged against it) for accurate equity context; it
+    does not move real funds."""
     ctx = _build_request_context()
     entries = deposits.list_entries_sorted()
     totals = deposits.summarize(entries)
@@ -981,7 +984,7 @@ def dashboard_deposits():
         e["occurred_at_human"] = format_human(e.get("occurred_at")) or e.get("occurred_at")
 
     return render_template(
-        "deposits.html",
+        "transactions.html",
         title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
         cache_bust=time.time(),
         account=ctx["account"],
@@ -990,6 +993,14 @@ def dashboard_deposits():
         investors=investors,
         is_owner=True,
     )
+
+
+@dashboard.route("/dashboard/deposits")
+@owner_page_required
+def dashboard_deposits():
+    """Legacy URL redirect: the Deposits tab was renamed to Transactions
+    (which now also tracks manually-logged broker fees)."""
+    return redirect("/dashboard/transactions")
 
 
 def _is_full_tier_investor(name, owner_name, tiers):
@@ -1019,7 +1030,12 @@ def _build_roi_breakdown(entries, combined_trades, balance):
     tv_pnl_events = _trade_pnl_events(combined_trades, sources=AUTOMATED_TRADE_SOURCES)
     trader_pnl_events = _trade_pnl_events(combined_trades, sources=TRADER_TRADE_SOURCES)
 
-    tv = deposits.investor_breakdown(entries, tv_pnl_events, current_balance=None)
+    # Manually-logged broker fees (Capital.com commission/financing charges)
+    # are shared across every unit holder like any other NAV-moving event —
+    # merged into the TradingView/Hedge sleeve only (which spans every
+    # investor) so they aren't double-applied in the Trader sleeve below.
+    fee_events = deposits.fee_pnl_events(entries)
+    tv = deposits.investor_breakdown(entries, tv_pnl_events + fee_events, current_balance=None)
 
     full_tier_entries = [
         e for e in entries
@@ -1096,6 +1112,12 @@ def _build_roi_breakdown(entries, combined_trades, balance):
         "pre_ledger_pnl": tv.get("pre_ledger_pnl"),
         "trader_pre_ledger_pnl": trader.get("pre_ledger_pnl"),
         "reconciliation_adjustment": reconciliation_adjustment if owner_key else None,
+        # Total manually-logged broker fees (Capital.com commission/financing
+        # charges) already factored into overall_gain_loss above via the
+        # real account balance, and shared across investors' allocated
+        # gain/loss via the NAV-per-unit timeline — shown here for
+        # transparency on the ROI page.
+        "total_fees": deposits.summarize(entries).get("total_fees", 0.0),
     }
 
 
@@ -1124,10 +1146,10 @@ def dashboard_roi():
     )
 
 
-@dashboard.route("/dashboard/deposits/add", methods=["POST"])
+@dashboard.route("/dashboard/transactions/add", methods=["POST"])
 @owner_required
-def dashboard_deposits_add():
-    """Add a manual deposit/withdrawal row to the bookkeeping ledger."""
+def dashboard_transactions_add():
+    """Add a manual deposit/withdrawal/fee row to the bookkeeping ledger."""
     payload = request.form if request.form else (request.get_json(silent=True) or {})
     entry_type = payload.get("type")
     amount = payload.get("amount")
@@ -1144,13 +1166,13 @@ def dashboard_deposits_add():
         return jsonify({"status": "error", "message": status}), code
 
     # Standard HTML form submission: redirect back to the page.
-    return redirect("/dashboard/deposits")
+    return redirect("/dashboard/transactions")
 
 
-@dashboard.route("/dashboard/deposits/<entry_id>/delete", methods=["POST"])
+@dashboard.route("/dashboard/transactions/<entry_id>/delete", methods=["POST"])
 @owner_required
-def dashboard_deposits_delete(entry_id: str):
-    """Delete a row from the deposit/withdrawal bookkeeping ledger."""
+def dashboard_transactions_delete(entry_id: str):
+    """Delete a row from the deposit/withdrawal/fee bookkeeping ledger."""
     ok, status = deposits.delete_entry(entry_id)
 
     if ok:
