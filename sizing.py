@@ -66,6 +66,85 @@ def _normalize_timeframe(value: Optional[str]) -> Optional[str]:
         return None
 
 
+# Trade sources counted as the automated TradingView/Hedge sleeve, matching
+# dashboard.py's AUTOMATED_TRADE_SOURCES / the Analytics "TradingView" tab
+# filter (?group=tradingview). Kept as a local constant (rather than
+# importing dashboard.py) to avoid a circular import, since calculate_size()
+# is called from webhook.py on the hot alert-processing path.
+_TRADINGVIEW_TRADE_SOURCES = frozenset(("tradingview", "hedge"))
+
+
+def _ticker_tradingview_win_rate(ticker: Optional[str]) -> Optional[float]:
+    """Win rate (0.0-1.0) of *ticker*'s closed TradingView/Hedge trades, i.e.
+    what the Analytics page's "TradingView" tab would show for this ticker.
+    Returns None if there isn't yet a single decided (win or loss) trade for
+    this ticker — callers should treat that as "not yet present in the
+    Analytics tab" and skip equity scaling (use the full cap)."""
+    ticker_norm = _normalize_ticker(ticker)
+    if not ticker_norm:
+        return None
+
+    try:
+        trades = load_raw_log()
+    except Exception:
+        logger.exception("Failed to load trade log for ticker win-rate scaling")
+        return None
+
+    fx_rate = float(getattr(config, "FX_USD_GBP", 0.78) or 0.78)
+    wins = 0
+    losses = 0
+    for trade in trades or []:
+        trade_ticker = _normalize_ticker(trade.get("ticker") or trade.get("epic"))
+        if trade_ticker != ticker_norm:
+            continue
+
+        source = str(
+            trade.get("trade_type") or trade.get("trade_source") or trade.get("origin") or trade.get("source") or ""
+        ).strip().lower()
+        if source not in _TRADINGVIEW_TRADE_SOURCES:
+            continue
+
+        status = str(trade.get("status") or ("CLOSED" if trade.get("time_exited") else "OPEN")).strip().upper()
+        if status != "CLOSED":
+            continue
+
+        pnl_gbp = _safe_float(trade.get("pnl_gbp"))
+        if pnl_gbp is None:
+            pnl_raw = _safe_float(trade.get("pnl"))
+            pnl_gbp = round(pnl_raw * fx_rate, 2) if pnl_raw is not None else None
+        if pnl_gbp is None:
+            continue
+
+        if pnl_gbp > 0:
+            wins += 1
+        elif pnl_gbp < 0:
+            losses += 1
+        # pnl_gbp == 0 (breakeven) is neither a win nor a loss, matching
+        # dashboard.compute_detailed_analytics's win_rate convention.
+
+    decided = wins + losses
+    if decided == 0:
+        return None
+    return wins / decided
+
+
+def _ticker_equity_scale(ticker: Optional[str]) -> float:
+    """Scale factor (0.0-1.0) applied to a ticker's equity caps based on its
+    TradingView/Hedge win rate (Analytics "TradingView" tab), so a
+    consistently winning ticker is allocated close to the full equity
+    ceiling while a consistently losing one gets scaled down — never below
+    config.TICKER_EQUITY_SCALE_MIN, so it's reduced rather than starved to
+    £0. A ticker with no decided TradingView/Hedge trades yet (not yet
+    present in the Analytics tab) is exempt and gets the full, unscaled
+    ceiling."""
+    win_rate = _ticker_tradingview_win_rate(ticker)
+    if win_rate is None:
+        return 1.0
+    scale_min = float(getattr(config, "TICKER_EQUITY_SCALE_MIN", 0.3) or 0.0)
+    scale_min = max(0.0, min(1.0, scale_min))
+    return max(scale_min, min(1.0, win_rate))
+
+
 def _open_ticker_usage(ticker: Optional[str], side: Optional[str] = None) -> Dict[str, float]:
     ticker_norm = _normalize_ticker(ticker)
     if not ticker_norm:
@@ -281,8 +360,17 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
                 "timeframe": timeframe_key,
             }
 
-    max_equity_per_trade = float(getattr(config, "MAX_EQUITY_PER_TRADE", 0) or 0)
-    max_equity_per_ticker = float(getattr(config, "MAX_EQUITY_PER_TICKER", max_equity_per_trade) or 0)
+    # Scale the equity ceilings down for a ticker with a weaker TradingView/
+    # Hedge win rate (Analytics "TradingView" tab) — a consistently losing
+    # ticker shouldn't be allocated the same equity as a top performer. A
+    # hedge trade (hedge_size_override, handled above) and a ticker with no
+    # decided trades yet are unaffected (scale == 1.0).
+    equity_scale = _ticker_equity_scale(ticker_key)
+
+    base_max_equity_per_trade = float(getattr(config, "MAX_EQUITY_PER_TRADE", 0) or 0)
+    base_max_equity_per_ticker = float(getattr(config, "MAX_EQUITY_PER_TICKER", base_max_equity_per_trade) or 0)
+    max_equity_per_trade = base_max_equity_per_trade * equity_scale
+    max_equity_per_ticker = base_max_equity_per_ticker * equity_scale
     remaining_ticker_equity = None
     if max_equity_per_ticker > 0:
         remaining_ticker_equity = max(0.0, max_equity_per_ticker - ticker_usage["equity_used"])
@@ -305,7 +393,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
 
     leverage = float(getattr(config, "LEVERAGE", 1))
     exposure = equity_to_use * leverage
-    max_exposure_per_trade = float(getattr(config, "MAX_EXPOSURE_PER_TRADE", 0) or 0)
+    max_exposure_per_trade = float(getattr(config, "MAX_EXPOSURE_PER_TRADE", 0) or 0) * equity_scale
     if max_exposure_per_trade > 0:
         exposure = min(exposure, max_exposure_per_trade)
 
@@ -402,4 +490,5 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
         "remaining_ticker_equity": (
             None if remaining_ticker_equity is None else float(round(max(0.0, remaining_ticker_equity - actual_equity_used), 2))
         ),
+        "ticker_equity_scale": float(round(equity_scale, 4)),
     }
