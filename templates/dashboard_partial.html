@@ -231,6 +231,22 @@
           {{ period_returns.monthly is not none and (period_returns.monthly ~ '%') or '—' }}
         </div>
       </div>
+      <div class="metric">
+        <div class="metric-label">Days Active</div>
+        <div class="metric-value metric-neutral">
+          {{ period_returns.days_active.active_days|default(0) }}/{{ period_returns.days_active.total_days|default(0) }}
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;">
+      <div class="metric-label" style="display:flex; justify-content:space-between;">
+        <span>Weekly Goal: {{ period_returns.goal.goal_pct|default(5) }}%</span>
+        <span>{{ period_returns.goal.progress_pct|default(0) }}%</span>
+      </div>
+      <div class="progress-bar-track" style="margin-top:6px;">
+        <div class="progress-bar-fill" style="width: {{ period_returns.goal.progress_pct|default(0) }}%;"></div>
+      </div>
     </div>
   </div>
 
