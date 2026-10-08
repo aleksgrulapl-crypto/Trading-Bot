@@ -58,6 +58,19 @@
     <div class="card">
       <div class="card-header">
         <div class="card-title">Account & Open Positions</div>
+        {% if is_owner %}
+        <div class="email-notify-toggle" style="position:absolute; right:0; top:0;">
+          <button
+            id="email-notify-btn"
+            class="pill {% if email_notify_enabled %}pill-long{% else %}pill-status{% endif %}"
+            style="cursor:pointer; border:none;"
+            onclick="toggleEmailNotifications()"
+            title="{{ email_notify_recipient or 'No recipient configured yet' }}"
+          >
+            ✉ Email Alerts: {{ email_notify_enabled and 'ON' or 'OFF' }}
+          </button>
+        </div>
+        {% endif %}
       </div>
 
       {% if positions %}

@@ -21,6 +21,7 @@ from flask import Blueprint, request, render_template, redirect, jsonify
 import session
 import config
 import deposits
+import notifications
 from display_helpers import format_human
 from close_position import close_position as close_live_position
 from trade_log import (
@@ -760,6 +761,8 @@ def dashboard_home():
         monthly_analytics=ctx["monthly_analytics"],
         period_returns=ctx.get("period_returns") or _default_period_returns(),
         is_owner=current_role() == "owner",
+        email_notify_enabled=notifications.is_enabled(),
+        email_notify_recipient=notifications.get_recipient(),
     )
 
 
@@ -783,6 +786,8 @@ def dashboard_data():
             monthly_analytics=ctx["monthly_analytics"],
             period_returns=ctx.get("period_returns") or _default_period_returns(),
             is_owner=current_role() == "owner",
+            email_notify_enabled=notifications.is_enabled(),
+            email_notify_recipient=notifications.get_recipient(),
         )
         return jsonify({
             "html": html,
@@ -1246,6 +1251,30 @@ def dashboard_transactions_delete(entry_id: str):
 
     code = 404 if status == "not_found" else (400 if status == "invalid_id" else 500)
     return jsonify({"status": "error", "message": status}), code
+
+
+@dashboard.route("/dashboard/notifications/email/toggle", methods=["POST"])
+@owner_required
+def dashboard_toggle_email_notifications():
+    """Owner-only: turn the "send to email" position notifications on/off.
+
+    The first time it's switched on with no recipient configured anywhere,
+    the recipient defaults to notifications.DEFAULT_RECIPIENT_EMAIL.
+    """
+    payload = request.get_json(silent=True) or request.form or {}
+    enabled = payload.get("enabled")
+    if enabled is None:
+        # No explicit value supplied – flip the current state.
+        enabled = not notifications.is_enabled()
+    else:
+        enabled = str(enabled).strip().lower() in ("1", "true", "yes", "on")
+
+    settings = notifications.set_enabled(enabled)
+    return jsonify({
+        "status": "success",
+        "enabled": bool(settings.get("enabled")),
+        "recipient": settings.get("to") or notifications.get_recipient(),
+    }), 200
 
 
 @dashboard.route("/dashboard/close/<position_id>", methods=["POST"])

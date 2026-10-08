@@ -253,6 +253,11 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "True").lower() in ("1", "true", "yes")
+# Persisted override for the dashboard's Owner-only "send to email" toggle,
+# so turning it on/off (and the recipient address) survives restarts without
+# needing to edit environment variables. Falls back to NOTIFY_EMAIL_ENABLED /
+# NOTIFY_EMAIL_TO above when this file doesn't exist yet.
+NOTIFY_SETTINGS_PATH = os.getenv("NOTIFY_SETTINGS_PATH", "/data/notify_settings.json")
 
 # File paths and persistence
 TRADE_LOG_PATH = os.getenv("TRADE_LOG_PATH", os.getenv("TRADE_LOG_FILE", "/data/trade_log.json"))

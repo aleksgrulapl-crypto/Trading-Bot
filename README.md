@@ -65,6 +65,7 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `SMTP_USERNAME` | SMTP login username | ⬜ |
 | `SMTP_PASSWORD` | SMTP login password (use an app password where supported) | ⬜ |
 | `SMTP_USE_TLS` | Use STARTTLS on `SMTP_PORT` (default `True`); set to `False` for implicit SSL | ⬜ |
+| `NOTIFY_SETTINGS_PATH` | Path for the dashboard's persisted email-toggle/recipient override (default `/data/notify_settings.json`) | ⬜ |
 
 ### Email notifications
 
@@ -76,6 +77,13 @@ the default) or both. Set `NOTIFY_EMAIL_ENABLED=True`, fill in the `SMTP_*`
 settings for your mail provider (e.g. Gmail: `smtp.gmail.com`, port `587`,
 an [app password](https://support.google.com/accounts/answer/185833)), and
 set `NOTIFY_EMAIL_TO` to the address(es) that should receive the emails.
+
+The Owner can also flip the master switch at runtime from the dashboard: an
+"✉ Email Alerts: ON/OFF" button next to **Account & Open Positions** (visible
+to the Owner role only). The first time it's switched on with no recipient
+configured, it defaults the recipient to `aleksgrulapl@gmail.com`; this
+choice is persisted to `NOTIFY_SETTINGS_PATH` (default `/data/notify_settings.json`)
+and overrides `NOTIFY_EMAIL_ENABLED`/`NOTIFY_EMAIL_TO` from then on.
 
 ### Run locally
 
