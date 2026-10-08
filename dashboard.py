@@ -480,6 +480,17 @@ def _trades_in_month(trades, month_key):
     return [t for t in trades or [] if _trade_month_key(t) == month_key]
 
 
+def _default_period_returns():
+    """Safe all-"—" fallback for period_returns, used when a caller (or a
+    legacy test monkeypatching _build_request_context) doesn't supply one."""
+    return {
+        "daily": None, "weekly": None, "monthly": None,
+        "daily_opening": None, "weekly_opening": None, "monthly_opening": None,
+        "goal": {"goal_pct": deposits.RETURN_GOAL_STEP_PCT, "progress_pct": 0.0},
+        "days_active": {"active_days": 0, "total_days": 0},
+    }
+
+
 def _trade_pnl_events(trades, sources=None):
     """Build a chronological PnL event series (GBP, FX-converted) for closed
     trades with a resolvable exit time, for use in investor NAV accounting.
@@ -692,12 +703,11 @@ def _build_request_context():
     try:
         deposits.record_daily_balance_snapshot((account or {}).get("balance"))
         period_returns = deposits.compute_period_returns((account or {}).get("balance"))
+        period_returns["goal"] = deposits.compute_weekly_return_goal_progress(period_returns.get("weekly"))
+        period_returns["days_active"] = deposits.compute_days_active()
     except Exception:
         logger.exception("dashboard: period return computation failed")
-        period_returns = {
-            "daily": None, "weekly": None, "monthly": None,
-            "daily_opening": None, "weekly_opening": None, "monthly_opening": None,
-        }
+        period_returns = _default_period_returns()
 
     now = datetime.utcnow()
     weekly_analytics = _safe_analytics(
@@ -748,7 +758,7 @@ def dashboard_home():
         analytics=ctx["analytics"],
         weekly_analytics=ctx["weekly_analytics"],
         monthly_analytics=ctx["monthly_analytics"],
-        period_returns=ctx.get("period_returns") or deposits.compute_period_returns(None),
+        period_returns=ctx.get("period_returns") or _default_period_returns(),
         is_owner=current_role() == "owner",
     )
 
@@ -771,7 +781,7 @@ def dashboard_data():
             analytics=ctx["analytics"],
             weekly_analytics=ctx["weekly_analytics"],
             monthly_analytics=ctx["monthly_analytics"],
-            period_returns=ctx.get("period_returns") or deposits.compute_period_returns(None),
+            period_returns=ctx.get("period_returns") or _default_period_returns(),
             is_owner=current_role() == "owner",
         )
         return jsonify({

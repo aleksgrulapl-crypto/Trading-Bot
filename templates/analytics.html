@@ -8,9 +8,9 @@
   <a href="/dashboard/analytics?group=trader{% if month != 'all' %}&month={{ month }}{% endif %}" class="{% if group == 'trader' %}active{% endif %}">Trader</a>
 </div>
 {% if available_months %}
-<div class="analytics-month-filter" style="margin:10px 0;">
+<div class="analytics-month-filter" style="margin:10px 0; display:flex; align-items:center; gap:8px;">
   <label for="analytics-month-select" class="small">Month:</label>
-  <select id="analytics-month-select" onchange="window.location.href='/dashboard/analytics?group={{ group }}&month=' + this.value;">
+  <select id="analytics-month-select" class="themed-select" onchange="window.location.href='/dashboard/analytics?group={{ group }}&month=' + this.value;">
     <option value="all" {% if month == 'all' %}selected{% endif %}>All Time</option>
     {% for m in available_months %}
     <option value="{{ m }}" {% if month == m %}selected{% endif %}>{{ m }}</option>

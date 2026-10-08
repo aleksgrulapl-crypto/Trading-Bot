@@ -7,6 +7,7 @@
 # deposit/withdrawal history alongside the live trading P&L.
 
 import json
+import math
 import os
 import tempfile
 import threading
@@ -1049,3 +1050,64 @@ def compute_period_returns(current_balance: Optional[float], path: str = BALANCE
         if opening > 0:
             result[period] = round((current_balance - opening) / opening * 100, 2)
     return result
+
+
+# Weekly Return goal: 5% is the first milestone; once reached the next goal
+# steps up by the same increment (10%, 15%, ...), gamifying the target
+# rather than leaving it fixed once hit.
+RETURN_GOAL_STEP_PCT = 5.0
+
+
+def compute_weekly_return_goal_progress(weekly_return: Optional[float], step_pct: float = RETURN_GOAL_STEP_PCT) -> Dict[str, Optional[float]]:
+    """Return the next Weekly Return milestone and progress toward it.
+
+    The first goal is *step_pct* (default 5%). Once the current weekly
+    return reaches/exceeds a milestone, the next goal becomes the next
+    multiple of *step_pct* above it (10%, 15%, ...). Progress is clamped to
+    [0, 100] so a return at or past the current milestone still shows a
+    full bar rather than overflowing while the next goal is computed.
+    """
+    if weekly_return is None:
+        return {"goal_pct": step_pct, "progress_pct": 0.0}
+    goal = (math.floor(weekly_return / step_pct) + 1) * step_pct
+    if goal <= 0:
+        goal = step_pct
+    progress = max(0.0, weekly_return) / goal * 100
+    return {"goal_pct": round(goal, 2), "progress_pct": round(min(progress, 100.0), 1)}
+
+
+def compute_days_active(path: str = BALANCE_HISTORY_PATH) -> Dict[str, int]:
+    """Return {"active_days", "total_days"} counting UK weekdays (Mon-Fri)
+    in the recorded balance history whose day-over-day Balance change was
+    positive, out of all tracked weekdays. Weekends are excluded entirely
+    (the market is closed, so a weekend day would always show ~0% return
+    and isn't a meaningful measure of trading performance).
+
+    Each day's return is computed against the *previous recorded* day's
+    balance (which may itself be a prior weekday if weekend entries exist),
+    so the very first tracked day has nothing to compare against and isn't
+    counted in either total.
+    """
+    history = _load_balance_history(path)
+    history = sorted(history, key=lambda r: r.get("date") or "")
+    active = 0
+    total = 0
+    for i in range(1, len(history)):
+        date_s = history[i].get("date") or ""
+        try:
+            d = datetime.strptime(date_s, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if d.weekday() >= 5:  # Saturday/Sunday
+            continue
+        try:
+            prev_balance = float(history[i - 1].get("balance"))
+            cur_balance = float(history[i].get("balance"))
+        except (TypeError, ValueError):
+            continue
+        if prev_balance <= 0:
+            continue
+        total += 1
+        if cur_balance > prev_balance:
+            active += 1
+    return {"active_days": active, "total_days": total}

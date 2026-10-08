@@ -3947,6 +3947,8 @@ class TestDashboardRoles:
             "period_returns": {
                 "daily": 1.5, "weekly": -2.25, "monthly": 10.0,
                 "daily_opening": 1000.0, "weekly_opening": 990.0, "monthly_opening": 900.0,
+                "goal": {"goal_pct": 5.0, "progress_pct": 0.0},
+                "days_active": {"active_days": 19, "total_days": 34},
             },
         })
 
@@ -3962,6 +3964,8 @@ class TestDashboardRoles:
         assert "1.5%" in body
         assert "-2.25%" in body
         assert "10.0%" in body
+        assert "19/34" in body
+        assert "Weekly Goal: 5.0%" in body
 
     def test_investor_login_sets_investor_role_cookie(self, monkeypatch):
         from flask import Flask
@@ -4443,6 +4447,58 @@ class TestBalanceHistoryPeriodReturns:
         deposits.record_daily_balance_snapshot(1000.0, path=path)
         result = deposits.compute_period_returns(None, path=path)
         assert result["daily"] is None
+
+    def test_weekly_return_goal_defaults_to_first_milestone_when_no_data(self):
+        import deposits
+        result = deposits.compute_weekly_return_goal_progress(None)
+        assert result == {"goal_pct": 5.0, "progress_pct": 0.0}
+
+    def test_weekly_return_goal_progress_toward_first_milestone(self):
+        import deposits
+        result = deposits.compute_weekly_return_goal_progress(3.0)
+        assert result == {"goal_pct": 5.0, "progress_pct": 60.0}
+
+    def test_weekly_return_goal_steps_up_once_milestone_passed(self):
+        import deposits
+        result = deposits.compute_weekly_return_goal_progress(7.0)
+        assert result == {"goal_pct": 10.0, "progress_pct": 70.0}
+
+    def test_weekly_return_goal_handles_exact_milestone_hit(self):
+        import deposits
+        result = deposits.compute_weekly_return_goal_progress(5.0)
+        assert result == {"goal_pct": 10.0, "progress_pct": 50.0}
+
+    def test_weekly_return_goal_clamps_negative_return_to_zero_progress(self):
+        import deposits
+        result = deposits.compute_weekly_return_goal_progress(-3.0)
+        assert result == {"goal_pct": 5.0, "progress_pct": 0.0}
+
+    def test_days_active_counts_positive_weekdays_excluding_weekends(self, tmp_path):
+        import deposits
+        path = str(tmp_path / "history.json")
+        # Mon 2026-10-05 -> Tue 10-06 (up, active) -> Wed 10-07 (down) ->
+        # Sat 10-10 (weekend, excluded even though it's "up") -> Mon 10-12 (up, active)
+        history = [
+            {"date": "2026-10-05", "balance": 1000.0},
+            {"date": "2026-10-06", "balance": 1010.0},
+            {"date": "2026-10-07", "balance": 1005.0},
+            {"date": "2026-10-10", "balance": 1200.0},
+            {"date": "2026-10-12", "balance": 1210.0},
+        ]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(history, f)
+
+        result = deposits.compute_days_active(path=path)
+
+        # 4 day-over-day comparisons total; the 10-10 Saturday entry is
+        # excluded, leaving 3 weekday comparisons, 2 of which were up.
+        assert result == {"active_days": 2, "total_days": 3}
+
+    def test_days_active_with_no_history_is_zero_of_zero(self, tmp_path):
+        import deposits
+        path = str(tmp_path / "history.json")
+        result = deposits.compute_days_active(path=path)
+        assert result == {"active_days": 0, "total_days": 0}
 
 
 class TestInvestorBreakdownOwnerFeeOverride:
