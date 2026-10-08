@@ -1667,6 +1667,64 @@ class TestSyncClosedTradesDisappearanceGuard:
         assert new_trade["time_exited"] == "2026-09-11 09:30:00"
         assert new_trade["exit_price"] == pytest.approx(95.5)
 
+    def test_closes_with_null_exit_price_when_history_and_snapshot_both_fail(self, tmp_path, monkeypatch):
+        """Regression: a broker-confirmed close (size==0) that neither the
+        transaction history nor a live market snapshot can supply a price for
+        (e.g. a sharp spike between polling ticks) must still be finalised as
+        CLOSED, instead of being left stuck OPEN forever. The trader can then
+        fill in the correct exit price via the dashboard's edit action."""
+        import history_sync
+        import trade_log
+
+        path = str(tmp_path / "log.json")
+        trade_log.save_raw_log([{
+            "dealId": "SPIKE-1",
+            "dealReference": "REF-SPIKE-1",
+            "ticker": "TSLA",
+            "side": "long",
+            "size": 1.0,
+            "entry_price": 200.0,
+            "time_entered": "2026-01-01T00:00:00Z",
+            "status": "OPEN",
+            "trade_source": "tradingview",
+            "origin": "tradingview",
+        }], path=path)
+
+        monkeypatch.setattr(history_sync, "canonicalize_trade_log", lambda: trade_log.canonicalize_trade_log(path=path))
+        monkeypatch.setattr(history_sync, "load_raw_log", lambda: trade_log.load_raw_log(path=path))
+        monkeypatch.setattr(
+            history_sync,
+            "close_trade_by_dealId",
+            lambda deal_id, **kwargs: trade_log.close_trade_by_dealId(deal_id, path=path, **kwargs),
+        )
+        monkeypatch.setattr(
+            history_sync,
+            "close_trade_fallback",
+            lambda ticker, entry_price, **kwargs: trade_log.close_trade_fallback(ticker, entry_price, path=path, **kwargs),
+        )
+        # Broker reports the position with size==0 (a direct, non-disappearance
+        # close signal), so no _confirm_position_gone check is even involved.
+        monkeypatch.setattr(
+            history_sync.session,
+            "get_positions",
+            lambda: [{"position": {"dealId": "SPIKE-1", "size": 0}, "market": {"epic": "US.TSLA"}}],
+        )
+        monkeypatch.setattr(history_sync, "_fetch_exit_from_history", lambda *args, **kwargs: (None, None, None))
+        monkeypatch.setattr(history_sync, "get_snapshot", lambda epic: (None, None))
+
+        history_sync._last_raw_1 = set()
+        history_sync._last_raw_2 = set()
+        history_sync._last_close_cache = {}
+        history_sync._absent_count = {}
+
+        history_sync.sync_closed_trades()
+
+        trades = trade_log.load_raw_log(path)
+        assert len(trades) == 1
+        assert trades[0]["status"] == "CLOSED"
+        assert trades[0].get("exit_price") is None
+        assert trades[0].get("pnl") is None
+
 
 class TestReconcileTickerMatching:
     """Regression tests: reconcile_with_positions() must match a bot/TradingView
@@ -2480,6 +2538,90 @@ class TestDeleteTradeLogEntry:
         assert status == "deleted"
         assert deleted["dealId"] == "PHANTOM-TRUSTED"
         assert trades == []
+
+
+class TestUpdateTradeExitPriceEntry:
+    """Tests for trade_log.update_trade_exit_price_entry."""
+
+    def test_sets_exit_price_and_recomputes_pnl_for_closed_trade(self, tmp_path):
+        from trade_log import update_trade_exit_price_entry, load_raw_log
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([{
+                "dealId": "D1",
+                "ticker": "AAPL",
+                "side": "long",
+                "size": 10,
+                "entry_price": 100.0,
+                "exit_price": None,
+                "pnl": None,
+                "pnl_gbp": None,
+                "status": "CLOSED",
+                "time_exited": "2026-10-05T19:00:00Z",
+            }], f)
+
+        ok, updated, status = update_trade_exit_price_entry(0, 110, path=path)
+
+        assert ok is True
+        assert status == "updated"
+        assert updated["exit_price"] == 110.0
+        assert updated["pnl"] == pytest.approx(100.0)
+        assert updated["pnl_gbp"] is not None
+
+        trades = load_raw_log(path)
+        assert trades[0]["exit_price"] == 110.0
+        assert trades[0]["pnl"] == pytest.approx(100.0)
+
+    def test_rejects_edit_for_still_open_trade(self, tmp_path):
+        from trade_log import update_trade_exit_price_entry
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([{
+                "dealId": "D1",
+                "ticker": "AAPL",
+                "side": "long",
+                "size": 10,
+                "entry_price": 100.0,
+                "status": "OPEN",
+            }], f)
+
+        ok, updated, status = update_trade_exit_price_entry(0, 110, path=path)
+
+        assert ok is False
+        assert updated is None
+        assert status == "not_completed"
+
+    def test_rejects_invalid_price(self, tmp_path):
+        from trade_log import update_trade_exit_price_entry
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([{
+                "dealId": "D1",
+                "ticker": "AAPL",
+                "status": "CLOSED",
+                "time_exited": "2026-10-05T19:00:00Z",
+            }], f)
+
+        ok, updated, status = update_trade_exit_price_entry(0, "not-a-number", path=path)
+        assert ok is False and status == "invalid_price"
+
+        ok, updated, status = update_trade_exit_price_entry(0, -5, path=path)
+        assert ok is False and status == "invalid_price"
+
+    def test_rejects_out_of_range_index(self, tmp_path):
+        from trade_log import update_trade_exit_price_entry
+
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        ok, updated, status = update_trade_exit_price_entry(0, 110, path=path)
+        assert ok is False
+        assert updated is None
+        assert status == "not_found"
 
 
 # ======================================================================== #
@@ -3527,6 +3669,45 @@ class TestDashboardRoles:
 
         assert response.status_code == 403
         assert data["message"] == "forbidden_viewer_role"
+
+    def test_viewer_role_is_blocked_from_update_exit_price_endpoint(self, monkeypatch):
+        from flask import Flask
+        from dashboard import dashboard
+
+        monkeypatch.setattr("dashboard.update_trade_exit_price_entry", lambda idx, new_exit_price: (True, {}, "ok"))
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "viewer")
+
+        response = client.post("/dashboard/trade/0/exit_price", json={"exit_price": 110})
+        data = response.get_json()
+
+        assert response.status_code == 403
+        assert data["message"] == "forbidden_viewer_role"
+
+    def test_owner_role_can_update_exit_price(self, monkeypatch):
+        from flask import Flask
+        from dashboard import dashboard
+
+        monkeypatch.setattr(
+            "dashboard.update_trade_exit_price_entry",
+            lambda idx, new_exit_price: (True, {"exit_price": float(new_exit_price)}, "updated"),
+        )
+
+        app = Flask(__name__)
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "owner")
+
+        response = client.post("/dashboard/trade/0/exit_price", json={"exit_price": 110})
+        data = response.get_json()
+
+        assert response.status_code == 200
+        assert data["status"] == "success"
 
     def test_owner_role_can_still_use_close_endpoint(self, monkeypatch):
         from flask import Flask

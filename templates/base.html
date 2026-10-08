@@ -248,6 +248,19 @@
         .type-select:hover {
             background: rgba(56, 189, 248, 0.2);
         }
+        .exit-price-input {
+            background: rgba(56, 189, 248, 0.1);
+            color: var(--text);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 6px;
+            padding: 2px 6px;
+            font-size: 11px;
+            width: 80px;
+        }
+        .exit-price-input:focus {
+            outline: none;
+            background: rgba(56, 189, 248, 0.2);
+        }
         .pnl-pos { color: var(--success); font-weight: 600; }
         .pnl-neg { color: var(--danger); font-weight: 600; }
         .small { font-size: 11px; color: var(--text-muted); }
@@ -431,6 +444,26 @@ function updateTradeType(tradeIndex, newType) {
             refreshDashboard();
         })
         .catch(err => console.error("Update trade type error:", err));
+}
+
+function updateExitPrice(tradeIndex, newExitPrice) {
+    const errorBanner = document.getElementById('error-banner');
+    if (newExitPrice === null || newExitPrice === undefined || String(newExitPrice).trim() === '') {
+        return;
+    }
+
+    fetch(`/dashboard/trade/${encodeURIComponent(tradeIndex)}/exit_price`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exit_price: newExitPrice })
+    })
+        .then(r => r.json())
+        .then(data => {
+            errorBanner.innerText = (data && data.message) || "Update exit price action failed.";
+            errorBanner.style.display = "block";
+            refreshDashboard();
+        })
+        .catch(err => console.error("Update exit price error:", err));
 }
 
 function refreshDashboard() {

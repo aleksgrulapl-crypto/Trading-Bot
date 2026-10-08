@@ -26,6 +26,7 @@ from close_position import close_position as close_live_position
 from trade_log import (
     delete_trade_log_entry,
     update_trade_type_entry,
+    update_trade_exit_price_entry,
     dedupe_trade_log_entries,
     is_trade_delete_candidate,
     load_raw_log,
@@ -1286,6 +1287,46 @@ def dashboard_update_trade_type(trade_index: int):
         code = 400
     elif status == "not_found":
         code = 404
+    else:
+        code = 500
+    return jsonify({
+        "status": "error",
+        "message": status,
+    }), code
+
+
+@dashboard.route("/dashboard/trade/<int:trade_index>/exit_price", methods=["POST"])
+@owner_required
+def dashboard_update_trade_exit_price(trade_index: int):
+    """Manually set/correct a completed trade's exit price.
+
+    PnL (and PnL GBP) is recalculated automatically from the new exit price,
+    covering trades where the bot never recorded one (e.g. a sharp spike hit
+    the broker's own SL/TP between polling ticks)."""
+    payload = request.get_json(silent=True) or {}
+    new_exit_price = payload.get("exit_price")
+
+    try:
+        updated, _trade, status = update_trade_exit_price_entry(trade_index, new_exit_price)
+    except Exception as exc:
+        logger.exception("dashboard: update exit price action failed for trade %s: %s", trade_index, exc)
+        return jsonify({
+            "status": "error",
+            "message": "update_exit_price_failed_internal",
+        }), 500
+
+    if updated:
+        return jsonify({
+            "status": "success",
+            "message": "Exit price updated.",
+        }), 200
+
+    if status in ("invalid_index", "invalid_price"):
+        code = 400
+    elif status == "not_found":
+        code = 404
+    elif status == "not_completed":
+        code = 409
     else:
         code = 500
     return jsonify({
