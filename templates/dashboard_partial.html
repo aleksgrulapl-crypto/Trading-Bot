@@ -205,5 +205,34 @@
     </div>
   </div>
 
+  <!-- Calendar-aligned Return (Balance-based, not a rolling window) -->
+  <div class="card" style="margin-top:16px;">
+    <div class="card-header">
+      <div class="card-title">Return</div>
+      <div class="small">Daily = today (00:00–23:59), Weekly = since Monday, Monthly = since the 1st — vs Balance at period start</div>
+    </div>
+
+    <div class="metrics-row">
+      <div class="metric">
+        <div class="metric-label">Daily Return</div>
+        <div class="metric-value {% if period_returns.daily is not none and period_returns.daily >= 0 %}metric-good{% elif period_returns.daily is not none %}metric-bad{% else %}metric-neutral{% endif %}">
+          {{ period_returns.daily is not none and (period_returns.daily ~ '%') or '—' }}
+        </div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Weekly Return</div>
+        <div class="metric-value {% if period_returns.weekly is not none and period_returns.weekly >= 0 %}metric-good{% elif period_returns.weekly is not none %}metric-bad{% else %}metric-neutral{% endif %}">
+          {{ period_returns.weekly is not none and (period_returns.weekly ~ '%') or '—' }}
+        </div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Monthly Return</div>
+        <div class="metric-value {% if period_returns.monthly is not none and period_returns.monthly >= 0 %}metric-good{% elif period_returns.monthly is not none %}metric-bad{% else %}metric-neutral{% endif %}">
+          {{ period_returns.monthly is not none and (period_returns.monthly ~ '%') or '—' }}
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 

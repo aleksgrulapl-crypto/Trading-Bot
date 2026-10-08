@@ -990,6 +990,7 @@ def _collapse_lingering_tradingview_duplicate(
     size: Any,
     time_entered: Any,
     live_dealids: Optional[set] = None,
+    other_live_positions_same_ticker_side: int = 0,
 ) -> bool:
     """Remove a leftover TradingView OPEN row once a broker row already exists."""
     if not canonical:
@@ -1028,13 +1029,28 @@ def _collapse_lingering_tradingview_duplicate(
         duplicate = candidate
         break
 
-    if duplicate is None:
-        duplicate = _find_pending_trade_by_ticker(trades, ticker, side)
-    if duplicate is None:
-        duplicate = _find_open_trade_for_dealid_rebind(
-            trades, ticker, side, dealId, dealReference, entry_price, size, time_entered,
-            live_dealids=live_dealids,
-        )
+    # The ticker+side-only fallbacks below (no dealId/dealReference evidence
+    # required) assume at most one broker position exists for this
+    # ticker/side in the current reconcile batch, so any other dealId-less
+    # row found for it must be a stale leftover of *canonical*'s own position.
+    # With scale-in enabled, two or more genuinely distinct live positions can
+    # legitimately share the same ticker/side (and even entry_price/size, when
+    # a repeat signal fills with zero slippage) - in that case a dealId-less
+    # sibling found here is very likely a *different*, still-unmatched scale-
+    # in trade, not a duplicate of *canonical*. Guessing wrong would silently
+    # merge away a real, separate trade: the sibling loses its own row and its
+    # live dealId then fails to match anything, surfacing as a brand-new
+    # "Trader" duplicate instead (the AMAT scale-in regression). Only trust
+    # these weak fallbacks when the live broker snapshot itself reports just
+    # one position for this ticker/side, removing that ambiguity.
+    if other_live_positions_same_ticker_side == 0:
+        if duplicate is None:
+            duplicate = _find_pending_trade_by_ticker(trades, ticker, side)
+        if duplicate is None:
+            duplicate = _find_open_trade_for_dealid_rebind(
+                trades, ticker, side, dealId, dealReference, entry_price, size, time_entered,
+                live_dealids=live_dealids,
+            )
     if duplicate is None or duplicate is canonical or not _is_tradingview_origin_trade(duplicate):
         return False
     return _merge_lingering_open_duplicate(trades, canonical, duplicate)
@@ -1799,6 +1815,49 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
             sig = _make_signature(t.get("dealId"), t.get("dealReference"), t.get("ticker"), t.get("entry_price"))
             existing_signatures.add(sig)
 
+        # Pre-scan the live positions batch to count, per ticker/side, how
+        # many broker positions are reported this round. With scale-in
+        # enabled several distinct positions can legitimately share a ticker
+        # and side; _collapse_lingering_tradingview_duplicate() needs this
+        # count to avoid guessing a dealId-less sibling is a stale duplicate
+        # when it may really be another live position still awaiting its own
+        # match (see that function's docstring for the regression this
+        # guards against).
+        live_ticker_side_entries: List[tuple] = []
+        for p in live_positions or []:
+            if not isinstance(p, dict):
+                continue
+            if p.get("dealId") is not None:
+                t_candidates = [
+                    p.get("epic"), p.get("ticker"), p.get("symbol"),
+                    (p.get("market") or {}).get("epic") if isinstance(p.get("market"), dict) else None,
+                    (p.get("market") or {}).get("symbol") if isinstance(p.get("market"), dict) else None,
+                ]
+                t_side = _normalize_side(p.get("side") or p.get("direction"))
+            else:
+                pos_ = p.get("position") or {}
+                market_ = p.get("market") or {}
+                t_candidates = [
+                    market_.get("epic"), market_.get("symbol"), p.get("ticker"), p.get("epic"),
+                    pos_.get("instrumentName"), pos_.get("instrument"),
+                ]
+                t_side = _normalize_side(pos_.get("direction"))
+            t_aliases = _ticker_candidate_aliases(t_candidates)
+            if t_aliases:
+                live_ticker_side_entries.append((t_aliases, t_side))
+
+        def _count_other_live_same_ticker_side(aliases: set, side_norm: Optional[str]) -> int:
+            if not aliases:
+                return 0
+            count = -1  # exclude this position itself from its own count
+            for other_aliases, other_side in live_ticker_side_entries:
+                if not aliases.intersection(other_aliases):
+                    continue
+                if side_norm and other_side and other_side != side_norm:
+                    continue
+                count += 1
+            return max(count, 0)
+
         for p in live_positions or []:
             dealId = None
             dealReference = None
@@ -1860,12 +1919,15 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                     trade_source = _detect_trade_origin(p, side, dealId, dealReference)
 
             sig = _make_signature(dealId, dealReference, ticker, entry_price)
+            cur_ticker_aliases = _ticker_candidate_aliases(ticker_candidates or ticker)
+            other_same_ticker_side = _count_other_live_same_ticker_side(cur_ticker_aliases, side)
             if sig in existing_signatures:
                 if dealId:
                     exact = _find_open_trade_by_dealid(trades, dealId)
                     if exact is not None and _collapse_lingering_tradingview_duplicate(
                         trades, exact, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered,
                         live_dealids=live_ids,
+                        other_live_positions_same_ticker_side=other_same_ticker_side,
                     ):
                         existing_signatures.add(
                             _make_signature(
@@ -1919,6 +1981,7 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
                 if _collapse_lingering_tradingview_duplicate(
                     trades, matched, ticker_candidates or ticker, side, dealId, dealReference, entry_price, size, time_entered,
                     live_dealids=live_ids,
+                    other_live_positions_same_ticker_side=other_same_ticker_side,
                 ):
                     changed = True
                 if changed:

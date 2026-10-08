@@ -456,6 +456,30 @@ def _trades_closed_since(trades, since_dt):
     return out
 
 
+def _trade_month_key(trade):
+    """Return the "YYYY-MM" calendar month a completed trade belongs to
+    (based on exit time, falling back to entry time), or None if
+    unresolvable. Used for the Analytics per-month filter."""
+    ts = _naive_dt(_parse_iso_like(trade.get("time_exited")) or _parse_iso_like(trade.get("time_entered")))
+    if ts is None:
+        return None
+    return ts.strftime("%Y-%m")
+
+
+def _available_analytics_months(trades):
+    """Return the distinct "YYYY-MM" months present across *trades*' exit
+    (or entry) times, newest first, for the Analytics month-selector."""
+    months = {_trade_month_key(t) for t in trades or []}
+    months.discard(None)
+    return sorted(months, reverse=True)
+
+
+def _trades_in_month(trades, month_key):
+    """Return trades whose exit (or entry, as fallback) time falls within
+    the calendar month *month_key* ("YYYY-MM")."""
+    return [t for t in trades or [] if _trade_month_key(t) == month_key]
+
+
 def _trade_pnl_events(trades, sources=None):
     """Build a chronological PnL event series (GBP, FX-converted) for closed
     trades with a resolvable exit time, for use in investor NAV accounting.
@@ -661,6 +685,20 @@ def _build_request_context():
     except Exception:
         logger.exception("dashboard: balance auto-detection failed")
 
+    # Calendar-aligned Daily/Weekly/Monthly Return, based on the Balance
+    # recorded at each period's start (00:00 today / this Monday / the 1st
+    # of this month) - distinct from weekly_analytics/monthly_analytics
+    # below, which are rolling trade-count/win-rate windows, not a Return %.
+    try:
+        deposits.record_daily_balance_snapshot((account or {}).get("balance"))
+        period_returns = deposits.compute_period_returns((account or {}).get("balance"))
+    except Exception:
+        logger.exception("dashboard: period return computation failed")
+        period_returns = {
+            "daily": None, "weekly": None, "monthly": None,
+            "daily_opening": None, "weekly_opening": None, "monthly_opening": None,
+        }
+
     now = datetime.utcnow()
     weekly_analytics = _safe_analytics(
         compute_analytics(_trades_closed_since(completed_trades, now - timedelta(days=7)))
@@ -676,6 +714,7 @@ def _build_request_context():
         "analytics": analytics,
         "weekly_analytics": weekly_analytics,
         "monthly_analytics": monthly_analytics,
+        "period_returns": period_returns,
     }
 
 
@@ -709,6 +748,7 @@ def dashboard_home():
         analytics=ctx["analytics"],
         weekly_analytics=ctx["weekly_analytics"],
         monthly_analytics=ctx["monthly_analytics"],
+        period_returns=ctx.get("period_returns") or deposits.compute_period_returns(None),
         is_owner=current_role() == "owner",
     )
 
@@ -731,6 +771,7 @@ def dashboard_data():
             analytics=ctx["analytics"],
             weekly_analytics=ctx["weekly_analytics"],
             monthly_analytics=ctx["monthly_analytics"],
+            period_returns=ctx.get("period_returns") or deposits.compute_period_returns(None),
             is_owner=current_role() == "owner",
         )
         return jsonify({
@@ -939,7 +980,12 @@ def dashboard_analytics():
 
     Supports a ``?group=`` query param to break the analytics down by trade
     source: "tradingview" (TradingView + Hedge), "trader" (discretionary
-    trades only), or "all" (default — current behaviour, every trade)."""
+    trades only), or "all" (default — current behaviour, every trade).
+
+    Supports a ``?month=YYYY-MM`` query param to restrict the statistics to
+    a single calendar month (e.g. September, October), based on each
+    trade's exit time (falling back to entry time); omit/"all" for the
+    full history (current behaviour)."""
     ctx = _build_request_context()
     group = str(request.args.get("group") or "all").strip().lower()
     if group not in ("all", "tradingview", "trader"):
@@ -947,12 +993,19 @@ def dashboard_analytics():
 
     if group == "all":
         group_trades = ctx["combined_trades"]
-        analytics = ctx["analytics"]
     else:
         sources = AUTOMATED_TRADE_SOURCES if group == "tradingview" else TRADER_TRADE_SOURCES
         group_trades = [t for t in ctx["combined_trades"] if _trade_type_label(t) in sources]
-        analytics = _safe_analytics(compute_analytics(group_trades))
 
+    available_months = _available_analytics_months(ctx["combined_trades"])
+    month = str(request.args.get("month") or "all").strip().lower()
+    if month != "all" and month not in available_months:
+        month = "all"
+
+    if month != "all":
+        group_trades = _trades_in_month(group_trades, month)
+
+    analytics = ctx["analytics"] if (group == "all" and month == "all") else _safe_analytics(compute_analytics(group_trades))
     detailed = compute_detailed_analytics(group_trades)
 
     return render_template(
@@ -963,6 +1016,8 @@ def dashboard_analytics():
         analytics=analytics,
         detailed=detailed,
         group=group,
+        month=month,
+        available_months=available_months,
         is_owner=current_role() == "owner",
     )
 

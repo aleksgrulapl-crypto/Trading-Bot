@@ -1430,6 +1430,47 @@ class TestReconcileDoesNotPhantomClose:
         assert stx.get("status") == "OPEN", \
             "A trade whose dealId is absent from one snapshot must not be marked CLOSED"
         assert not result["closed"]
+
+    def test_scaled_in_pending_rows_bind_to_correct_dealids_not_mislabelled_trader(self, tmp_path):
+        """Regression for the AMAT duplicate-"Trader" bug: two scale-in
+        signals for the same ticker/side that both logged a dealId-less
+        pending row (order.py's dealReference-less path) must each bind to
+        their own live broker dealId via reconcile, not collapse into one
+        match while the other falls through to a brand-new "Trader" row."""
+        from trade_log import upsert_open_trade, reconcile_with_positions, load_raw_log
+        path = str(tmp_path / "log.json")
+        with open(path, "w") as f:
+            json.dump([], f)
+
+        upsert_open_trade(
+            {"dealId": None, "dealReference": "REF-45M", "ticker": "AMAT", "side": "short",
+             "size": 0.66, "entry_price": 504.84, "timeframe": "45M",
+             "trade_source": "tradingview", "origin": "tradingview"},
+            path=path,
+        )
+        upsert_open_trade(
+            {"dealId": None, "dealReference": "REF-60M", "ticker": "AMAT", "side": "short",
+             "size": 0.66, "entry_price": 504.84, "timeframe": "60M",
+             "trade_source": "tradingview", "origin": "tradingview"},
+            path=path,
+        )
+
+        live_positions = [
+            {"dealId": "AMAT-DEAL-1", "epic": "AMAT", "side": "SELL", "size": 0.66, "price": 504.84},
+            {"dealId": "AMAT-DEAL-2", "epic": "AMAT", "side": "SELL", "size": 0.66, "price": 504.84},
+        ]
+        result = reconcile_with_positions(live_positions, path=path)
+
+        assert not result["added"], \
+            "Both live positions should bind to the existing pending rows, not create new 'Trader' rows"
+        trades = load_raw_log(path)
+        amat_trades = [t for t in trades if t.get("ticker") == "AMAT"]
+        assert len(amat_trades) == 2
+        deal_ids = {t.get("dealId") for t in amat_trades}
+        assert deal_ids == {"AMAT-DEAL-1", "AMAT-DEAL-2"}
+        for t in amat_trades:
+            assert t.get("trade_source") == "tradingview", \
+                f"Scaled-in trade should keep its tradingview origin, got {t.get('trade_source')!r}"
     """Webhook orders must create a pending row and then enrich with dealId."""
 
     class _Response:
@@ -1495,6 +1536,39 @@ class TestReconcileDoesNotPhantomClose:
         assert appended[0]["dealReference"] == "REF-1"
         assert appended[1]["dealId"] == "DEAL-1"
         assert appended[1]["dealReference"] == "REF-1"
+
+    def test_logs_pending_order_even_when_no_deal_reference_is_returned(self, monkeypatch):
+        """Regression: a broker order response with no dealReference at all
+        must still leave a trade_source="tradingview" pending row behind, so
+        reconcile_with_positions() can bind the real dealId to it later
+        instead of creating a brand-new "Trader"-labelled duplicate row."""
+        import order
+
+        appended = []
+        monkeypatch.setattr(order.auth, "ensure_token", lambda: True)
+        monkeypatch.setattr(order.time, "sleep", lambda _: None)
+        monkeypatch.setattr(order, "append_open_trade", lambda payload: appended.append(payload))
+        monkeypatch.setattr(order.session, "update_last_trade", lambda: None)
+        monkeypatch.setattr(
+            order.session,
+            "request",
+            lambda method, url, **kwargs: (
+                self._Response(200, {"snapshot": {"bid": 397.4, "offer": 397.5}})
+                if method == "GET" and "/markets/" in url
+                else self._Response(200, {})  # POST order response has no dealReference
+            ),
+        )
+
+        result = order.place_order("UNH", "buy", 2.05, timeframe="15M")
+
+        assert result["dealReference"] is None
+        assert result["dealId"] is None
+        assert len(appended) == 1
+        assert appended[0]["dealId"] is None
+        assert appended[0]["dealReference"] is None
+        assert appended[0]["ticker"] == "UNH"
+        assert appended[0]["trade_source"] == "tradingview"
+        assert appended[0]["timeframe"] == "15M"
 
 
 class TestSyncClosedTradesDisappearanceGuard:
@@ -3534,6 +3608,87 @@ class TestComputeAnalytics:
         assert result["total_pl"] == pytest.approx(round(100.0 * config.FX_USD_GBP, 2))
 
 
+class TestAnalyticsMonthFilter:
+    """Tests for dashboard's per-month Analytics filter helpers and the
+    /dashboard/analytics?month=YYYY-MM route."""
+
+    def test_available_analytics_months_lists_distinct_months_newest_first(self):
+        from dashboard import _available_analytics_months
+        trades = [
+            {"time_exited": "2026-09-15T10:00:00"},
+            {"time_exited": "2026-10-02T10:00:00"},
+            {"time_exited": "2026-09-20T10:00:00"},
+            {"time_entered": "2026-08-01T10:00:00"},  # no time_exited: falls back
+        ]
+        assert _available_analytics_months(trades) == ["2026-10", "2026-09", "2026-08"]
+
+    def test_trades_in_month_filters_by_exit_time(self):
+        from dashboard import _trades_in_month
+        trades = [
+            {"time_exited": "2026-09-15T10:00:00", "pnl": 1},
+            {"time_exited": "2026-10-02T10:00:00", "pnl": 2},
+        ]
+        result = _trades_in_month(trades, "2026-09")
+        assert len(result) == 1
+        assert result[0]["pnl"] == 1
+
+    def test_trades_in_month_falls_back_to_entry_time_when_no_exit(self):
+        from dashboard import _trades_in_month
+        trades = [{"time_entered": "2026-09-15T10:00:00", "pnl": 1}]
+        assert len(_trades_in_month(trades, "2026-09")) == 1
+        assert len(_trades_in_month(trades, "2026-10")) == 0
+
+    def test_analytics_route_filters_to_selected_month(self, monkeypatch):
+        from flask import Flask
+        import dashboard as dashboard_module
+        from dashboard import dashboard
+
+        trades = [
+            {"status": "CLOSED", "pnl": 100.0, "pnl_gbp": 100.0, "time_exited": "2026-09-15T10:00:00"},
+            {"status": "CLOSED", "pnl": -40.0, "pnl_gbp": -40.0, "time_exited": "2026-10-02T10:00:00"},
+        ]
+        monkeypatch.setattr(dashboard_module, "_build_request_context", lambda: {
+            "account": {"balance": 1000, "pnl": 0},
+            "combined_trades": trades,
+            "analytics": dashboard_module._safe_analytics(dashboard_module.compute_analytics(trades)),
+        })
+
+        app = Flask(__name__, template_folder="templates")
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+
+        response = client.get("/dashboard/analytics?month=2026-09")
+        body = response.get_data(as_text=True)
+
+        assert response.status_code == 200
+        assert "2026-09" in body
+
+    def test_analytics_route_ignores_unknown_month(self, monkeypatch):
+        """An unrecognised ?month= value falls back to all-time rather than
+        erroring or silently returning zero trades."""
+        from flask import Flask
+        import dashboard as dashboard_module
+        from dashboard import dashboard
+
+        trades = [{"status": "CLOSED", "pnl": 100.0, "pnl_gbp": 100.0, "time_exited": "2026-09-15T10:00:00"}]
+        analytics = dashboard_module._safe_analytics(dashboard_module.compute_analytics(trades))
+        monkeypatch.setattr(dashboard_module, "_build_request_context", lambda: {
+            "account": {"balance": 1000, "pnl": 0},
+            "combined_trades": trades,
+            "analytics": analytics,
+        })
+
+        app = Flask(__name__, template_folder="templates")
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+
+        response = client.get("/dashboard/analytics?month=2099-01")
+
+        assert response.status_code == 200
+
+
 class TestProtectedRoutes:
     def test_debug_route_requires_dashboard_auth(self):
         import webhook
@@ -3771,6 +3926,42 @@ class TestDashboardRoles:
         assert response.status_code == 200
         assert "Viewer" in body
         assert "button onclick=\"closePosition" not in body
+
+    def test_dashboard_home_renders_period_returns_card(self, monkeypatch):
+        """The Return card should show the Daily/Weekly/Monthly % figures
+        computed from calendar-aligned balance history, when available."""
+        from flask import Flask
+        import dashboard as dashboard_module
+        from dashboard import dashboard
+
+        monkeypatch.setattr(dashboard_module, "_build_request_context", lambda: {
+            "account": {"pnl": 0},
+            "positions": [],
+            "combined_trades": [],
+            "analytics": {
+                "win_rate": 0, "expectancy": 0, "trade_count": 0,
+                "total_pl": 0, "max_drawdown": 0,
+            },
+            "weekly_analytics": dashboard_module._safe_analytics({}),
+            "monthly_analytics": dashboard_module._safe_analytics({}),
+            "period_returns": {
+                "daily": 1.5, "weekly": -2.25, "monthly": 10.0,
+                "daily_opening": 1000.0, "weekly_opening": 990.0, "monthly_opening": 900.0,
+            },
+        })
+
+        app = Flask(__name__, template_folder="templates")
+        app.register_blueprint(dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+
+        response = client.get("/dashboard")
+        body = response.get_data(as_text=True)
+
+        assert response.status_code == 200
+        assert "1.5%" in body
+        assert "-2.25%" in body
+        assert "10.0%" in body
 
     def test_investor_login_sets_investor_role_cookie(self, monkeypatch):
         from flask import Flask
@@ -4174,6 +4365,84 @@ class TestInvestorTiers:
         ok, status = deposits.set_investor_tier("   ", "full", path=path)
         assert ok is False
         assert status == "invalid_investor"
+
+
+class TestBalanceHistoryPeriodReturns:
+    """Tests for deposits.py's calendar-aligned balance-history snapshots
+    and the Daily/Weekly/Monthly Return % they feed, used by the Dashboard's
+    Return card (distinct from the rolling-window weekly/monthly analytics)."""
+
+    def test_record_daily_balance_snapshot_is_idempotent_per_day(self, tmp_path):
+        import deposits
+        path = str(tmp_path / "history.json")
+        deposits.record_daily_balance_snapshot(1000.0, path=path)
+        deposits.record_daily_balance_snapshot(2000.0, path=path)  # same day: no-op
+        history = deposits._load_balance_history(path)
+        assert len(history) == 1
+        assert history[0]["balance"] == 1000.0
+
+    def test_record_daily_balance_snapshot_ignores_none_balance(self, tmp_path):
+        import deposits
+        path = str(tmp_path / "history.json")
+        deposits.record_daily_balance_snapshot(None, path=path)
+        assert deposits._load_balance_history(path) == []
+
+    def test_compute_period_returns_with_no_history_returns_all_none(self, tmp_path):
+        import deposits
+        path = str(tmp_path / "history.json")
+        result = deposits.compute_period_returns(1000.0, path=path)
+        assert result == {
+            "daily": None, "weekly": None, "monthly": None,
+            "daily_opening": None, "weekly_opening": None, "monthly_opening": None,
+        }
+
+    def test_compute_period_returns_computes_each_calendar_period(self, tmp_path):
+        import deposits
+        from datetime import date, timedelta
+        path = str(tmp_path / "history.json")
+        today = date.today()
+        history = [
+            {"date": (today - timedelta(days=40)).isoformat(), "balance": 1000.0},
+            {"date": today.replace(day=1).isoformat(), "balance": 1100.0},
+            {"date": (today - timedelta(days=today.weekday())).isoformat(), "balance": 1150.0},
+            {"date": today.isoformat(), "balance": 1180.0},
+        ]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(history, f)
+
+        result = deposits.compute_period_returns(1200.0, path=path)
+
+        assert result["daily_opening"] == 1180.0
+        assert result["weekly_opening"] == 1150.0
+        assert result["monthly_opening"] == 1100.0
+        assert result["daily"] == pytest.approx(round((1200.0 - 1180.0) / 1180.0 * 100, 2))
+        assert result["weekly"] == pytest.approx(round((1200.0 - 1150.0) / 1150.0 * 100, 2))
+        assert result["monthly"] == pytest.approx(round((1200.0 - 1100.0) / 1100.0 * 100, 2))
+
+    def test_compute_period_returns_falls_back_to_earliest_snapshot_in_period(self, tmp_path):
+        """If tracking only started mid-month (no snapshot on the 1st), the
+        earliest snapshot within the month is used as the opening balance
+        rather than showing no Return at all."""
+        import deposits
+        from datetime import date
+        path = str(tmp_path / "history.json")
+        today = date.today()
+        mid_month = today.replace(day=min(today.day, 28))
+        history = [{"date": mid_month.isoformat(), "balance": 900.0}]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(history, f)
+
+        result = deposits.compute_period_returns(990.0, path=path)
+
+        assert result["monthly_opening"] == 900.0
+        assert result["monthly"] == 10.0
+
+    def test_compute_period_returns_handles_none_balance(self, tmp_path):
+        import deposits
+        path = str(tmp_path / "history.json")
+        deposits.record_daily_balance_snapshot(1000.0, path=path)
+        result = deposits.compute_period_returns(None, path=path)
+        assert result["daily"] is None
 
 
 class TestInvestorBreakdownOwnerFeeOverride:

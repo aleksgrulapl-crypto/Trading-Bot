@@ -278,6 +278,11 @@ PLEDGE_MAX_AMOUNT = float(os.getenv("PLEDGE_MAX_AMOUNT", 500.0))
 # pledge's amount matches the detected change, that pledge is auto-confirmed
 # and attributed to its investor instead of logged as "Unassigned".
 BALANCE_STATE_PATH = os.getenv("BALANCE_STATE_PATH", "/data/balance_state.json")
+# Calendar-aligned balance snapshots (one entry per UK calendar day, the
+# first balance observed that day) used as the opening-balance basis for
+# the Dashboard's Daily/Weekly/Monthly Return metrics - these are
+# period-locked (e.g. Daily = 00:00-23:59 UK), not rolling windows.
+BALANCE_HISTORY_PATH = os.getenv("BALANCE_HISTORY_PATH", "/data/balance_history.json")
 # Base unexplained balance delta (GBP, either direction) below which it's
 # ignored entirely as FX/rounding noise. The real deposit/withdrawal floors
 # below are higher still, to keep the Deposits ledger free of clutter.
