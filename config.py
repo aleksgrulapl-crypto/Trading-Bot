@@ -233,6 +233,27 @@ DAILY_REPORT_ENABLED = os.getenv("DAILY_REPORT_ENABLED", "True").lower() in ("1"
 DAILY_REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", 22))
 DAILY_REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", 0))
 
+# Email notifications: sent directly to NOTIFY_EMAIL_TO via SMTP when a
+# position is opened and/or closed. NOTIFY_EMAIL_ENABLED is the master
+# switch; NOTIFY_EMAIL_ON_OPEN / NOTIFY_EMAIL_ON_CLOSE let you pick which
+# event(s) trigger an email independently (e.g. close-only, with PnL and
+# account balance, is the default so you're not spammed on every open).
+NOTIFY_EMAIL_ENABLED = os.getenv("NOTIFY_EMAIL_ENABLED", "False").lower() in ("1", "true", "yes")
+NOTIFY_EMAIL_ON_OPEN = os.getenv("NOTIFY_EMAIL_ON_OPEN", "False").lower() in ("1", "true", "yes")
+NOTIFY_EMAIL_ON_CLOSE = os.getenv("NOTIFY_EMAIL_ON_CLOSE", "True").lower() in ("1", "true", "yes")
+# Comma-separated list of recipient addresses.
+NOTIFY_EMAIL_TO = os.getenv("NOTIFY_EMAIL_TO", "")
+# "From" address shown on the email; defaults to the SMTP login username.
+NOTIFY_EMAIL_FROM = os.getenv("NOTIFY_EMAIL_FROM", "")
+# SMTP server used to actually send the email (e.g. smtp.gmail.com / 587 with
+# STARTTLS, or your provider's equivalent). Use an app password, not your
+# normal account password, where supported.
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "True").lower() in ("1", "true", "yes")
+
 # File paths and persistence
 TRADE_LOG_PATH = os.getenv("TRADE_LOG_PATH", os.getenv("TRADE_LOG_FILE", "/data/trade_log.json"))
 DAILY_REPORT_FILE = os.getenv("DAILY_REPORT_FILE", "/tmp/daily_report.json")

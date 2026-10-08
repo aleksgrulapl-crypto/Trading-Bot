@@ -55,6 +55,27 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `TRAIL_SL_PERC` | Portion of unrealized profit locked by trailing SL as soon as it activates (default `0.65` = `65%`) | ⬜ |
 | `TRAIL_TIGHTEN_STEP_PERC` | How much the locked-in portion ramps up per activation-multiple of profit beyond 1x, so the SL follows more closely the deeper a trade goes in-profit (default `0.15` = `15%` per step) | ⬜ |
 | `TRAIL_MAX_PERC` | Ceiling on the locked-in portion as profit keeps extending (default `0.95` = `95%`) | ⬜ |
+| `NOTIFY_EMAIL_ENABLED` | Master switch for email notifications (default `False`) | ⬜ |
+| `NOTIFY_EMAIL_ON_OPEN` | Send an email when a position opens (default `False`) | ⬜ |
+| `NOTIFY_EMAIL_ON_CLOSE` | Send an email when a position closes, with PnL and account balance (default `True`) | ⬜ |
+| `NOTIFY_EMAIL_TO` | Comma-separated recipient email address(es) | ⬜ |
+| `NOTIFY_EMAIL_FROM` | "From" address on the email (default: `SMTP_USERNAME`) | ⬜ |
+| `SMTP_HOST` | SMTP server hostname used to send notification emails | ⬜ |
+| `SMTP_PORT` | SMTP server port (default `587`) | ⬜ |
+| `SMTP_USERNAME` | SMTP login username | ⬜ |
+| `SMTP_PASSWORD` | SMTP login password (use an app password where supported) | ⬜ |
+| `SMTP_USE_TLS` | Use STARTTLS on `SMTP_PORT` (default `True`); set to `False` for implicit SSL | ⬜ |
+
+### Email notifications
+
+The bot can email you directly when a position is **opened** and/or **closed**
+(the close email includes the trade's PnL and the current account balance).
+Each event is toggled independently via `NOTIFY_EMAIL_ON_OPEN` /
+`NOTIFY_EMAIL_ON_CLOSE`, so you can enable just one (e.g. close-only, which is
+the default) or both. Set `NOTIFY_EMAIL_ENABLED=True`, fill in the `SMTP_*`
+settings for your mail provider (e.g. Gmail: `smtp.gmail.com`, port `587`,
+an [app password](https://support.google.com/accounts/answer/185833)), and
+set `NOTIFY_EMAIL_TO` to the address(es) that should receive the emails.
 
 ### Run locally
 
