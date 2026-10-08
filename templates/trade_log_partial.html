@@ -55,7 +55,18 @@
               {{ t.entry_price is not none and t.entry_price or t.get('entryPrice') or '—' }}
             </td>
             <td>
+              {% if is_owner and t._log_index is not none and (t.status == 'CLOSED' or t.time_exited) %}
+              <input
+                type="number"
+                step="any"
+                class="exit-price-input"
+                value="{{ t.exit_price if t.exit_price is not none else (t.get('exitPrice') or '') }}"
+                placeholder="—"
+                onchange="updateExitPrice({{ t._log_index }}, this.value)"
+              />
+              {% else %}
               {{ t.exit_price is not none and t.exit_price or t.get('exitPrice') or '—' }}
+              {% endif %}
             </td>
             {% set display_pnl = t.pnl_gbp %}
             {% if display_pnl is none and t.pnl is not none %}

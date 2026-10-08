@@ -449,13 +449,27 @@ def sync_closed_trades():
         if exit_price is None:
             bid, offer = get_snapshot(epic)
             if bid is None or offer is None:
-                logger.debug("sync_closed_trades: snapshot unavailable for %s, skipping", epic)
-                continue
-
-            if direction == "long":
-                exit_price = float(bid)
+                # Neither Capital.com's transaction history nor a live market
+                # snapshot produced a close price – this happens most often
+                # when a sharp spike triggers the broker's own SL/TP between
+                # polling ticks and the history row/snapshot lag behind it.
+                # Previously this `continue`d, leaving the position stuck
+                # OPEN in our log forever even though it's confirmed closed
+                # at the broker (we only reach this point once disappearance
+                # has already been confirmed above). That silently hid
+                # finished trades from the dashboard. Instead, finalise the
+                # close now with exit_price/pnl left as None so the trade
+                # correctly shows as CLOSED and can be corrected via the
+                # dashboard's "edit exit price" action.
+                logger.warning(
+                    "sync_closed_trades: snapshot unavailable for %s (dealId=%s); closing with unknown exit price for manual correction",
+                    epic, deal_id,
+                )
             else:
-                exit_price = float(offer)
+                if direction == "long":
+                    exit_price = float(bid)
+                else:
+                    exit_price = float(offer)
 
         # Step 3: compute pnl from exit_price if history didn't provide it
         if pnl is None and exit_price is not None:

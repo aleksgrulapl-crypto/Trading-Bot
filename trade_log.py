@@ -513,6 +513,56 @@ def update_trade_type_entry(
         return True, dict(trade), "updated"
 
 
+def update_trade_exit_price_entry(
+    index: int, new_exit_price: Any, path: str = LOG_PATH
+) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """Manually set/correct a completed trade's exit price and recompute PnL.
+
+    Covers the case where a trade closed (e.g. a sharp spike triggered the
+    broker's own SL/TP between polling ticks) but the automated sync
+    couldn't recover a fill price from either Capital.com's transaction
+    history or a live market snapshot, leaving ``exit_price``/``pnl`` null.
+    Only completed (CLOSED, or with a recorded time_exited) rows may be
+    edited. PnL/PnL(GBP) are recalculated from the new exit price exactly as
+    the automated close path would, so dashboard figures stay consistent.
+    """
+    try:
+        idx = int(index)
+    except (TypeError, ValueError):
+        return False, None, "invalid_index"
+
+    try:
+        exit_price = float(new_exit_price)
+    except (TypeError, ValueError):
+        return False, None, "invalid_price"
+    if exit_price <= 0:
+        return False, None, "invalid_price"
+
+    with _trade_log_lock:
+        trades = load_raw_log(path)
+        if idx < 0 or idx >= len(trades):
+            return False, None, "not_found"
+
+        trade = trades[idx] if isinstance(trades[idx], dict) else None
+        if trade is None:
+            return False, None, "not_found"
+
+        status = str(trade.get("status") or "").strip().upper()
+        is_completed = status == "CLOSED" or trade.get("time_exited") not in (None, "")
+        if not is_completed:
+            return False, None, "not_completed"
+
+        trade["exit_price"] = exit_price
+        # Recompute pnl/pnl_gbp from the corrected exit price, discarding any
+        # previously stored broker-reported pnl (it was tied to the old/
+        # missing exit price and would now be inconsistent with it).
+        _apply_pnl(trade)
+
+        if not save_raw_log(trades, path):
+            return False, None, "save_failed"
+        return True, dict(trade), "updated"
+
+
 # ---------------------------------------------------------------------------
 # Internal calculation helpers
 # ---------------------------------------------------------------------------
