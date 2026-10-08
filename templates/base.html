@@ -448,6 +448,29 @@ function closePosition(dealId) {
         .catch(err => console.error("Close error:", err));
 }
 
+function toggleEmailNotifications() {
+    const errorBanner = document.getElementById('error-banner');
+    const btn = document.getElementById('email-notify-btn');
+    const currentlyOn = btn && btn.textContent.includes('ON');
+
+    fetch('/dashboard/notifications/email/toggle', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !currentlyOn })
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data && data.status === "success") {
+                errorBanner.innerText = `Email alerts turned ${data.enabled ? "ON" : "OFF"}${data.recipient ? " (" + data.recipient + ")" : ""}.`;
+            } else {
+                errorBanner.innerText = (data && data.message) || "Could not update email alerts.";
+            }
+            errorBanner.style.display = "block";
+            refreshDashboard();
+        })
+        .catch(err => console.error("Toggle email notifications error:", err));
+}
+
 function deleteTrade(tradeIndex) {
     const errorBanner = document.getElementById('error-banner');
     if (!window.confirm('Delete this trade from the log?')) {

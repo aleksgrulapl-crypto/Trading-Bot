@@ -50,6 +50,7 @@ from trade_log import (
     _normalize_side,
 )
 from close_position import close_position as close_position_module
+import notifications
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -672,9 +673,20 @@ def process_webhook_payload(payload: Dict[str, Any], cid: str = "") -> Dict[str,
         "trade_source": source,
         "origin": source,
     }
+    # Snapshot whether a trade already exists for this deal before upserting,
+    # so we only notify "position opened" for a genuinely new trade rather
+    # than every idempotent/duplicate webhook delivery that merely updates
+    # an already-logged open position.
+    pre_existing, _ = _find_existing_entry(load_raw_log(), dealId, dealReference, ticker, entry_price)
+
     upserted = upsert_open_trade(upsert_payload)
     if upserted:
         logger.info("%sUpserted open trade dealId=%s ticker=%s source=%s", log_prefix, dealId, ticker, source)
+        if not pre_existing:
+            try:
+                notifications.notify_position_opened(upserted)
+            except Exception:
+                logger.exception("%sfailed to send position-opened notification", log_prefix)
         return {"action": "upserted", "trade": upserted}
 
     logger.warning("%sUpsert rejected – likely missing/invalid entry_price or size. dealId=%s ticker=%s entry_price=%s size=%s",

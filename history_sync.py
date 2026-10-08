@@ -17,6 +17,7 @@ from trade_log import (
 )
 from utils import uk_timestamp
 from datetime import datetime, timezone
+import notifications
 
 logger = logging.getLogger("sync_closed_trades")
 if not logger.handlers:
@@ -264,6 +265,22 @@ def get_snapshot(epic: str) -> Tuple[Optional[float], Optional[float]]:
     return bid, offer
 
 
+def _notify_position_closed(trade: dict) -> None:
+    """Best-effort email notification for a just-closed trade, including the
+    current account balance. Any failure here (SMTP, broker balance lookup)
+    is logged and swallowed so it never breaks close-sync processing."""
+    try:
+        balance = None
+        try:
+            account = session.enrich_account(session.get_account())
+            balance = account.get("balance")
+        except Exception:
+            logger.exception("_notify_position_closed: failed to fetch account balance")
+        notifications.notify_position_closed(trade, balance=balance)
+    except Exception:
+        logger.exception("_notify_position_closed: failed to send notification")
+
+
 def sync_closed_trades():
     """
     Detect closed trades by:
@@ -498,9 +515,11 @@ def sync_closed_trades():
                 logger.warning("sync_closed_trades: could not close trade for dealId=%s (no matching open trade found)", deal_id)
             else:
                 logger.debug("sync_closed_trades: fallback close succeeded for dealId=%s", deal_id)
+                _notify_position_closed(fallback)
                 closed_in_run.add(cache_key)
         else:
             logger.debug("sync_closed_trades: closed trade recorded for dealId=%s", deal_id)
+            _notify_position_closed(updated)
             closed_in_run.add(cache_key)
 
         # mark as processed to avoid duplicate handling in same run

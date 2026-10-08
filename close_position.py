@@ -20,6 +20,7 @@ from trade_log import (
 )
 from utils import uk_timestamp
 from config import API_POSITIONS, API_HISTORY_TRANSACTIONS, API_MARKET
+import notifications
 
 # Timeout (seconds) for every outbound broker API call
 BROKER_API_TIMEOUT = 30
@@ -92,6 +93,24 @@ def _find_open_trade(deal_id: str):
         if entry.get("status") == "OPEN" and entry.get("dealId") and str(entry.get("dealId")) == str(deal_id):
             return entry
     return None
+
+
+def _notify_close(trade: Optional[dict]) -> None:
+    """Best-effort email notification for a just-closed trade, including the
+    current account balance. Failures are logged and swallowed so they never
+    affect the (already successful) broker close."""
+    if not trade:
+        return
+    try:
+        balance = None
+        try:
+            account = session.enrich_account(session.get_account())
+            balance = account.get("balance")
+        except Exception:
+            logger.exception("_notify_close: failed to fetch account balance")
+        notifications.notify_position_closed(trade, balance=balance)
+    except Exception:
+        logger.exception("_notify_close: failed to send notification")
 
 
 def _fetch_close_details_from_history(deal_id: str, time_entered=None) -> Tuple[Optional[float], Optional[float]]:
@@ -328,7 +347,8 @@ def close_position(position_id: str) -> dict:
             updated = close_trade_by_dealId(position_id, exit_price=exit_price, time_exited=uk_timestamp(), note="Closed via API")
             if updated:
                 if updated.get("pnl") is None and pnl is not None and exit_price is not None:
-                    close_trade_by_dealId(position_id, exit_price=exit_price, time_exited=uk_timestamp(), note="Updated pnl")
+                    updated = close_trade_by_dealId(position_id, exit_price=exit_price, time_exited=uk_timestamp(), note="Updated pnl")
+                _notify_close(updated)
             else:
                 # No matching dealId in log – try fallback close by ticker + entry_price
                 if ticker and entry_price is not None:
@@ -344,15 +364,18 @@ def close_position(position_id: str) -> dict:
                             "trade log may be out of sync",
                             position_id,
                         )
+                    else:
+                        _notify_close(fallback)
         else:
             # No deal ID – try fallback close
             if ticker and entry_price is not None:
-                close_trade_fallback(
+                fallback = close_trade_fallback(
                     ticker, entry_price,
                     exit_price=exit_price,
                     time_exited=uk_timestamp(),
                     note="Closed via API (no dealId)",
                 )
+                _notify_close(fallback)
 
     except Exception as e:
         # Log the error but do NOT convert a failed log update into a "success"
