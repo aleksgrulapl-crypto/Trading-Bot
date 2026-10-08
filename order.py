@@ -120,30 +120,41 @@ def place_order(
 
     # Map dealReference -> dealId via confirms endpoint
     real_deal_id = None
-    if deal_ref:
-        source = str(trade_source or "tradingview").strip().lower()
-        ts = uk_timestamp()
-        tf = timeframe or "N/A"
-        pending_payload = {
-            "dealId": None,
-            "dealReference": deal_ref,
-            "ticker": epic,
-            "epic": epic,
-            "side": "Long" if dir_norm == "BUY" else "Short",
-            "size": float(size),
-            "entry_price": float(entry_price),
-            "time_entered": ts,
-            "timeframe": tf,
-            "trade_source": source,
-            "origin": source,
-            "notes": f"sl={sl}; tp={tp}; timeframe={timeframe}; dealReference={deal_ref}",
-        }
-        try:
-            append_open_trade(pending_payload)
-            logger.debug("Logged pending open trade for %s via %s (dealReference=%s)", epic, source, deal_ref)
-        except Exception:
-            logger.exception("Failed to log pending open trade for dealReference=%s", deal_ref)
+    source = str(trade_source or "tradingview").strip().lower()
+    ts = uk_timestamp()
+    tf = timeframe or "N/A"
+    pending_payload = {
+        "dealId": None,
+        "dealReference": deal_ref,
+        "ticker": epic,
+        "epic": epic,
+        "side": "Long" if dir_norm == "BUY" else "Short",
+        "size": float(size),
+        "entry_price": float(entry_price),
+        "time_entered": ts,
+        "timeframe": tf,
+        "trade_source": source,
+        "origin": source,
+        "notes": f"sl={sl}; tp={tp}; timeframe={timeframe}; dealReference={deal_ref}",
+    }
+    # Always record a pending row up-front, even when the broker's order
+    # response carries no dealReference at all. Without this, a missing
+    # dealReference meant NO application-level trace of this order's true
+    # TradingView origin/timeframe ever existed, so reconcile_with_positions()
+    # - the only remaining path that could ever log the live broker position -
+    # had nothing to match against and always created a brand-new row via
+    # _detect_trade_origin()'s dealId-only fallback, which unconditionally
+    # labels such rows "trader". With a dealId-less pending row already
+    # present for this ticker/side, reconcile's _find_pending_trade_by_ticker()
+    # fallback binds the broker's real dealId to it instead, preserving the
+    # correct tradingview/hedge origin and timeframe.
+    try:
+        append_open_trade(pending_payload)
+        logger.debug("Logged pending open trade for %s via %s (dealReference=%s)", epic, source, deal_ref)
+    except Exception:
+        logger.exception("Failed to log pending open trade for dealReference=%s", deal_ref)
 
+    if deal_ref:
         confirms_url = f"{API_BASE}/api/v1/confirms/{deal_ref}"
         backoff = 0.2
         for attempt in range(10):
@@ -197,9 +208,17 @@ def place_order(
             except Exception:
                 logger.exception("Failed to log broker-confirmed trade")
         else:
-            logger.warning("Could not confirm dealId for dealReference=%s; deferring trade-log entry to reconciliation", deal_ref)
+            logger.warning(
+                "Could not confirm dealId for dealReference=%s; pending trade-log row already recorded, "
+                "relying on reconciliation to bind the broker dealId",
+                deal_ref,
+            )
     else:
-        logger.warning("No dealReference returned by order response; deferring trade-log entry to reconciliation")
+        logger.warning(
+            "No dealReference returned by order response for %s; relying on reconciliation to bind the "
+            "broker dealId to the pending trade-log row already created above",
+            epic,
+        )
 
     try:
         session.update_last_trade()

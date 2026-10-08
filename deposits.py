@@ -917,3 +917,135 @@ def detect_and_record_balance_change(
         _save_balance_state(current_balance, now_iso)
         logger.info("deposits: balance auto-detection result: %s", result)
         return result
+
+
+# -----------------------------------------------------------------------
+# Calendar-aligned balance history for the Dashboard's Daily/Weekly/Monthly
+# Return metrics.
+#
+# These are deliberately *not* rolling windows (e.g. "last 7 days"): Daily
+# covers 00:00-23:59 UK time for the current calendar day, Weekly runs from
+# this week's Monday, and Monthly runs from the 1st of the current month -
+# each measured against the account Balance recorded at that period's
+# start. A lightweight one-row-per-UK-calendar-day snapshot (the first
+# balance observed that day) is the practical stand-in for "the balance at
+# exactly 00:00", since nothing else in the app polls the broker on a timer
+# independent of dashboard/webhook activity.
+# -----------------------------------------------------------------------
+BALANCE_HISTORY_PATH = os.environ.get("BALANCE_HISTORY_PATH") or (getattr(config, "BALANCE_HISTORY_PATH", None) if config else None) or "/data/balance_history.json"
+_balance_history_lock = threading.Lock()
+# Keep the history file small indefinitely; a year of daily snapshots is
+# more than enough for any Monthly Return lookup.
+BALANCE_HISTORY_MAX_DAYS = 400
+
+
+def _load_balance_history(path: str = BALANCE_HISTORY_PATH) -> List[Dict[str, Any]]:
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                return [r for r in data if isinstance(r, dict) and r.get("date")]
+    except Exception:
+        logger.exception("deposits: failed to load balance history")
+    return []
+
+
+def _save_balance_history(history: List[Dict[str, Any]], path: str = BALANCE_HISTORY_PATH) -> bool:
+    ok = _atomic_write(path, history)
+    if not ok:
+        logger.error("deposits: atomic write of balance history failed")
+    return ok
+
+
+def record_daily_balance_snapshot(current_balance: Optional[float], path: str = BALANCE_HISTORY_PATH) -> None:
+    """Record the first observed broker Balance of today (UK calendar date).
+
+    Idempotent/cheap: a no-op once today's snapshot already exists. Safe to
+    call on every dashboard refresh.
+    """
+    if current_balance is None:
+        return
+    try:
+        current_balance = float(current_balance)
+    except (TypeError, ValueError):
+        return
+
+    today = _now_naive_uk().date().isoformat()
+    with _balance_history_lock:
+        history = _load_balance_history(path)
+        if any(r.get("date") == today for r in history):
+            return
+        history.append({"date": today, "balance": round(current_balance, 2), "recorded_at": _now_iso()})
+        history.sort(key=lambda r: r.get("date") or "")
+        if len(history) > BALANCE_HISTORY_MAX_DAYS:
+            history = history[-BALANCE_HISTORY_MAX_DAYS:]
+        _save_balance_history(history, path)
+
+
+def _period_boundary_date(now: datetime, period: str):
+    """Return the calendar date (a ``date``) marking the start of *period*
+    ("daily", "weekly", or "monthly") containing *now*."""
+    today = now.date()
+    if period == "weekly":
+        from datetime import timedelta as _timedelta
+        return today - _timedelta(days=today.weekday())  # Monday
+    if period == "monthly":
+        return today.replace(day=1)
+    return today
+
+
+def _opening_balance_on_or_after(history: List[Dict[str, Any]], boundary_date) -> Optional[float]:
+    """Return the earliest recorded balance on/after *boundary_date*.
+
+    Falling back to the earliest snapshot within the period (rather than
+    requiring an exact boundary-date match) means a period that started
+    before the bot began tracking balance history still gets a usable
+    opening balance instead of no Return figure at all.
+    """
+    boundary_s = boundary_date.isoformat()
+    candidates = [r for r in history if (r.get("date") or "") >= boundary_s]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda r: r.get("date") or "")
+    try:
+        return float(candidates[0].get("balance"))
+    except (TypeError, ValueError):
+        return None
+
+
+def compute_period_returns(current_balance: Optional[float], path: str = BALANCE_HISTORY_PATH) -> Dict[str, Optional[float]]:
+    """Return calendar-aligned {daily, weekly, monthly} % returns.
+
+    Each is ``(current_balance - opening_balance) / opening_balance * 100``
+    where *opening_balance* is the Balance recorded at that period's start
+    (today / this Monday / the 1st of this month). A period with no
+    recorded opening balance yet returns ``None`` for both the percentage
+    and the opening balance, rather than a misleading 0%.
+    """
+    result: Dict[str, Optional[float]] = {
+        "daily": None, "weekly": None, "monthly": None,
+        "daily_opening": None, "weekly_opening": None, "monthly_opening": None,
+    }
+    if current_balance is None:
+        return result
+    try:
+        current_balance = float(current_balance)
+    except (TypeError, ValueError):
+        return result
+
+    history = _load_balance_history(path)
+    if not history:
+        return result
+
+    now = _now_naive_uk()
+    for period in ("daily", "weekly", "monthly"):
+        boundary = _period_boundary_date(now, period)
+        opening = _opening_balance_on_or_after(history, boundary)
+        if opening is None:
+            continue
+        result[f"{period}_opening"] = round(opening, 2)
+        if opening > 0:
+            result[period] = round((current_balance - opening) / opening * 100, 2)
+    return result

@@ -3,10 +3,21 @@
 {% block content %}
 <div class="analytics-wrap">
 <div class="analytics-tabs">
-  <a href="/dashboard/analytics?group=all" class="{% if group == 'all' %}active{% endif %}">General (All Trades)</a>
-  <a href="/dashboard/analytics?group=tradingview" class="{% if group == 'tradingview' %}active{% endif %}">TradingView</a>
-  <a href="/dashboard/analytics?group=trader" class="{% if group == 'trader' %}active{% endif %}">Trader</a>
+  <a href="/dashboard/analytics?group=all{% if month != 'all' %}&month={{ month }}{% endif %}" class="{% if group == 'all' %}active{% endif %}">General (All Trades)</a>
+  <a href="/dashboard/analytics?group=tradingview{% if month != 'all' %}&month={{ month }}{% endif %}" class="{% if group == 'tradingview' %}active{% endif %}">TradingView</a>
+  <a href="/dashboard/analytics?group=trader{% if month != 'all' %}&month={{ month }}{% endif %}" class="{% if group == 'trader' %}active{% endif %}">Trader</a>
 </div>
+{% if available_months %}
+<div class="analytics-month-filter" style="margin:10px 0;">
+  <label for="analytics-month-select" class="small">Month:</label>
+  <select id="analytics-month-select" onchange="window.location.href='/dashboard/analytics?group={{ group }}&month=' + this.value;">
+    <option value="all" {% if month == 'all' %}selected{% endif %}>All Time</option>
+    {% for m in available_months %}
+    <option value="{{ m }}" {% if month == m %}selected{% endif %}>{{ m }}</option>
+    {% endfor %}
+  </select>
+</div>
+{% endif %}
 <div class="analytics-top-grid">
   <div class="card">
     <div class="card-header">
