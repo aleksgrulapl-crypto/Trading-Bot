@@ -130,6 +130,21 @@ def _fmt_money(value: Any, prefix: str = "£") -> str:
         return str(value)
 
 
+def _fmt_datetime(value: Any) -> str:
+    """Render an ISO-8601 timestamp (as produced by utils.uk_timestamp) in a
+    human-friendly form, e.g. '09 Oct 2026, 05:15'. Falls back to the raw
+    value if it can't be parsed."""
+    if not value:
+        return "n/a"
+    try:
+        import datetime
+        s = str(value)
+        dt = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return dt.strftime("%d %b %Y, %H:%M")
+    except Exception:
+        return str(value)
+
+
 def _send_email_sync(subject: str, body: str) -> bool:
     """Actually connect to SMTP and send. Runs on the calling thread."""
     to_addrs = [a.strip() for a in (get_recipient() or "").split(",") if a.strip()]
@@ -188,7 +203,7 @@ def notify_position_opened(trade: Dict[str, Any]) -> bool:
         f"Size: {trade.get('size')}\n"
         f"Entry price: {trade.get('entry_price')}\n"
         f"Deal ID: {trade.get('dealId')}\n"
-        f"Opened at: {trade.get('time_entered')}\n"
+        f"Opened at: {_fmt_datetime(trade.get('time_entered'))}\n"
     )
     return _send_email(subject, body)
 
@@ -213,14 +228,28 @@ def notify_position_closed(trade: Dict[str, Any], balance: Optional[float] = Non
         result = "UNKNOWN"
 
     subject = f"Position closed: {ticker} {side} ({result}, {_fmt_money(display_pnl)})"
+
+    # The balance we're handed is fetched from the broker right after the
+    # close request returns, before the broker has necessarily settled this
+    # trade's realised P&L into the account's funds figure. Add this trade's
+    # own PnL on top so the reported balance reflects the win/loss that was
+    # just applied, rather than a pre-settlement snapshot.
+    balance_after = balance
+    if balance is not None and display_pnl is not None:
+        try:
+            balance_after = float(balance) + float(display_pnl)
+        except (TypeError, ValueError):
+            balance_after = balance
+
     body = (
         f"A position was closed.\n\n"
         f"Ticker: {ticker}\n"
         f"Side: {side}\n"
+        f"Size: {trade.get('size')}\n"
         f"Entry price: {trade.get('entry_price')}\n"
         f"Exit price: {trade.get('exit_price')}\n"
         f"PnL: {_fmt_money(display_pnl)}\n"
-        f"Closed at: {trade.get('time_exited')}\n"
-        f"Account balance: {_fmt_money(balance)}\n"
+        f"Closed at: {_fmt_datetime(trade.get('time_exited'))}\n"
+        f"Account balance: {_fmt_money(balance_after)}\n"
     )
     return _send_email(subject, body)
