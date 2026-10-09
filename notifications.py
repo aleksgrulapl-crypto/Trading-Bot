@@ -180,15 +180,13 @@ def _send_email_sync(subject: str, body: str) -> bool:
 
 
 def _send_email(subject: str, body: str) -> bool:
-    if not is_enabled():
-        return False
     threading.Thread(target=_send_email_sync, args=(subject, body), daemon=True).start()
     return True
 
 
 def notify_position_opened(trade: Dict[str, Any]) -> bool:
-    """Email when a position is opened, if NOTIFY_EMAIL_ON_OPEN is enabled."""
-    if not getattr(config, "NOTIFY_EMAIL_ON_OPEN", False):
+    """Email when a position is opened, only when the dashboard toggle is On."""
+    if not is_enabled():
         return False
     if not trade:
         return False
@@ -209,11 +207,9 @@ def notify_position_opened(trade: Dict[str, Any]) -> bool:
 
 
 def notify_position_closed(trade: Dict[str, Any], balance: Optional[float] = None) -> bool:
-    """Email when a position is closed, if NOTIFY_EMAIL_ON_CLOSE is enabled.
+    """Email when a position is closed, regardless of the dashboard toggle.
     Includes the trade's PnL and (when available) the current account balance.
     """
-    if not getattr(config, "NOTIFY_EMAIL_ON_CLOSE", False):
-        return False
     if not trade:
         return False
 

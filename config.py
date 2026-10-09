@@ -234,13 +234,9 @@ DAILY_REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", 22))
 DAILY_REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", 0))
 
 # Email notifications: sent directly to NOTIFY_EMAIL_TO via SMTP when a
-# position is opened and/or closed. NOTIFY_EMAIL_ENABLED is the master
-# switch; NOTIFY_EMAIL_ON_OPEN / NOTIFY_EMAIL_ON_CLOSE let you pick which
-# event(s) trigger an email independently (e.g. close-only, with PnL and
-# account balance, is the default so you're not spammed on every open).
+# position is closed (always) and opened (only when NOTIFY_EMAIL_ENABLED / the
+# dashboard "Receive Notifications" toggle is On).
 NOTIFY_EMAIL_ENABLED = os.getenv("NOTIFY_EMAIL_ENABLED", "False").lower() in ("1", "true", "yes")
-NOTIFY_EMAIL_ON_OPEN = os.getenv("NOTIFY_EMAIL_ON_OPEN", "False").lower() in ("1", "true", "yes")
-NOTIFY_EMAIL_ON_CLOSE = os.getenv("NOTIFY_EMAIL_ON_CLOSE", "True").lower() in ("1", "true", "yes")
 # Comma-separated list of recipient addresses.
 NOTIFY_EMAIL_TO = os.getenv("NOTIFY_EMAIL_TO", "")
 # "From" address shown on the email; defaults to the SMTP login username.
