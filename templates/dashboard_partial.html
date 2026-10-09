@@ -245,10 +245,11 @@
         </div>
       </div>
       <div class="metric">
-        <div class="metric-label">Days Active</div>
+        <div class="metric-label">Successful Weeks</div>
         <div class="metric-value metric-neutral">
-          {{ period_returns.days_active.active_days|default(0) }}/{{ period_returns.days_active.total_days|default(0) }}
+          {{ period_returns.successful_weeks.successful_weeks|default(0) }}/{{ period_returns.successful_weeks.total_weeks|default(0) }}
         </div>
+        <div class="small">Avg weekly return: {{ period_returns.successful_weeks.avg_weekly_return is not none and (period_returns.successful_weeks.avg_weekly_return ~ '%') or '—' }}</div>
       </div>
     </div>
 

@@ -488,7 +488,7 @@ def _default_period_returns():
         "daily": None, "weekly": None, "monthly": None,
         "daily_opening": None, "weekly_opening": None, "monthly_opening": None,
         "goal": {"goal_pct": deposits.RETURN_GOAL_STEP_PCT, "progress_pct": 0.0},
-        "days_active": {"active_days": 0, "total_days": 0},
+        "successful_weeks": {"successful_weeks": 0, "total_weeks": 0, "avg_weekly_return": None},
     }
 
 
@@ -705,7 +705,8 @@ def _build_request_context():
         deposits.record_daily_balance_snapshot((account or {}).get("balance"))
         period_returns = deposits.compute_period_returns((account or {}).get("balance"))
         period_returns["goal"] = deposits.compute_weekly_return_goal_progress(period_returns.get("weekly"))
-        period_returns["days_active"] = deposits.compute_days_active()
+        deposits.record_weekly_close((account or {}).get("balance"))
+        period_returns["successful_weeks"] = deposits.compute_successful_weeks()
     except Exception:
         logger.exception("dashboard: period return computation failed")
         period_returns = _default_period_returns()

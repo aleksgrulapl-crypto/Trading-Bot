@@ -1,4 +1,4 @@
-# AG Capital Trading Bot
+# AGC Trading Bot
 
 A Python/Flask-based automated trading bot for the Capital.com CFD API, with a real-time web dashboard and structured trade log.
 

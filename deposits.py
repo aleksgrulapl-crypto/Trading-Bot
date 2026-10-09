@@ -1076,38 +1076,115 @@ def compute_weekly_return_goal_progress(weekly_return: Optional[float], step_pct
     return {"goal_pct": round(goal, 2), "progress_pct": round(min(progress, 100.0), 1)}
 
 
-def compute_days_active(path: str = BALANCE_HISTORY_PATH) -> Dict[str, int]:
-    """Return {"active_days", "total_days"} counting UK weekdays (Mon-Fri)
-    in the recorded balance history whose day-over-day Balance change was
-    positive, out of all tracked weekdays. Weekends are excluded entirely
-    (the market is closed, so a weekend day would always show ~0% return
-    and isn't a meaningful measure of trading performance).
+# -----------------------------------------------------------------------
+# Successful Weeks: a trading week runs Monday -> Friday 21:00 UK (end of
+# trading hours). A week is "successful" when its return reaches the 5%
+# weekly goal. Week closes are frozen the first time the app observes the
+# account after Friday 21:00 so later deposits/withdrawals can't alter them.
+# -----------------------------------------------------------------------
+WEEKLY_CLOSES_PATH = os.environ.get("WEEKLY_CLOSES_PATH") or (getattr(config, "WEEKLY_CLOSES_PATH", None) if config else None) or "/data/weekly_closes.json"
+_weekly_closes_lock = threading.Lock()
+WEEK_CLOSE_WEEKDAY = 4  # Friday
+WEEK_CLOSE_HOUR = 21
+SUCCESSFUL_WEEK_PCT = RETURN_GOAL_STEP_PCT
+TRADING_YEAR_WEEKS = 52
 
-    Each day's return is computed against the *previous recorded* day's
-    balance (which may itself be a prior weekday if weekend entries exist),
-    so the very first tracked day has nothing to compare against and isn't
-    counted in either total.
+
+def _load_weekly_closes(path: str = WEEKLY_CLOSES_PATH) -> Dict[str, float]:
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {str(k): float(v) for k, v in data.items()}
+    except Exception:
+        logger.exception("deposits: failed to load weekly closes")
+    return {}
+
+
+def _week_close_passed(now: datetime) -> bool:
+    """True once *now* (naive UK) is at/after this week's Friday 21:00."""
+    if now.weekday() > WEEK_CLOSE_WEEKDAY:
+        return True
+    return now.weekday() == WEEK_CLOSE_WEEKDAY and now.hour >= WEEK_CLOSE_HOUR
+
+
+def record_weekly_close(current_balance: Optional[float], path: str = WEEKLY_CLOSES_PATH, now: Optional[datetime] = None) -> None:
+    """Freeze this week's closing balance once Friday 21:00 UK has passed.
+    Idempotent: a no-op if already recorded or the close hasn't happened."""
+    if current_balance is None:
+        return
+    try:
+        current_balance = float(current_balance)
+    except (TypeError, ValueError):
+        return
+    now = now or _now_naive_uk()
+    if not _week_close_passed(now):
+        return
+    from datetime import timedelta as _timedelta
+    week_start = (now.date() - _timedelta(days=now.weekday())).isoformat()
+    with _weekly_closes_lock:
+        closes = _load_weekly_closes(path)
+        if week_start in closes:
+            return
+        closes[week_start] = round(current_balance, 2)
+        _atomic_write(path, closes)
+
+
+def compute_successful_weeks(
+    path: str = BALANCE_HISTORY_PATH,
+    closes_path: str = WEEKLY_CLOSES_PATH,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Return {"successful_weeks", "total_weeks", "avg_weekly_return"}.
+
+    Each completed week's return is (close - open) / open, where open is the
+    first balance snapshot of that week and close is the frozen Friday 21:00
+    balance (falling back to the next week's first snapshot). Only the last
+    52 weeks count (the trading year). avg_weekly_return is the mean return
+    across those weeks, or None when there are none.
     """
-    history = _load_balance_history(path)
-    history = sorted(history, key=lambda r: r.get("date") or "")
-    active = 0
-    total = 0
-    for i in range(1, len(history)):
-        date_s = history[i].get("date") or ""
+    from datetime import timedelta as _timedelta
+    now = now or _now_naive_uk()
+    history = sorted(_load_balance_history(path), key=lambda r: r.get("date") or "")
+    closes = _load_weekly_closes(closes_path)
+
+    by_week: Dict[str, List[Dict[str, Any]]] = {}
+    for r in history:
         try:
-            d = datetime.strptime(date_s, "%Y-%m-%d").date()
+            d = datetime.strptime(r.get("date") or "", "%Y-%m-%d").date()
         except ValueError:
             continue
-        if d.weekday() >= 5:  # Saturday/Sunday
+        ws = (d - _timedelta(days=d.weekday())).isoformat()
+        by_week.setdefault(ws, []).append(r)
+
+    current_ws = (now.date() - _timedelta(days=now.weekday())).isoformat()
+    weeks = sorted(by_week)
+    returns: List[float] = []
+    for ws in weeks:
+        if ws > current_ws or (ws == current_ws and ws not in closes):
             continue
         try:
-            prev_balance = float(history[i - 1].get("balance"))
-            cur_balance = float(history[i].get("balance"))
+            opening = float(by_week[ws][0].get("balance"))
         except (TypeError, ValueError):
             continue
-        if prev_balance <= 0:
+        closing = closes.get(ws)
+        if closing is None:
+            later = [w for w in weeks if w > ws]
+            if not later:
+                continue
+            try:
+                closing = float(by_week[later[0]][0].get("balance"))
+            except (TypeError, ValueError):
+                continue
+        if opening <= 0:
             continue
-        total += 1
-        if cur_balance > prev_balance:
-            active += 1
-    return {"active_days": active, "total_days": total}
+        returns.append((closing - opening) / opening * 100)
+
+    returns = returns[-TRADING_YEAR_WEEKS:]
+    return {
+        "successful_weeks": sum(1 for r in returns if r >= SUCCESSFUL_WEEK_PCT),
+        "total_weeks": len(returns),
+        "avg_weekly_return": round(sum(returns) / len(returns), 2) if returns else None,
+    }
