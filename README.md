@@ -56,9 +56,7 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `TRAIL_SL_PERC` | Portion of unrealized profit locked by trailing SL as soon as it activates (default `0.70` = `70%`) | ⬜ |
 | `TRAIL_TIGHTEN_STEP_PERC` | How much the locked-in portion ramps up per activation-multiple of profit beyond 1x, so the SL follows more closely the deeper a trade goes in-profit (default `0.20` = `20%` per step) | ⬜ |
 | `TRAIL_MAX_PERC` | Ceiling on the locked-in portion as profit keeps extending (default `0.95` = `95%`) | ⬜ |
-| `NOTIFY_EMAIL_ENABLED` | Master switch for email notifications (default `False`) | ⬜ |
-| `NOTIFY_EMAIL_ON_OPEN` | Send an email when a position opens (default `False`) | ⬜ |
-| `NOTIFY_EMAIL_ON_CLOSE` | Send an email when a position closes, with PnL and account balance (default `True`) | ⬜ |
+| `NOTIFY_EMAIL_ENABLED` | Default for the "Receive Notifications" toggle: `True` emails on position open and close, `False` emails on close only (default `False`) | ⬜ |
 | `NOTIFY_EMAIL_TO` | Comma-separated recipient email address(es) | ⬜ |
 | `NOTIFY_EMAIL_FROM` | "From" address on the email (default: `SMTP_USERNAME`) | ⬜ |
 | `SMTP_HOST` | SMTP server hostname used to send notification emails | ⬜ |
@@ -70,11 +68,10 @@ Copy the table below and export the values in your environment or a `.env` file:
 
 ### Email notifications
 
-The bot can email you directly when a position is **opened** and/or **closed**
-(the close email includes the trade's PnL and the current account balance).
-Each event is toggled independently via `NOTIFY_EMAIL_ON_OPEN` /
-`NOTIFY_EMAIL_ON_CLOSE`, so you can enable just one (e.g. close-only, which is
-the default) or both. Set `NOTIFY_EMAIL_ENABLED=True`, fill in the `SMTP_*`
+The bot emails you when a position is **closed** (including the trade's PnL and
+the current account balance), and also when one is **opened** if the dashboard's
+"Receive Notifications" toggle is On (Off = closed emails only). The toggle's
+default comes from `NOTIFY_EMAIL_ENABLED`. Fill in the `SMTP_*`
 settings for your mail provider (e.g. Gmail: `smtp.gmail.com`, port `587`,
 an [app password](https://support.google.com/accounts/answer/185833)), and
 set `NOTIFY_EMAIL_TO` to the address(es) that should receive the emails.
