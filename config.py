@@ -391,14 +391,20 @@ EPIC_MAP = {
 }
 
 # Trailing stop defaults
-TRAIL_ACTIVATION_PERC = float(os.getenv("TRAIL_ACTIVATION_PERC", 0.02))
+TRAIL_ACTIVATION_PERC = float(os.getenv("TRAIL_ACTIVATION_PERC", 0.01))
 TRAIL_ACTIVATION_TP_FRACTION = float(os.getenv("TRAIL_ACTIVATION_TP_FRACTION", 0.25))
+# Absolute GBP unrealized-PnL floor: trailing activates as soon as EITHER
+# this amount of profit (converted to GBP) OR the percentage-based
+# activation threshold above is reached, whichever comes first. This lets
+# small/low-priced positions activate trailing promptly instead of waiting
+# for a large percentage price move.
+TRAIL_ACTIVATION_PNL_GBP = float(os.getenv("TRAIL_ACTIVATION_PNL_GBP", 2.0))
 # Fraction of unrealized profit locked in by the SL as soon as trailing
-# activates (e.g. 0.65 -> SL sits at entry + 65% of the profit made so far).
-TRAIL_SL_PERC = float(os.getenv("TRAIL_SL_PERC", 0.65))
+# activates (e.g. 0.70 -> SL sits at entry + 70% of the profit made so far).
+TRAIL_SL_PERC = float(os.getenv("TRAIL_SL_PERC", 0.70))
 # As profit extends further beyond the activation threshold, the locked-in
 # fraction ramps up by TRAIL_TIGHTEN_STEP_PERC per "activation multiple"
 # past 1x, up to the TRAIL_MAX_PERC ceiling — so the SL hugs price more
 # closely the deeper a trade goes in-profit.
-TRAIL_TIGHTEN_STEP_PERC = float(os.getenv("TRAIL_TIGHTEN_STEP_PERC", 0.15))
+TRAIL_TIGHTEN_STEP_PERC = float(os.getenv("TRAIL_TIGHTEN_STEP_PERC", 0.20))
 TRAIL_MAX_PERC = float(os.getenv("TRAIL_MAX_PERC", 0.95))
