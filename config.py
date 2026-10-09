@@ -125,7 +125,7 @@ TICKER_SETTINGS = {
 }
 
 # UI / dashboard
-DASHBOARD_TITLE = os.getenv("DASHBOARD_TITLE", "AG Capital Trader")
+DASHBOARD_TITLE = os.getenv("DASHBOARD_TITLE", "AGC Trader")
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "Killen123%")
 # Dual login roles: "Owner" has full control (close/delete/edit trades); "Viewer"
 # can only view the Dashboard/Analytics pages. DASHBOARD_OWNER_PASSWORD falls back

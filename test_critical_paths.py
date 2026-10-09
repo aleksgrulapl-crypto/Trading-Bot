@@ -3948,7 +3948,7 @@ class TestDashboardRoles:
                 "daily": 1.5, "weekly": -2.25, "monthly": 10.0,
                 "daily_opening": 1000.0, "weekly_opening": 990.0, "monthly_opening": 900.0,
                 "goal": {"goal_pct": 5.0, "progress_pct": 0.0},
-                "days_active": {"active_days": 19, "total_days": 34},
+                "successful_weeks": {"successful_weeks": 3, "total_weeks": 8, "avg_weekly_return": 2.5},
             },
         })
 
@@ -3964,7 +3964,12 @@ class TestDashboardRoles:
         assert "1.5%" in body
         assert "-2.25%" in body
         assert "10.0%" in body
-        assert "19/34" in body
+        assert "3/8" in body
+        assert "Successful Weeks" in body
+        assert "2.5%" in body
+        assert "Terms of Service" in body
+        assert "Contact Us" in body
+        assert "FAQ" in body
         assert "Weekly Goal: 5.0%" in body
 
     def test_investor_login_sets_investor_role_cookie(self, monkeypatch):
@@ -4473,32 +4478,44 @@ class TestBalanceHistoryPeriodReturns:
         result = deposits.compute_weekly_return_goal_progress(-3.0)
         assert result == {"goal_pct": 5.0, "progress_pct": 0.0}
 
-    def test_days_active_counts_positive_weekdays_excluding_weekends(self, tmp_path):
+    def test_successful_weeks_counts_weeks_at_or_above_5_pct_and_averages(self, tmp_path):
         import deposits
+        from datetime import datetime
         path = str(tmp_path / "history.json")
-        # Mon 2026-10-05 -> Tue 10-06 (up, active) -> Wed 10-07 (down) ->
-        # Sat 10-10 (weekend, excluded even though it's "up") -> Mon 10-12 (up, active)
+        closes = str(tmp_path / "closes.json")
         history = [
-            {"date": "2026-10-05", "balance": 1000.0},
-            {"date": "2026-10-06", "balance": 1010.0},
-            {"date": "2026-10-07", "balance": 1005.0},
-            {"date": "2026-10-10", "balance": 1200.0},
-            {"date": "2026-10-12", "balance": 1210.0},
+            {"date": "2026-09-28", "balance": 1000.0},  # week 1 open
+            {"date": "2026-10-05", "balance": 1060.0},  # week 1 close (+6%), week 2 open
+            {"date": "2026-10-12", "balance": 1081.2},  # week 2 close (+2%), week 3 open
         ]
         with open(path, "w", encoding="utf-8") as f:
             json.dump(history, f)
+        now = datetime(2026, 10, 12, 10, 0)  # Monday: week 3 still in progress
 
-        result = deposits.compute_days_active(path=path)
+        result = deposits.compute_successful_weeks(path=path, closes_path=closes, now=now)
 
-        # 4 day-over-day comparisons total; the 10-10 Saturday entry is
-        # excluded, leaving 3 weekday comparisons, 2 of which were up.
-        assert result == {"active_days": 2, "total_days": 3}
+        assert result == {"successful_weeks": 1, "total_weeks": 2, "avg_weekly_return": 4.0}
 
-    def test_days_active_with_no_history_is_zero_of_zero(self, tmp_path):
+    def test_week_closes_only_after_friday_21_and_is_frozen(self, tmp_path):
         import deposits
+        from datetime import datetime
         path = str(tmp_path / "history.json")
-        result = deposits.compute_days_active(path=path)
-        assert result == {"active_days": 0, "total_days": 0}
+        closes = str(tmp_path / "closes.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump([{"date": "2026-10-05", "balance": 1000.0}], f)
+
+        deposits.record_weekly_close(1100.0, path=closes, now=datetime(2026, 10, 9, 20, 59))
+        assert deposits.compute_successful_weeks(path=path, closes_path=closes, now=datetime(2026, 10, 9, 20, 59))["total_weeks"] == 0
+
+        deposits.record_weekly_close(1100.0, path=closes, now=datetime(2026, 10, 9, 21, 0))
+        deposits.record_weekly_close(1500.0, path=closes, now=datetime(2026, 10, 10, 9, 0))  # frozen: ignored
+        result = deposits.compute_successful_weeks(path=path, closes_path=closes, now=datetime(2026, 10, 10, 9, 0))
+        assert result == {"successful_weeks": 1, "total_weeks": 1, "avg_weekly_return": 10.0}
+
+    def test_successful_weeks_with_no_history(self, tmp_path):
+        import deposits
+        result = deposits.compute_successful_weeks(path=str(tmp_path / "h.json"), closes_path=str(tmp_path / "c.json"))
+        assert result == {"successful_weeks": 0, "total_weeks": 0, "avg_weekly_return": None}
 
 
 class TestInvestorBreakdownOwnerFeeOverride:
