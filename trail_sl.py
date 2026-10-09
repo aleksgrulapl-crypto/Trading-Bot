@@ -91,6 +91,26 @@ def _effective_trail_percent(profit_perc: float, activation_perc: float, base_tr
     return min(max_trail_perc, base_trail_perc_f + (tighten_step_perc * tighten_steps))
 
 
+def _profit_in_gbp(profit: Optional[float], position: dict) -> Optional[float]:
+    """Convert a position's monetary unrealized P&L (as reported by the
+    broker, typically in the instrument's quote currency) into GBP, using
+    the same FX_USD_GBP rate the dashboard/trade log use elsewhere. If the
+    position is already denominated in GBP, no conversion is applied."""
+    if profit is None:
+        return None
+    try:
+        profit_f = float(profit)
+    except Exception:
+        return None
+
+    currency = str((position or {}).get("currency") or "USD").upper()
+    if currency == "GBP":
+        return profit_f
+
+    fx = float(getattr(config, "FX_USD_GBP", 0.78) or 0.78)
+    return profit_f * fx
+
+
 def _extract_tp_level(position: dict, side: str) -> Optional[float]:
     candidates = (
         position.get("profitLevel"),
@@ -171,7 +191,9 @@ def _update_stop_level(deal_id: str, new_sl: float) -> bool:
 def run_trailing_sl() -> None:
     """
     Continuous trailing stop:
-      - Activates when profit reaches >= TRAIL_ACTIVATION_PERC (e.g. 0.50 for 50%)
+      - Activates when profit reaches >= TRAIL_ACTIVATION_PERC (e.g. 0.01 for 1%)
+        OR unrealized PnL reaches >= TRAIL_ACTIVATION_PNL_GBP, whichever
+        comes first.
       - Moves SL to entry + profit * TRAIL_SL_PERC (for longs)
         or entry - profit * TRAIL_SL_PERC (for shorts)
       - Re-evaluated on every scheduler tick so the SL keeps rising as price rises
@@ -220,9 +242,17 @@ def run_trailing_sl() -> None:
 
         profit_perc = profit / entry_price_f if entry_price_f != 0 else 0.0
 
-        # Activation threshold
+        # Activation threshold: trailing kicks in once EITHER the
+        # percentage-based threshold OR a flat GBP unrealized-PnL floor is
+        # reached, whichever happens first. The GBP floor lets lower-priced
+        # positions (where a given percentage move is a large dollar swing)
+        # start trailing without waiting on a big percentage move.
         activation_perc = _activation_threshold_perc(p, side, entry_price_f)
-        if profit_perc < activation_perc:
+        pnl_gbp = _profit_in_gbp(p.get("profit", p.get("upl")), p)
+        pnl_floor_gbp = float(getattr(config, "TRAIL_ACTIVATION_PNL_GBP", 2.0) or 0.0)
+        meets_perc = profit_perc >= activation_perc
+        meets_pnl_floor = pnl_gbp is not None and pnl_floor_gbp > 0 and pnl_gbp >= pnl_floor_gbp
+        if not (meets_perc or meets_pnl_floor):
             continue
 
         # Compute trail stop
