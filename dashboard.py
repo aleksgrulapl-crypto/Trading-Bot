@@ -805,6 +805,72 @@ def dashboard_data():
         }), 500
 
 
+TRADES_PER_PAGE = 20
+
+_CLOSED_SORT_KEYS = {
+    "exited": lambda t: t.get("time_exited") or t.get("time_entered") or "",
+    "entered": lambda t: t.get("time_entered") or "",
+    "ticker": lambda t: str(t.get("ticker") or "").lower(),
+    "timeframe": lambda t: str(t.get("timeframe") or "").lower(),
+    "type": lambda t: str(t.get("trade_type") or "").lower(),
+    "side": lambda t: str(t.get("side") or t.get("direction") or "").lower(),
+    "size": lambda t: _num_or_none(t.get("size")),
+    "entry": lambda t: _num_or_none(t.get("entry_price")),
+    "exit": lambda t: _num_or_none(t.get("exit_price")),
+    "pnl": lambda t: _num_or_none(t.get("pnl_gbp") if t.get("pnl_gbp") is not None else t.get("pnl")),
+}
+
+
+def _num_or_none(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_closed_trade(t):
+    return t.get("status") == "CLOSED" or bool(t.get("time_exited"))
+
+
+def build_trade_log_view(trades, args):
+    """Split display trades into open/closed and paginate the closed ones.
+
+    Display-only: operates on already deduped/reconciled trades and keeps
+    each trade's ``_log_index`` untouched so edit/delete actions still work.
+    """
+    open_trades = [t for t in trades or [] if not _is_closed_trade(t)]
+    closed = [t for t in trades or [] if _is_closed_trade(t)]
+
+    sort = args.get("sort", "exited")
+    if sort not in _CLOSED_SORT_KEYS:
+        sort = "exited"
+    direction = "asc" if args.get("dir") == "asc" else "desc"
+    key = _CLOSED_SORT_KEYS[sort]
+    # Rows with no value for the sort key always go last.
+    present = [t for t in closed if key(t) not in (None, "")]
+    missing = [t for t in closed if key(t) in (None, "")]
+    present.sort(key=key, reverse=(direction == "desc"))
+    closed = present + missing
+
+    total = len(closed)
+    pages = max(1, math.ceil(total / TRADES_PER_PAGE))
+    try:
+        page = int(args.get("page", 1))
+    except (TypeError, ValueError):
+        page = 1
+    page = min(max(page, 1), pages)
+    start = (page - 1) * TRADES_PER_PAGE
+
+    return {
+        "open_trades": open_trades,
+        "closed_trades": closed[start:start + TRADES_PER_PAGE],
+        "closed_total": total,
+        "page": page,
+        "pages": pages,
+        "sort": sort,
+        "dir": direction,
+    }
+
 @dashboard.route("/dashboard/trades")
 @login_required
 def dashboard_trades():
@@ -817,8 +883,8 @@ def dashboard_trades():
         title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
         cache_bust=time.time(),
         account=ctx["account"],
-        trades=ctx["combined_trades"],
         is_owner=current_role() == "owner",
+        **build_trade_log_view(ctx["combined_trades"], request.args),
     )
 
 
@@ -832,8 +898,8 @@ def dashboard_trades_data():
         html = render_template(
             "trade_log_partial.html",
             cache_bust=time.time(),
-            trades=ctx["combined_trades"],
             is_owner=current_role() == "owner",
+            **build_trade_log_view(ctx["combined_trades"], request.args),
         )
         return jsonify({
             "html": html,
