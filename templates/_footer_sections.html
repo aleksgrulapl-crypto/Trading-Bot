@@ -1,6 +1,12 @@
-<div class="analytics-wrap footer-sections" style="margin-top:24px;">
+<div class="footer-sections">
+  <div class="footer-tabs" role="tablist">
+    <a href="#terms-of-service" data-footer-tab="terms-of-service">Terms of Service</a>
+    <a href="#contact-us" data-footer-tab="contact-us">Contact Us</a>
+    <a href="#faq" data-footer-tab="faq">FAQ</a>
+  </div>
+  <div class="footer-panels analytics-wrap">
 
-  <div class="card" id="terms-of-service">
+  <div class="card footer-panel" id="terms-of-service">
     <div class="card-header">
       <div class="card-title">Terms of Service</div>
     </div>
@@ -73,18 +79,34 @@
     </details>
   </div>
 
-  <div class="card" id="contact-us">
+  <div class="card footer-panel" id="contact-us">
     <div class="card-header">
       <div class="card-title">Contact Us</div>
     </div>
     <div class="small">Contact details coming soon.</div>
   </div>
 
-  <div class="card" id="faq">
+  <div class="card footer-panel" id="faq">
     <div class="card-header">
       <div class="card-title">FAQ</div>
     </div>
     <div class="small">Frequently asked questions coming soon.</div>
   </div>
-
+  </div>
 </div>
+<script>
+(function () {
+  const tabs = document.querySelectorAll('[data-footer-tab]');
+  const panels = document.querySelectorAll('.footer-panel');
+  function show(id) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.footerTab === id));
+    panels.forEach(p => { p.style.display = p.id === id ? 'block' : 'none'; });
+  }
+  tabs.forEach(t => t.addEventListener('click', e => {
+    e.preventDefault();
+    const id = t.dataset.footerTab;
+    show(t.classList.contains('active') ? null : id);
+  }));
+  show(null);
+})();
+</script>

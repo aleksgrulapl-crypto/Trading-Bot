@@ -1,33 +1,9 @@
-<div id="trade-log-inner">
-  <div class="grid-full">
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">Trade Log</div>
-      </div>
-
-      {% if trades %}
-      <table class="table">
-        <thead>
+{% macro trade_rows(rows) %}
+          {% for t in rows %}
           <tr>
-            <th>Time Entered</th>
-            <th>Time Exited</th>
-            <th>Ticker</th>
-            <th>Timeframe</th>
-            <th>Type</th>
-            <th>Side</th>
-            <th>Size</th>
-            <th>Entry</th>
-            <th>Exit</th>
-            <th>PnL (GBP)</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for t in trades %}
-          <tr>
-            <td class="small">{{ t.time_entered_human or t.time_entered or '—' }}</td>
-            <td class="small">{{ t.time_exited_human or t.time_exited or '—' }}</td>
-            <td>{{ t.ticker or '—' }}</td>
+            <td class="small">{{ t.time_entered_human or t.time_entered or '�' }}</td>
+            <td class="small">{{ t.time_exited_human or t.time_exited or '�' }}</td>
+            <td>{{ t.ticker or '�' }}</td>
             <td class="small">{{ t.timeframe or 'N/A' }}</td>
             <td>
               {% if is_owner and t._log_index is not none %}
@@ -47,12 +23,12 @@
               {% elif side == 'Short' %}
                 <span class="pill pill-short">Short</span>
               {% else %}
-                <span class="pill pill-status">{{ side or '—' }}</span>
+                <span class="pill pill-status">{{ side or '�' }}</span>
               {% endif %}
             </td>
-            <td>{{ t.size|default('—') }}</td>
+            <td>{{ t.size|default('�') }}</td>
             <td>
-              {{ t.entry_price is not none and t.entry_price or t.get('entryPrice') or '—' }}
+              {{ t.entry_price is not none and t.entry_price or t.get('entryPrice') or '�' }}
             </td>
             <td>
               {% if is_owner and t._log_index is not none and (t.status == 'CLOSED' or t.time_exited) %}
@@ -61,11 +37,11 @@
                 step="any"
                 class="exit-price-input"
                 value="{{ t.exit_price if t.exit_price is not none else (t.get('exitPrice') or '') }}"
-                placeholder="—"
+                placeholder="�"
                 onchange="updateExitPrice({{ t._log_index }}, this.value)"
               />
               {% else %}
-              {{ t.exit_price is not none and t.exit_price or t.get('exitPrice') or '—' }}
+              {{ t.exit_price is not none and t.exit_price or t.get('exitPrice') or '�' }}
               {% endif %}
             </td>
             {% set display_pnl = t.pnl_gbp %}
@@ -73,7 +49,7 @@
               {% set display_pnl = (t.pnl * (config.FX_USD_GBP if config and config.FX_USD_GBP else 0.78))|round(2) %}
             {% endif %}
             <td class="{% if display_pnl is not none and display_pnl >= 0 %}pnl-pos{% elif display_pnl is not none %}pnl-neg{% endif %}">
-              {{ display_pnl if display_pnl is not none else '—' }}
+              {{ display_pnl if display_pnl is not none else '�' }}
             </td>
             <td>
               {% if is_owner and t.can_delete and t._log_index is not none %}
@@ -82,10 +58,72 @@
             </td>
           </tr>
           {% endfor %}
+{% endmacro %}
+{% macro sort_th(key, label) %}{% set nd = 'asc' if (sort == key and dir == 'desc') else 'desc' %}<a class="sort-link" href="/dashboard/trades?sort={{ key }}&dir={{ nd }}">{{ label }}{% if sort == key %} {{ '▲' if dir == 'asc' else '▼' }}{% endif %}</a>{% endmacro %}
+<div id="trade-log-inner">
+  <div class="grid-full" style="gap:16px;">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Open Trades</div>
+      </div>
+      {% if open_trades %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Time Entered</th>
+            <th>Time Exited</th>
+            <th>Ticker</th>
+            <th>Timeframe</th>
+            <th>Type</th>
+            <th>Side</th>
+            <th>Size</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>PnL (GBP)</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+{{ trade_rows(open_trades) }}
         </tbody>
       </table>
       {% else %}
-      <div class="small">No trades recorded.</div>
+      <div class="small">No open trades.</div>
+      {% endif %}
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header">
+        <div class="card-title">Closed Trades ({{ closed_total }})</div>
+      </div>
+      {% if closed_trades %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>{{ sort_th('entered', 'Time Entered') }}</th>
+            <th>{{ sort_th('exited', 'Time Exited') }}</th>
+            <th>{{ sort_th('ticker', 'Ticker') }}</th>
+            <th>{{ sort_th('timeframe', 'Timeframe') }}</th>
+            <th>{{ sort_th('type', 'Type') }}</th>
+            <th>{{ sort_th('side', 'Side') }}</th>
+            <th>{{ sort_th('size', 'Size') }}</th>
+            <th>{{ sort_th('entry', 'Entry') }}</th>
+            <th>{{ sort_th('exit', 'Exit') }}</th>
+            <th>{{ sort_th('pnl', 'PnL (GBP)') }}</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+{{ trade_rows(closed_trades) }}
+        </tbody>
+      </table>
+      <div class="pagination">
+        {% if page > 1 %}<a href="/dashboard/trades?page={{ page - 1 }}&sort={{ sort }}&dir={{ dir }}">&laquo; Prev</a>{% else %}<span class="disabled">&laquo; Prev</span>{% endif %}
+        <span>Page {{ page }} of {{ pages }}</span>
+        {% if page < pages %}<a href="/dashboard/trades?page={{ page + 1 }}&sort={{ sort }}&dir={{ dir }}">Next &raquo;</a>{% else %}<span class="disabled">Next &raquo;</span>{% endif %}
+      </div>
+      {% else %}
+      <div class="small">No closed trades.</div>
       {% endif %}
     </div>
   </div>

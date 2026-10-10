@@ -142,30 +142,18 @@
     <div class="card-title">Win / Loss by Ticker</div>
   </div>
     {% if detailed.per_ticker_stats %}
-    <table class="table table-spaced">
-      <thead>
-        <tr>
-          <th>Ticker</th>
-          <th>Trades</th>
-          <th>Wins</th>
-          <th>Losses</th>
-          <th>Win Rate</th>
-          <th>Total PnL (GBP)</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for s in detailed.per_ticker_stats %}
-        <tr>
-          <td>{{ s.ticker }}</td>
-          <td>{{ s.trade_count }}</td>
-          <td>{{ s.wins }}</td>
-          <td>{{ s.losses }}</td>
-          <td>{{ s.win_rate is not none and s.win_rate or '—' }}%</td>
-          <td class="{% if s.total_pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">{{ s.total_pnl }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="ticker-grid">
+      {% for s in detailed.per_ticker_stats %}
+      <div class="ticker-card">
+        <div class="ticker-name">{{ s.ticker }}</div>
+        <div class="ticker-row"><span>Trades</span><span>{{ s.trade_count }}</span></div>
+        <div class="ticker-row"><span>Wins</span><span>{{ s.wins }}</span></div>
+        <div class="ticker-row"><span>Losses</span><span>{{ s.losses }}</span></div>
+        <div class="ticker-row"><span>Win Rate</span><span>{{ s.win_rate is not none and s.win_rate or '—' }}%</span></div>
+        <div class="ticker-row"><span>Total PnL (GBP)</span><span class="{% if s.total_pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">{{ s.total_pnl }}</span></div>
+      </div>
+      {% endfor %}
+    </div>
     {% else %}
     <div class="small">No closed trades yet.</div>
     {% endif %}
