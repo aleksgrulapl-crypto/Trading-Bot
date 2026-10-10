@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="analytics-wrap">
+<div class="analytics-wrap analytics-wide">
 <div class="analytics-tabs">
   <a href="/dashboard/analytics?group=all{% if month != 'all' %}&month={{ month }}{% endif %}" class="{% if group == 'all' %}active{% endif %}">General (All Trades)</a>
   <a href="/dashboard/analytics?group=tradingview{% if month != 'all' %}&month={{ month }}{% endif %}" class="{% if group == 'tradingview' %}active{% endif %}">TradingView</a>
@@ -144,7 +144,7 @@
     {% if detailed.per_ticker_stats %}
     <div class="ticker-grid">
       {% for s in detailed.per_ticker_stats %}
-      <div class="ticker-card">
+      <div class="ticker-card {% if s.total_pnl >= 0 %}ticker-pos{% else %}ticker-neg{% endif %}">
         <div class="ticker-name">{{ s.ticker }}</div>
         <div class="ticker-row"><span>Trades</span><span>{{ s.trade_count }}</span></div>
         <div class="ticker-row"><span>Wins</span><span>{{ s.wins }}</span></div>

@@ -97,6 +97,11 @@
         <div class="card-title">Closed Trades ({{ closed_total }})</div>
       </div>
       {% if closed_trades %}
+      <div class="pagination">
+        {% if page > 1 %}<a href="/dashboard/trades?page={{ page - 1 }}&sort={{ sort }}&dir={{ dir }}">&laquo; Prev</a>{% else %}<span class="disabled">&laquo; Prev</span>{% endif %}
+        <span>Page {{ page }} of {{ pages }}</span>
+        {% if page < pages %}<a href="/dashboard/trades?page={{ page + 1 }}&sort={{ sort }}&dir={{ dir }}">Next &raquo;</a>{% else %}<span class="disabled">Next &raquo;</span>{% endif %}
+      </div>
       <table class="table">
         <thead>
           <tr>
@@ -117,11 +122,7 @@
 {{ trade_rows(closed_trades) }}
         </tbody>
       </table>
-      <div class="pagination">
-        {% if page > 1 %}<a href="/dashboard/trades?page={{ page - 1 }}&sort={{ sort }}&dir={{ dir }}">&laquo; Prev</a>{% else %}<span class="disabled">&laquo; Prev</span>{% endif %}
-        <span>Page {{ page }} of {{ pages }}</span>
-        {% if page < pages %}<a href="/dashboard/trades?page={{ page + 1 }}&sort={{ sort }}&dir={{ dir }}">Next &raquo;</a>{% else %}<span class="disabled">Next &raquo;</span>{% endif %}
-      </div>
+
       {% else %}
       <div class="small">No closed trades.</div>
       {% endif %}
