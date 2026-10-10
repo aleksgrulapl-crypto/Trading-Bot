@@ -127,8 +127,14 @@
         .pagination a { color: var(--accent); text-decoration: none; padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.4); }
         .pagination a:hover { background: rgba(56, 189, 248, 0.12); }
         .pagination .disabled { color: var(--text-muted); opacity: 0.5; padding: 4px 10px; }
-        .ticker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+        .ticker-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
         .ticker-card { background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(31, 41, 55, 0.9); border-radius: 10px; padding: 12px 14px; }
+        .ticker-card.ticker-pos { border-color: rgba(74, 222, 128, 0.35); background: linear-gradient(160deg, rgba(74, 222, 128, 0.08), rgba(2, 6, 23, 0.9)); }
+        .ticker-card.ticker-neg { border-color: rgba(249, 115, 115, 0.35); background: linear-gradient(160deg, rgba(249, 115, 115, 0.08), rgba(2, 6, 23, 0.9)); }
+        .ticker-pos .ticker-name { color: var(--success); }
+        .ticker-neg .ticker-name { color: var(--danger); }
+        .analytics-wrap.analytics-wide { max-width: none; }
+        .card-navy { align-self: start; background: linear-gradient(160deg, #0a1a2f, #020617); }
         .ticker-card .ticker-name { font-weight: 700; font-size: 15px; margin-bottom: 8px; }
         .ticker-card .ticker-row { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; color: var(--text-muted); }
         .ticker-card .ticker-row span:last-child { color: var(--text); }

@@ -915,6 +915,33 @@ def dashboard_trades_data():
         }), 500
 
 
+def _render_static_page(template):
+    ctx = _build_request_context()
+    return render_template(
+        template,
+        title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
+        cache_bust=time.time(),
+        account=ctx["account"],
+    )
+
+
+@dashboard.route("/dashboard/terms")
+@login_required
+def dashboard_terms():
+    return _render_static_page("terms.html")
+
+
+@dashboard.route("/dashboard/contact")
+@login_required
+def dashboard_contact():
+    return _render_static_page("contact.html")
+
+
+@dashboard.route("/dashboard/faq")
+@login_required
+def dashboard_faq():
+    return _render_static_page("faq.html")
+
 @dashboard.route("/dashboard/investors")
 @login_required
 def dashboard_investors():
