@@ -82,7 +82,7 @@ def dashboard_login_submit():
 
 @dashboard.route("/dashboard/logout")
 def dashboard_logout():
-    resp = redirect("/dashboard/login")
+    resp = redirect("/dashboard")
     resp.delete_cookie("dashboard_auth")
     resp.delete_cookie("dashboard_role")
     return resp
@@ -92,34 +92,70 @@ def dashboard_logout():
 # Auth decorators
 # -----------------------------
 def login_required(view):
+    """Dashboard pages are open to everyone: visitors without a login are
+    treated as the (restricted) Viewer role. Role-specific gating is done by
+    the other decorators and by the templates."""
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
-        if not request.cookies.get("dashboard_auth"):
-            return redirect("/dashboard/login")
         return view(*args, **kwargs)
     return wrapper
 
 
 def current_role() -> str:
-    """Return the logged-in role: 'owner', 'viewer', or 'investor'.
+    """Return the active role: 'owner', 'viewer', or 'investor'.
 
-    Legacy sessions (an auth cookie set before roles existed, or a cookie
-    with an unrecognized value) are treated as 'owner' to preserve the
-    original single-password behavior.
+    Visitors with no login cookie are the default 'viewer'. A login cookie
+    with a missing/unrecognized role (a session set before roles existed) is
+    treated as 'owner' to preserve the original single-password behavior.
     """
+    if not request.cookies.get("dashboard_auth"):
+        return "viewer"
     role = request.cookies.get("dashboard_role")
     if role in ("owner", "viewer", "investor"):
         return role
     return "owner"
 
 
-def owner_required(view):
-    """Require the Owner role for mutating dashboard actions (close/delete/edit).
-    Viewer/Investor accounts are authenticated but limited to read-only pages."""
+def is_logged_in() -> bool:
+    return bool(request.cookies.get("dashboard_auth"))
+
+
+def non_viewer_page_required(view):
+    """Hide whole pages (Trade Log, Analytics) from the Viewer role: viewers
+    are redirected to the main dashboard; the JSON variant gets a 403."""
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
-        if not request.cookies.get("dashboard_auth"):
-            return redirect("/dashboard/login")
+        if current_role() == "viewer":
+            if request.path.endswith("/data"):
+                return jsonify({"status": "error", "message": "forbidden_viewer_role"}), 403
+            return redirect("/dashboard")
+        return view(*args, **kwargs)
+    return wrapper
+
+
+def _viewer_safe_context(ctx):
+    """Return a copy of the dashboard context for the Viewer role: account
+    figures are dropped and open positions are reduced to Ticker, Side and
+    Entry only."""
+    safe = dict(ctx)
+    safe["account"] = {}
+    safe["positions"] = [
+        {
+            "ticker": p.get("ticker") or p.get("epic"),
+            "direction": p.get("direction") or p.get("side"),
+            "entry_price": p.get("entry_price") if p.get("entry_price") is not None else p.get("price"),
+        }
+        for p in (ctx.get("positions") or [])
+        if isinstance(p, dict)
+    ]
+    return safe
+
+
+def owner_required(view):
+    """Require the Owner role for mutating dashboard actions (close/delete/edit).
+    Viewer/Investor accounts are limited to read-only pages."""
+    @functools.wraps(view)
+    def wrapper(*args, **kwargs):
         if current_role() != "owner":
             return jsonify({
                 "status": "error",
@@ -135,8 +171,6 @@ def owner_page_required(view):
     main dashboard instead of receiving a JSON 403."""
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
-        if not request.cookies.get("dashboard_auth"):
-            return redirect("/dashboard/login")
         if current_role() != "owner":
             return redirect("/dashboard")
         return view(*args, **kwargs)
@@ -145,12 +179,12 @@ def owner_page_required(view):
 
 @dashboard.context_processor
 def _inject_role():
-    """Make the logged-in role available to every dashboard template
-    without threading it through each render_template() call."""
+    """Make the active role and login state available to every dashboard
+    template without threading them through each render_template() call."""
     try:
-        return {"role": current_role()}
+        return {"role": current_role(), "logged_in": is_logged_in()}
     except Exception:
-        return {"role": "owner"}
+        return {"role": "viewer", "logged_in": False}
 
 
 def roi_access_required(view):
@@ -160,8 +194,6 @@ def roi_access_required(view):
     gain/loss figures."""
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
-        if not request.cookies.get("dashboard_auth"):
-            return redirect("/dashboard/login")
         if current_role() not in ("owner", "investor"):
             return redirect("/dashboard")
         return view(*args, **kwargs)
@@ -773,6 +805,9 @@ def dashboard_home():
     except Exception:
         logger.debug("dashboard: could not update shared_state")
 
+    if current_role() == "viewer":
+        ctx = _viewer_safe_context(ctx)
+
     return render_template(
         "dashboard.html",
         title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
@@ -797,6 +832,8 @@ def dashboard_data():
     Always returns JSON, even on error, to prevent client-side parse failures.
     """
     ctx = _build_request_context()
+    if current_role() == "viewer":
+        ctx = _viewer_safe_context(ctx)
 
     try:
         html = render_template(
@@ -894,7 +931,7 @@ def build_trade_log_view(trades, args):
     }
 
 @dashboard.route("/dashboard/trades")
-@login_required
+@non_viewer_page_required
 def dashboard_trades():
     """Render the Trade Log page (moved off the main dashboard for a
     tidier, more focused layout)."""
@@ -911,7 +948,7 @@ def dashboard_trades():
 
 
 @dashboard.route("/dashboard/trades/data")
-@login_required
+@non_viewer_page_required
 def dashboard_trades_data():
     """Return fresh Trade Log data as JSON (with rendered HTML partial)."""
     ctx = _build_request_context()
@@ -978,7 +1015,7 @@ def dashboard_investors():
     tiers = deposits.load_tiers()
 
     investor_rows = []
-    for name in investors:
+    for name in (investors if current_role() == "owner" else []):
         is_owner = bool(owner_name) and name.strip().lower() == owner_name.strip().lower()
         tier = "owner" if is_owner else deposits.get_investor_tier(name, tiers)
         investor_rows.append({"name": name, "tier": tier, "is_owner": is_owner})
@@ -1104,7 +1141,7 @@ def dashboard_investors_set_tier():
 
 
 @dashboard.route("/dashboard/analytics")
-@login_required
+@non_viewer_page_required
 def dashboard_analytics():
     """Render the in-depth Analytics page: best/worst trade, per-ticker
     win/loss breakdown, equity curve, and average hold time.

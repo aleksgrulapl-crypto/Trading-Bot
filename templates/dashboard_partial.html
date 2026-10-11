@@ -55,10 +55,11 @@
     </div>
 
     <!-- Account & Open Positions -->
-    {% set open_pnl = account.pnl if (account and account.pnl is not none) else (positions | sum(attribute='profit') if positions else none) %}
+    {% set limited = (role == 'viewer') %}
+    {% set open_pnl = none if limited else (account.pnl if (account and account.pnl is not none) else (positions | sum(attribute='profit') if positions else none)) %}
     <div class="card {% if open_pnl is not none and open_pnl >= 0 %}card-pos{% elif open_pnl is not none %}card-neg{% endif %}">
       <div class="card-header">
-        <div class="card-title">Account & Open Positions</div>
+        <div class="card-title">{{ 'Open Positions' if limited else 'Account & Open Positions' }}</div>
         {% if is_owner %}
         <div class="email-notify-toggle" style="position:absolute; right:0; top:0;">
           <button
@@ -80,12 +81,14 @@
           <tr>
             <th>Ticker</th>
             <th>Side</th>
-            <th>Size</th>
+            {% if not limited %}<th>Size</th>{% endif %}
             <th>Entry</th>
+            {% if not limited %}
             <th>Current</th>
             <th>SL / TP</th>
             <th>PNL (GBP)</th>
             <th></th>
+            {% endif %}
           </tr>
         </thead>
         <tbody>
@@ -102,8 +105,9 @@
                 <span class="pill pill-status">{{ dir or '—' }}</span>
               {% endif %}
             </td>
-            <td>{{ p.size|default('—') }}</td>
+            {% if not limited %}<td>{{ p.size|default('—') }}</td>{% endif %}
             <td>{{ p.entry_price is not none and p.entry_price or p.price|default('—') }}</td>
+            {% if not limited %}
             <td>{{ p.current_price|default('—') }}</td>
             <td>{{ p.stopLevel|default('—') }} / {{ p.limitLevel|default('—') }}</td>
             <td class="{% if p.profit is not none and p.profit >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
@@ -116,6 +120,7 @@
               <span class="small">—</span>
               {% endif %}
             </td>
+            {% endif %}
           </tr>
           {% endfor %}
         </tbody>

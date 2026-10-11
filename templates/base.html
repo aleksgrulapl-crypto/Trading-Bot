@@ -94,6 +94,8 @@
         header .nav a:hover { background: rgba(56, 189, 248, 0.12); }
         header .nav a.logout { color: var(--danger); }
         header .nav a.logout:hover { background: rgba(248, 113, 113, 0.12); }
+        header .nav a.login-link { color: var(--success); }
+        header .nav a.login-link:hover { background: rgba(74, 222, 128, 0.12); }
         #error-banner {
             display: none;
             margin: 12px 24px 0;
@@ -449,8 +451,10 @@
                 {{ {'owner': 'Owner', 'investor': 'Investor'}.get(role, 'Viewer') }}
             </span>
             <a href="/dashboard">Dashboard</a>
+            {% if role != 'viewer' %}
             <a href="/dashboard/trades">Trade Log</a>
             <a href="/dashboard/analytics">Analytics</a>
+            {% endif %}
             <a href="/dashboard/investors">Investors</a>
             {% if role in ('owner', 'investor') %}
             <a href="/dashboard/roi">ROI</a>
@@ -458,7 +462,11 @@
             {% if role == 'owner' %}
             <a href="/dashboard/transactions">Transactions</a>
             {% endif %}
+            {% if logged_in %}
             <a href="/dashboard/logout" class="logout">Logout</a>
+            {% else %}
+            <a href="/dashboard/login" class="login-link">Login</a>
+            {% endif %}
         </div>
     </div>
 </header>
