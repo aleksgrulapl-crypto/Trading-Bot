@@ -1016,6 +1016,21 @@ def _opening_balance_on_or_after(history: List[Dict[str, Any]], boundary_date) -
         return None
 
 
+def period_labels(now: Optional[datetime] = None) -> Dict[str, str]:
+    """Human-readable labels for the current calendar Daily/Weekly/Monthly
+    return periods (UK time): today's date, Mon-Sun range, and month name."""
+    from datetime import timedelta as _timedelta
+    now = now or _now_naive_uk()
+    today = now.date()
+    monday = today - _timedelta(days=today.weekday())
+    sunday = monday + _timedelta(days=6)
+    return {
+        "daily": today.strftime("%d/%m/%Y"),
+        "weekly": f"{monday.strftime('%d/%m/%y')} - {sunday.strftime('%d/%m/%y')}",
+        "monthly": today.strftime("%B"),
+    }
+
+
 def compute_period_returns(current_balance: Optional[float], path: str = BALANCE_HISTORY_PATH) -> Dict[str, Optional[float]]:
     """Return calendar-aligned {daily, weekly, monthly} % returns.
 

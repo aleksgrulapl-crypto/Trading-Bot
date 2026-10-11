@@ -55,7 +55,8 @@
     </div>
 
     <!-- Account & Open Positions -->
-    <div class="card">
+    {% set open_pnl = account.pnl if (account and account.pnl is not none) else (positions | sum(attribute='profit') if positions else none) %}
+    <div class="card {% if open_pnl is not none and open_pnl >= 0 %}card-pos{% elif open_pnl is not none %}card-neg{% endif %}">
       <div class="card-header">
         <div class="card-title">Account & Open Positions</div>
         {% if is_owner %}
@@ -219,27 +220,27 @@
   </div>
 
   <!-- Calendar-aligned Return (Balance-based, not a rolling window) -->
-  <div class="card" style="margin-top:16px;">
+  {% set lbl = period_returns.labels or {} %}
+  <div class="card {% if period_returns.weekly is not none and period_returns.weekly >= 0 %}card-pos{% elif period_returns.weekly is not none %}card-neg{% endif %}" style="margin-top:16px;">
     <div class="card-header">
-      <div class="card-title">Return</div>
-      <div class="small">Daily = today (00:00–23:59), Weekly = since Monday, Monthly = since the 1st — vs Balance at period start</div>
+      <div class="card-title">Calendar Based Return</div>
     </div>
 
     <div class="metrics-row">
-      <div class="metric">
-        <div class="metric-label">Daily Return</div>
+      <div class="metric {% if period_returns.daily is not none %}{{ 'ticker-pos' if period_returns.daily >= 0 else 'ticker-neg' }}{% endif %}">
+        <div class="metric-label">Current Daily Return{% if lbl.daily %} · {{ lbl.daily }}{% endif %}</div>
         <div class="metric-value {% if period_returns.daily is not none and period_returns.daily >= 0 %}metric-good{% elif period_returns.daily is not none %}metric-bad{% else %}metric-neutral{% endif %}">
           {{ period_returns.daily is not none and (period_returns.daily ~ '%') or '—' }}
         </div>
       </div>
-      <div class="metric">
-        <div class="metric-label">Weekly Return</div>
+      <div class="metric {% if period_returns.weekly is not none %}{{ 'ticker-pos' if period_returns.weekly >= 0 else 'ticker-neg' }}{% endif %}">
+        <div class="metric-label">Current Weekly Return{% if lbl.weekly %} · {{ lbl.weekly }}{% endif %}</div>
         <div class="metric-value {% if period_returns.weekly is not none and period_returns.weekly >= 0 %}metric-good{% elif period_returns.weekly is not none %}metric-bad{% else %}metric-neutral{% endif %}">
           {{ period_returns.weekly is not none and (period_returns.weekly ~ '%') or '—' }}
         </div>
       </div>
-      <div class="metric">
-        <div class="metric-label">Monthly Return</div>
+      <div class="metric {% if period_returns.monthly is not none %}{{ 'ticker-pos' if period_returns.monthly >= 0 else 'ticker-neg' }}{% endif %}">
+        <div class="metric-label">Current Monthly Return{% if lbl.monthly %} · {{ lbl.monthly }}{% endif %}</div>
         <div class="metric-value {% if period_returns.monthly is not none and period_returns.monthly >= 0 %}metric-good{% elif period_returns.monthly is not none %}metric-bad{% else %}metric-neutral{% endif %}">
           {{ period_returns.monthly is not none and (period_returns.monthly ~ '%') or '—' }}
         </div>

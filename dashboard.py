@@ -712,6 +712,7 @@ def _build_request_context():
         period_returns = _default_period_returns()
 
     now = datetime.utcnow()
+    period_returns["labels"] = deposits.period_labels()
     weekly_analytics = _safe_analytics(
         compute_analytics(_trades_closed_since(completed_trades, now - timedelta(days=7)))
     )
