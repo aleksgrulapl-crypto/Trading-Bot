@@ -3710,6 +3710,62 @@ class TestProtectedRoutes:
 
 
 class TestDashboardRoles:
+    def _viewer_client(self, monkeypatch, with_cookie=False):
+        from flask import Flask
+        import dashboard
+
+        monkeypatch.setattr(dashboard, "_build_request_context", lambda: {
+            "account": {"equity": 1234, "balance": 987, "pnl": -316.79, "available": 55},
+            "positions": [{"ticker": "AAPL", "direction": "Long", "entry_price": 150.5,
+                           "size": 7, "current_price": 140, "profit": -316.79, "dealId": "D1"}],
+            "combined_trades": [],
+            "analytics": dashboard._safe_analytics({}),
+            "weekly_analytics": dashboard._safe_analytics({}),
+            "monthly_analytics": dashboard._safe_analytics({}),
+        })
+        app = Flask(__name__)
+        app.register_blueprint(dashboard.dashboard)
+        client = app.test_client()
+        if with_cookie:
+            client.set_cookie("dashboard_auth", "1")
+            client.set_cookie("dashboard_role", "viewer")
+        return client
+
+    def test_anonymous_visitor_is_viewer_with_limited_positions(self, monkeypatch):
+        client = self._viewer_client(monkeypatch)
+        html = client.get("/dashboard").get_data(as_text=True)
+        assert "AAPL" in html and "150.5" in html
+        assert "316.79" not in html and "1234" not in html and "987" not in html
+        assert ">Size<" not in html and ">SL / TP<" not in html
+        assert ">Trade Log<" not in html and ">Analytics<" not in html
+        assert ">Login<" in html and ">Logout<" not in html
+
+    def test_viewer_data_endpoint_hides_account_and_position_details(self, monkeypatch):
+        client = self._viewer_client(monkeypatch)
+        data = client.get("/dashboard/data").get_json()
+        assert data["account"] == {}
+        assert data["positions"] == [{"ticker": "AAPL", "direction": "Long", "entry_price": 150.5}]
+
+    def test_viewer_cannot_open_trade_log_or_analytics(self, monkeypatch):
+        client = self._viewer_client(monkeypatch)
+        for path in ("/dashboard/trades", "/dashboard/analytics"):
+            resp = client.get(path)
+            assert resp.status_code == 302
+            assert resp.headers["Location"].endswith("/dashboard")
+        assert client.get("/dashboard/trades/data").status_code == 403
+
+    def test_investors_list_hidden_from_viewer(self, monkeypatch):
+        client = self._viewer_client(monkeypatch)
+        monkeypatch.setattr("deposits.list_investors", lambda entries: ["Secret Investor"])
+        html = client.get("/dashboard/investors").get_data(as_text=True)
+        assert "Secret Investor" not in html
+
+    def test_logged_in_user_sees_logout_and_logout_returns_to_dashboard(self, monkeypatch):
+        client = self._viewer_client(monkeypatch, with_cookie=True)
+        assert ">Logout<" in client.get("/dashboard").get_data(as_text=True)
+        resp = client.get("/dashboard/logout")
+        assert resp.headers["Location"].endswith("/dashboard")
+
     def test_owner_login_sets_owner_role_cookie(self, monkeypatch):
         from flask import Flask
         from dashboard import dashboard
