@@ -457,6 +457,21 @@ def _trades_closed_since(trades, since_dt):
     return out
 
 
+def _trades_closed_between(trades, start_dt, end_dt, weekdays_only=False):
+    """Like ``_trades_closed_since`` but bounded to [start_dt, end_dt).
+    With *weekdays_only*, trades timestamped on a Saturday/Sunday are
+    excluded (stock-only trading; e.g. Sunday-night commodity opens)."""
+    out = []
+    for t in _trades_closed_since(trades, start_dt):
+        ts = _naive_dt(_parse_iso_like(t.get("time_exited")) or _parse_iso_like(t.get("time_entered")))
+        if ts >= end_dt:
+            continue
+        if weekdays_only and ts.weekday() >= 5:
+            continue
+        out.append(t)
+    return out
+
+
 def _trade_month_key(trade):
     """Return the "YYYY-MM" calendar month a completed trade belongs to
     (based on exit time, falling back to entry time), or None if
@@ -711,13 +726,19 @@ def _build_request_context():
         logger.exception("dashboard: period return computation failed")
         period_returns = _default_period_returns()
 
-    now = datetime.utcnow()
     period_returns["labels"] = deposits.period_labels()
+    now_uk = deposits._now_naive_uk()
+    week_start = datetime.combine(deposits._period_boundary_date(now_uk, "weekly"), datetime.min.time())
+    week_end = week_start + timedelta(days=7)
+    month_start = datetime.combine(deposits._period_boundary_date(now_uk, "monthly"), datetime.min.time())
+    next_month = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+    # Snapshots cover Mon-Fri trades only (stock trading); weekend/Sunday-night
+    # commodity activity is excluded until commodities are supported.
     weekly_analytics = _safe_analytics(
-        compute_analytics(_trades_closed_since(completed_trades, now - timedelta(days=7)))
+        compute_analytics(_trades_closed_between(completed_trades, week_start, week_end, weekdays_only=True))
     )
     monthly_analytics = _safe_analytics(
-        compute_analytics(_trades_closed_since(completed_trades, now - timedelta(days=30)))
+        compute_analytics(_trades_closed_between(completed_trades, month_start, next_month, weekdays_only=True))
     )
 
     return {

@@ -1027,6 +1027,7 @@ def period_labels(now: Optional[datetime] = None) -> Dict[str, str]:
     return {
         "daily": today.strftime("%d/%m/%Y"),
         "weekly": f"{monday.strftime('%d/%m/%y')} - {sunday.strftime('%d/%m/%y')}",
+        "weekly_trading": f"{monday.strftime('%d/%m/%y')} - {(monday + _timedelta(days=4)).strftime('%d/%m/%y')}",
         "monthly": today.strftime("%B"),
     }
 
