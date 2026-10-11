@@ -2,7 +2,7 @@
 
   <div class="grid">
     <!-- Analytics / Summary -->
-    <div class="card card-navy">
+    <div class="card {% if analytics.total_pl is not none and analytics.total_pl >= 0 %}card-pos{% elif analytics.total_pl is not none %}card-neg{% else %}card-navy{% endif %}" style="align-self:start;">
       <div class="card-header">
         <div class="card-title">Performance Snapshot</div>
       </div>
@@ -127,7 +127,7 @@
 
   <!-- Weekly / Monthly Snapshots -->
   <div class="grid-two" style="margin-top:16px;">
-    <div class="card">
+    <div class="card {% if weekly_analytics.total_pl is not none and weekly_analytics.total_pl >= 0 %}card-pos{% elif weekly_analytics.total_pl is not none %}card-neg{% endif %}">
       <div class="card-header">
         <div class="card-title">Weekly Snapshot</div>
       </div>
@@ -172,7 +172,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card {% if monthly_analytics.total_pl is not none and monthly_analytics.total_pl >= 0 %}card-pos{% elif monthly_analytics.total_pl is not none %}card-neg{% endif %}">
       <div class="card-header">
         <div class="card-title">Monthly Snapshot</div>
       </div>

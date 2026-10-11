@@ -38,11 +38,12 @@
             padding: 20px 24px;
             border-bottom: 1px solid var(--border);
             display: grid;
-            grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+            grid-template-columns: auto minmax(0, 1fr) auto;
             align-items: center;
             gap: 24px;
         }
         header .title {
+            text-align: center;
             font-size: 24px;
             font-weight: 700;
             color: var(--accent-soft);
@@ -55,7 +56,7 @@
             font-size: 16px;
             font-weight: 700;
             letter-spacing: 0.04em;
-            text-align: center;
+            text-align: left;
             white-space: nowrap;
         }
         header .uk-clock-label {
@@ -133,7 +134,7 @@
         .ticker-card.ticker-neg { border-color: rgba(249, 115, 115, 0.35); background: linear-gradient(160deg, rgba(249, 115, 115, 0.08), rgba(2, 6, 23, 0.9)); }
         .ticker-pos .ticker-name { color: var(--success); }
         .ticker-neg .ticker-name { color: var(--danger); }
-        .analytics-wrap.analytics-wide { max-width: none; }
+        .analytics-wrap.analytics-wide { max-width: 1400px; }
         .card-navy { align-self: start; background: linear-gradient(160deg, #0a1a2f, #020617); }
         .ticker-card .ticker-name { font-weight: 700; font-size: 15px; margin-bottom: 8px; }
         .ticker-card .ticker-row { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; color: var(--text-muted); }
@@ -343,8 +344,13 @@
         .metrics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 8px; height: 100%; align-content: center; }
         .metrics-grid .metric { text-align: center; padding: 12px 8px; }
         .metrics-grid .metric-value { font-size: 17px; }
-        .card-accent-good { border-top: 3px solid var(--success); }
-        .card-accent-bad { border-top: 3px solid var(--danger); }
+        .card-accent-good, .card-pos { border-color: rgba(74, 222, 128, 0.35); background: linear-gradient(160deg, rgba(74, 222, 128, 0.08), rgba(2, 6, 23, 0.9)); }
+        .card-accent-bad, .card-neg { border-color: rgba(249, 115, 115, 0.35); background: linear-gradient(160deg, rgba(249, 115, 115, 0.08), rgba(2, 6, 23, 0.9)); }
+        .card-pos .card-title { color: var(--success); border-color: rgba(74, 222, 128, 0.45); background: linear-gradient(160deg, rgba(74, 222, 128, 0.14), rgba(2, 6, 23, 0.9)); }
+        .card-neg .card-title { color: var(--danger); border-color: rgba(249, 115, 115, 0.45); background: linear-gradient(160deg, rgba(249, 115, 115, 0.14), rgba(2, 6, 23, 0.9)); }
+        .card-accent-good .card-title { color: var(--success); border-color: rgba(74, 222, 128, 0.45); background: linear-gradient(160deg, rgba(74, 222, 128, 0.14), rgba(2, 6, 23, 0.9)); }
+        .card-accent-bad .card-title { color: var(--danger); border-color: rgba(249, 115, 115, 0.45); background: linear-gradient(160deg, rgba(249, 115, 115, 0.14), rgba(2, 6, 23, 0.9)); }
+        .equity-chart-wrap { position: relative; height: 320px; }
         .trade-highlight { display: grid; grid-template-columns: 1fr; gap: 6px; }
         .trade-highlight .metric { padding: 6px 10px; }
         .trade-highlight .metric-value { font-size: 13px; }
@@ -406,6 +412,7 @@
             header .uk-clock {
                 grid-column: 1;
                 grid-row: auto;
+                text-align: center;
             }
             header .header-right { align-items: center; }
             header .nav { flex-wrap: wrap; justify-content: center; }
@@ -415,12 +422,12 @@
 <body>
 
 <header>
-    <div class="title">{{ title }}</div>
-
     <div id="uk-clock" class="uk-clock" aria-live="off">
         <span class="uk-clock-label">UK Time</span>
         <span id="uk-clock-value">--:--:--</span>
     </div>
+
+    <div class="title">{{ title }}</div>
 
     <div class="header-right">
         {% if role == 'owner' %}

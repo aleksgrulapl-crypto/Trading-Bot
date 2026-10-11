@@ -19,7 +19,7 @@
 </div>
 {% endif %}
 <div class="analytics-top-grid">
-  <div class="card">
+  <div class="card {% if analytics.total_pl is not none and analytics.total_pl >= 0 %}card-pos{% elif analytics.total_pl is not none %}card-neg{% endif %}">
     <div class="card-header">
       <div class="card-title">Performance Overview</div>
     </div>
@@ -131,7 +131,7 @@
     <div class="card-title">Equity Curve</div>
   </div>
   {% if detailed.equity_curve %}
-  <canvas id="equityCurveChart" height="90"></canvas>
+  <div class="equity-chart-wrap"><canvas id="equityCurveChart"></canvas></div>
   {% else %}
   <div class="small">No closed trades yet.</div>
   {% endif %}
@@ -211,6 +211,7 @@
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       interaction: {
         mode: 'index',
         intersect: false,
