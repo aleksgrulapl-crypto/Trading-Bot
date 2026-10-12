@@ -539,16 +539,18 @@ def investor_breakdown(
     configured owner (``config.OWNER_INVESTOR_NAME``) as pre-ledger equity,
     or left unattributed if no owner is configured/present.
 
-    A configured owner performance fee (``config.OWNER_INVESTOR_OVERRIDE_PCT``,
-    default 15%) is skimmed from each *profitable* closed trade while other
-    investors hold units, and credited to the owner as additional units at
-    that moment's NAV (covering backend/hosting costs) — this dilutes other
-    unit holders only going forward, never retroactively.
+    A configured operator allocation (``config.OWNER_INVESTOR_OVERRIDE_PCT``,
+    default 15%) is issued to the owner as operator units, covering
+    backend/hosting costs. It applies only when NAV-per-unit exceeds its
+    previous peak (a high-water mark), and only to the growth above that
+    peak, so recovering earlier drawdowns attracts no allocation. Units are
+    issued at that moment's NAV, diluting other unit holders only going
+    forward, never retroactively.
 
     ``owner_override_pct_override``, when given, replaces the configured
     percentage for this call only — used by dashboard.py to run a second,
     "Trader-sleeve" simulation (restricted to full-tier investors) with the
-    fee disabled, since that sleeve's profits are split purely pro-rata.
+    allocation disabled, since that sleeve's profits are split purely pro-rata.
     """
     as_of = as_of or _now_naive_uk()
 
@@ -617,10 +619,14 @@ def investor_breakdown(
     fund_value = 0.0
     total_units = 0.0
     nav_per_unit = 1.0
+    # High-water mark: the highest NAV-per-unit reached after any operator
+    # allocation. Operator units are only issued on NAV growth above it.
+    high_water_mark = 1.0
     investor_units: Dict[str, float] = {}
 
     for ev in timeline:
         if ev["kind"] == "pnl":
+            prior_nav = nav_per_unit
             fund_value += ev["amount"]
             if total_units > 0:
                 nav_per_unit = fund_value / total_units
@@ -630,16 +636,21 @@ def investor_breakdown(
                 # whoever deposits next rather than crash on a divide-by-zero.
                 fund_value = 0.0
                 nav_per_unit = 1.0
+                high_water_mark = 1.0
                 continue
 
-            # Owner performance fee on profitable trades, paid in newly
-            # issued owner units (dilutes other holders going forward only).
+            # Operator allocation, paid in newly issued operator units
+            # (dilutes other holders going forward only). Only the part of
+            # NAV growth above the previous peak (high-water mark) counts.
             if ev["amount"] > 0 and owner_key and 0 < owner_override_pct < 100 and nav_per_unit > 0:
-                fee = ev["amount"] * (owner_override_pct / 100.0)
-                fee_units = fee / nav_per_unit
-                investor_units[owner_key] = investor_units.get(owner_key, 0.0) + fee_units
-                total_units += fee_units
-                nav_per_unit = fund_value / total_units if total_units > 0 else nav_per_unit
+                gain_above_peak = (nav_per_unit - max(high_water_mark, prior_nav)) * total_units
+                if gain_above_peak > 0:
+                    allocation = gain_above_peak * (owner_override_pct / 100.0)
+                    allocation_units = allocation / nav_per_unit
+                    investor_units[owner_key] = investor_units.get(owner_key, 0.0) + allocation_units
+                    total_units += allocation_units
+                    nav_per_unit = fund_value / total_units if total_units > 0 else nav_per_unit
+            high_water_mark = max(high_water_mark, nav_per_unit)
         else:  # capital event
             name = ev["investor"]
             safe_nav = nav_per_unit if nav_per_unit > 0 else 0.000001
