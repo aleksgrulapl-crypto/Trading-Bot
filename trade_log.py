@@ -1437,6 +1437,16 @@ def validate_trade_payload(payload: Dict[str, Any]) -> Tuple[bool, str]:
     return True, ""
 
 
+def _notify_opened(trade: Dict[str, Any]) -> None:
+    """Best-effort "position opened" email, sent whenever a brand-new open
+    trade row is created (webhook, order flow, or broker reconciliation)."""
+    try:
+        import notifications
+        notifications.notify_position_opened(trade)
+    except Exception:
+        logger.exception("failed to send position-opened notification")
+
+
 def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional[Dict[str, Any]]:
     """Insert or update an open trade record."""
     pos = payload.get("position") or payload.get("raw") or payload
@@ -1622,6 +1632,7 @@ def upsert_open_trade(payload: Dict[str, Any], path: str = LOG_PATH) -> Optional
         }
         trades.append(new_trade)
         if save_raw_log(trades, path):
+            _notify_opened(new_trade)
             return new_trade
         return None
 
@@ -2065,7 +2076,9 @@ def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = L
 
         trades, deduped = dedupe_trade_log_entries(trades)
         if closed or added or matched_updates or reopened or deduped:
-            save_raw_log(trades, path)
+            if save_raw_log(trades, path):
+                for new_pos in added:
+                    _notify_opened(new_pos)
 
     return {"closed": closed, "added": added, "reopened": reopened}
 
