@@ -31,7 +31,7 @@
         </div>
       </div>
       <div class="metric">
-        <div class="metric-label">Total Fees Deducted</div>
+        <div class="metric-label">Total Broker Fees Deducted</div>
         <div class="metric-value metric-bad">£{{ "%.2f"|format(breakdown.total_fees or 0) }}</div>
       </div>
     </div>
@@ -44,11 +44,15 @@
       <em>after</em> their own deposit, never retroactively.
       {% if breakdown.owner_name %}
       <strong>{{ breakdown.owner_name }}</strong> additionally receives a
-      {{ "%.0f"|format(breakdown.owner_override_pct) }}% performance fee on
-      profitable closed <strong>TradingView/Hedge</strong> trades only (for
-      covering backend/hosting costs as account owner), paid in newly issued
-      units at that trade's NAV — this fee is separate from and does not
-      apply to Trader-sleeve profits.
+      discretionary <strong>operator allocation</strong> of
+      {{ "%.0f"|format(breakdown.owner_override_pct) }}% for covering
+      backend/hosting costs, on profitable closed
+      <strong>TradingView/Hedge</strong> trades only. It is issued as
+      <strong>operator units</strong> at that trade's NAV, and only when NAV
+      exceeds its previous peak (high-water mark) &mdash; the allocation
+      applies solely to growth above that peak, so recovering earlier losses
+      attracts no allocation. It is separate from and does not apply to
+      Trader-sleeve profits.
       {% endif %}
       {% if breakdown.pre_ledger_pnl %}
       <br>Note: £{{ "%.2f"|format(breakdown.pre_ledger_pnl) }} of TradingView
@@ -63,10 +67,11 @@
       {% endif %}
       {% if breakdown.reconciliation_adjustment %}
       <br>Note: the live broker balance differs from the sum of recorded
-      trade PnL by £{{ "%.2f"|format(breakdown.reconciliation_adjustment) }}
-      (likely trades missing from the trade log, fees, or swaps). This has
-      been credited to {{ breakdown.owner_name }} so the Overall Gain/Loss
-      above always matches the sum of each investor's figures below.
+      trade PnL by £{{ "%.2f"|format(breakdown.reconciliation_adjustment) }}.
+      Broker adjustments, missing trades, swaps, and reconciliation
+      differences are allocated to the Operator ({{ breakdown.owner_name }}),
+      so the Overall Gain/Loss above always matches the sum of each
+      investor's figures below.
       {% endif %}
       {% if breakdown.total_fees %}
       <br>£{{ "%.2f"|format(breakdown.total_fees) }} of manually-logged broker
@@ -103,7 +108,7 @@
           <td>
             {{ inv.investor }}
             <span class="tier-badge tier-badge-{{ inv.tier }}">{{ inv.tier }}</span>
-            {% if inv.is_owner %}<span class="pill pill-status" title="Receives a {{ '%.0f'|format(breakdown.owner_override_pct) }}% performance fee on profitable TradingView trades">+{{ "%.0f"|format(breakdown.owner_override_pct) }}%</span>{% endif %}
+            {% if inv.is_owner %}<span class="pill pill-status" title="Receives a {{ '%.0f'|format(breakdown.owner_override_pct) }}% operator allocation (operator units) on TradingView growth above the high-water mark">Operator +{{ "%.0f"|format(breakdown.owner_override_pct) }}%</span>{% endif %}
           </td>
           <td>£{{ "%.2f"|format(inv.deposited) }}</td>
           <td>£{{ "%.2f"|format(inv.withdrawn) }}</td>
@@ -131,8 +136,8 @@
     </table>
     <p class="small" style="margin-top: 10px;">
       "TradingView P&amp;L" is every investor's pro-rata share of
-      automated TradingView/Hedge trade PnL (the Owner's performance fee is
-      skimmed from this sleeve only). "Trader P&amp;L" is the discretionary
+      automated TradingView/Hedge trade PnL (the Operator's allocation is
+      issued from this sleeve only). "Trader P&amp;L" is the discretionary
       trade PnL, shared only between the Owner and investors granted
       <strong>Full</strong> tier on the <a href="/dashboard/investors">Investors page</a> —
       shown as "n/a" for TradingView-tier investors, who do not participate
