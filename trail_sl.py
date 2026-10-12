@@ -249,7 +249,7 @@ def run_trailing_sl() -> None:
         # start trailing without waiting on a big percentage move.
         activation_perc = _activation_threshold_perc(p, side, entry_price_f)
         pnl_gbp = _profit_in_gbp(p.get("profit", p.get("upl")), p)
-        pnl_floor_gbp = float(getattr(config, "TRAIL_ACTIVATION_PNL_GBP", 2.0) or 0.0)
+        pnl_floor_gbp = float(getattr(config, "TRAIL_ACTIVATION_PNL_GBP", 15.0) or 0.0)
         meets_perc = profit_perc >= activation_perc
         meets_pnl_floor = pnl_gbp is not None and pnl_floor_gbp > 0 and pnl_gbp >= pnl_floor_gbp
         if not (meets_perc or meets_pnl_floor):
