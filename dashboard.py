@@ -984,10 +984,53 @@ def _render_static_page(template):
     )
 
 
+def _terms_last_updated() -> str:
+    """Date the Terms of Service were last changed. The date is stamped
+    automatically: a hash of the terms template is stored alongside the date,
+    and whenever the template's content changes (i.e. after a deploy that
+    edits the ToS) the date is reset to today."""
+    import hashlib
+    import json
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "terms.html")
+    state_path = getattr(config, "TERMS_VERSION_PATH", "/data/terms_version.json")
+    today = datetime.now().strftime("%d %B %Y").lstrip("0")
+    try:
+        with open(path, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+    except Exception:
+        return today
+
+    state = {}
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f) or {}
+    except Exception:
+        state = {}
+
+    if state.get("hash") == digest and state.get("date"):
+        return state["date"]
+
+    try:
+        os.makedirs(os.path.dirname(state_path) or ".", exist_ok=True)
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump({"hash": digest, "date": today}, f)
+    except Exception:
+        logger.exception("failed to persist terms version")
+    return today
+
+
 @dashboard.route("/dashboard/terms")
 @login_required
 def dashboard_terms():
-    return _render_static_page("terms.html")
+    ctx = _build_request_context()
+    return render_template(
+        "terms.html",
+        title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
+        cache_bust=time.time(),
+        account=ctx["account"],
+        terms_last_updated=_terms_last_updated(),
+    )
 
 
 @dashboard.route("/dashboard/contact")

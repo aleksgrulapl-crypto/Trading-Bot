@@ -44,9 +44,9 @@ VALID_TYPES = frozenset(("deposit", "withdrawal", "fee"))
 
 # Fee entries aren't tied to a specific investor's capital — they're
 # broker-level costs (e.g. Capital.com commission/financing charges) that
-# reduce the fund as a whole. Entries of type "fee" default to this label
-# when no investor is supplied.
-FEE_ENTRY_LABEL = "Fund"
+# reduce the fund as a whole. Entries of type "fee" are always assigned this
+# label (any supplied investor name is ignored).
+FEE_ENTRY_LABEL = "Broker"
 
 # Module-level lock protecting all read-modify-write operations on the deposits log file.
 _deposits_lock = threading.Lock()
@@ -205,7 +205,7 @@ def add_entry(
     ROI/ownership share can be calculated per-person. Fee entries are a
     broker-level cost (e.g. Capital.com commission/financing charges)
     rather than one investor's capital, so *investor* may be left blank
-    for them and defaults to ``FEE_ENTRY_LABEL``.
+    for them and is always set to ``FEE_ENTRY_LABEL`` ("Broker").
     """
     normalized_type = str(entry_type or "").strip().lower()
     if normalized_type not in VALID_TYPES:
@@ -216,11 +216,10 @@ def add_entry(
         return False, None, "invalid_amount"
 
     investor_name = str(investor or "").strip()
-    if not investor_name:
-        if normalized_type == "fee":
-            investor_name = FEE_ENTRY_LABEL
-        else:
-            return False, None, "invalid_investor"
+    if normalized_type == "fee":
+        investor_name = FEE_ENTRY_LABEL
+    elif not investor_name:
+        return False, None, "invalid_investor"
     investor_name = investor_name[:100]
 
     # Accept a caller-supplied date (YYYY-MM-DD or ISO datetime); fall back to now.

@@ -254,6 +254,8 @@ SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "True").lower() in ("1", "true", "yes")
 # needing to edit environment variables. Falls back to NOTIFY_EMAIL_ENABLED /
 # NOTIFY_EMAIL_TO above when this file doesn't exist yet.
 NOTIFY_SETTINGS_PATH = os.getenv("NOTIFY_SETTINGS_PATH", "/data/notify_settings.json")
+# Stores the hash/date used to auto-stamp "last updated" on the Terms of Service.
+TERMS_VERSION_PATH = os.getenv("TERMS_VERSION_PATH", "/data/terms_version.json")
 
 # File paths and persistence
 TRADE_LOG_PATH = os.getenv("TRADE_LOG_PATH", os.getenv("TRADE_LOG_FILE", "/data/trade_log.json"))
