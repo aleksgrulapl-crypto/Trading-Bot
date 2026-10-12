@@ -199,11 +199,15 @@ def notify_position_opened(trade: Dict[str, Any]) -> bool:
     side = str(trade.get("side") or "?").upper()
     logger.info("notify_position_opened: queueing email for %s %s (source=%s)",
                 ticker, side, trade.get("trade_source"))
-    subject = f"Position opened: {ticker} {side}"
+    source_label = {"tradingview": "TradingView", "trader": "Trader", "hedge": "Hedge"}.get(
+        str(trade.get("trade_source") or trade.get("origin") or "").strip().lower(), "Unknown"
+    )
+    subject = f"Position opened: {ticker} {side} ({source_label})"
     body = (
         f"A new position was opened.\n\n"
         f"Ticker: {ticker}\n"
         f"Side: {side}\n"
+        f"Source: {source_label}\n"
         f"Size: {trade.get('size')}\n"
         f"Entry price: {trade.get('entry_price')}\n"
         f"Deal ID: {trade.get('dealId')}\n"
