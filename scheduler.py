@@ -18,6 +18,7 @@ from utils import timestamp
 
 from trail_sl import run_trailing_sl
 from history_sync import sync_closed_trades  # only import the function
+from trade_log import reconcile_with_positions
 
 UK_TZ = pytz.timezone("Europe/London")
 
@@ -189,6 +190,24 @@ class Scheduler:
             time.sleep(sleep_interval)
 
 
+def sync_open_positions() -> None:
+    """Reconcile the trade log against live broker positions so positions
+    opened outside the bot (e.g. manually by the trader) are logged - and the
+    "position opened" email sent - promptly, instead of only when someone
+    next loads the dashboard (the only other caller of
+    reconcile_with_positions)."""
+    try:
+        raw_positions = session.get_positions()
+        if not raw_positions:
+            return
+        positions = session.enrich_positions(raw_positions)
+        recon = reconcile_with_positions(positions)
+        if recon.get("added"):
+            logger.info("sync_open_positions: logged %d new open position(s)", len(recon["added"]))
+    except Exception:
+        logger.exception("sync_open_positions failed")
+
+
 # single scheduler instance
 scheduler = Scheduler()
 
@@ -210,6 +229,8 @@ def start_scheduler() -> None:
     # Closed trade sync job (SL/TP/manual closes)
     scheduler.add_interval_job(5, sync_closed_trades)
 
+    # Open position sync (manual/trader opens that bypass the webhook)
+    scheduler.add_interval_job(10, sync_open_positions)
     # Optional daily/hourly logging jobs (examples)
     scheduler.add_daily_job(getattr(config, "DAILY_REPORT_HOUR", 22), getattr(config, "DAILY_REPORT_MINUTE", 0), lambda: log_equity("equity_log.json"))
     scheduler.add_hourly_job(0, lambda: log_available("available_log.json"))

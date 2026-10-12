@@ -186,18 +186,28 @@ def _send_email(subject: str, body: str) -> bool:
 
 def notify_position_opened(trade: Dict[str, Any]) -> bool:
     """Email when a position is opened, only when the dashboard toggle is On."""
-    if not is_enabled():
-        return False
     if not trade:
+        return False
+    if not is_enabled():
+        logger.info(
+            "notify_position_opened: skipped for %s - email toggle is Off (settings file %s)",
+            trade.get("ticker"), SETTINGS_PATH,
+        )
         return False
 
     ticker = trade.get("ticker") or "?"
     side = str(trade.get("side") or "?").upper()
-    subject = f"Position opened: {ticker} {side}"
+    logger.info("notify_position_opened: queueing email for %s %s (source=%s)",
+                ticker, side, trade.get("trade_source"))
+    source_label = {"tradingview": "TradingView", "trader": "Trader", "hedge": "Hedge"}.get(
+        str(trade.get("trade_source") or trade.get("origin") or "").strip().lower(), "Unknown"
+    )
+    subject = f"Position opened: {ticker} {side} ({source_label})"
     body = (
         f"A new position was opened.\n\n"
         f"Ticker: {ticker}\n"
         f"Side: {side}\n"
+        f"Source: {source_label}\n"
         f"Size: {trade.get('size')}\n"
         f"Entry price: {trade.get('entry_price')}\n"
         f"Deal ID: {trade.get('dealId')}\n"
