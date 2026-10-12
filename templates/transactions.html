@@ -131,9 +131,16 @@ function onTransactionTypeChange() {
     const investorInput = document.getElementById("investor");
     const investorField = document.getElementById("investor-field");
     // Fees are a broker-level cost (not one investor's capital), so the
-    // investor field is optional for them and defaults server-side to "Fund".
+    // investor is fixed to "Broker" (also enforced server-side).
     const isFee = type === "fee";
     investorInput.required = !isFee;
+    investorInput.readOnly = isFee;
+    if (isFee) {
+        investorInput.dataset.prev = investorInput.value;
+        investorInput.value = "Broker";
+    } else if (investorInput.value === "Broker") {
+        investorInput.value = investorInput.dataset.prev || "";
+    }
     investorField.style.opacity = isFee ? "0.6" : "1";
 }
 
