@@ -115,6 +115,9 @@
             </td>
             <td>
               {% if is_owner %}
+              {% if p.trade_type == 'Trader' %}
+              <button onclick="toggleTrail('{{ p.dealId or p.id }}', {{ 'false' if p.trail_enabled else 'true' }})">SL Trail: {{ 'ON' if p.trail_enabled else 'OFF' }}</button>
+              {% endif %}
               <button onclick="closePosition('{{ p.dealId or p.id }}')">Close</button>
               {% else %}
               <span class="small">—</span>
