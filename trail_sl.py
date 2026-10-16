@@ -8,6 +8,7 @@ from typing import Optional
 
 import config
 import session
+import trail_settings
 from config import TRAIL_ACTIVATION_PERC, TRAIL_SL_PERC, API_POSITIONS
 
 logger = logging.getLogger("trail_sl")
@@ -205,12 +206,18 @@ def run_trailing_sl() -> None:
         logger.exception("Failed to fetch/enrich positions for trailing SL")
         return
 
+    disabled = trail_settings.disabled_ids()
+
     for p in enriched:
         # deal id may be under 'dealId' or 'id'
         deal_id = p.get("dealId") or p.get("id")
         if not deal_id:
             continue
         deal_id = str(deal_id)
+
+        if deal_id in disabled:
+            logger.debug("Skipping %s: SL trail switched off for this trade", deal_id)
+            continue
 
         direction = (p.get("direction") or "").strip()
         side = _normalize_side(direction)

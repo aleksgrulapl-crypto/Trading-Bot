@@ -533,6 +533,23 @@ function closePosition(dealId) {
         .catch(err => console.error("Close error:", err));
 }
 
+function toggleTrail(dealId, enabled) {
+    const errorBanner = document.getElementById('error-banner');
+
+    fetch(`/dashboard/trail/${encodeURIComponent(dealId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: enabled })
+    })
+        .then(r => r.json())
+        .then(data => {
+            errorBanner.innerText = (data && data.message) || "Trail toggle failed.";
+            errorBanner.style.display = "block";
+            refreshDashboard();
+        })
+        .catch(err => console.error("Trail toggle error:", err));
+}
+
 function toggleEmailNotifications() {
     const errorBanner = document.getElementById('error-banner');
     const btn = document.getElementById('email-notify-btn');

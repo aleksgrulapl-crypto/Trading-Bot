@@ -22,6 +22,7 @@ import session
 import config
 import deposits
 import notifications
+import trail_settings
 from display_helpers import format_human
 from close_position import close_position as close_live_position
 from trade_log import (
@@ -725,6 +726,25 @@ def _build_request_context():
     combined_raw = [dict(t, _log_index=i) for i, t in enumerate(load_raw_log())]
     combined_trades = normalize_trades(dedupe_trades(combined_raw))
     combined_trades = _mark_delete_candidates(combined_trades, _live_position_deal_ids(raw_positions, positions))
+
+    # Annotate live positions with their trade type and SL-trail state so the
+    # dashboard can offer a per-trade trail toggle for Trader trades.
+    try:
+        if raw_positions:
+            trail_settings.prune(p.get("dealId") or p.get("id") for p in positions if isinstance(p, dict))
+        trail_off = trail_settings.disabled_ids()
+        type_by_deal = {}
+        for t in combined_raw:
+            if t.get("status") == "OPEN" and t.get("dealId"):
+                type_by_deal[str(t["dealId"])] = _trade_type_label(t)
+        for p in positions:
+            if not isinstance(p, dict):
+                continue
+            did = str(p.get("dealId") or p.get("id") or "")
+            p["trade_type"] = type_by_deal.get(did, "Trader")
+            p["trail_enabled"] = did not in trail_off
+    except Exception:
+        logger.exception("dashboard: failed to annotate positions with trail state")
     combined_trades.sort(
         key=lambda t: (t.get("time_exited") or t.get("time_entered") or ""),
         reverse=True,
@@ -1470,6 +1490,30 @@ def dashboard_toggle_email_notifications():
         "status": "success",
         "enabled": bool(settings.get("enabled")),
         "recipient": settings.get("to") or notifications.get_recipient(),
+    }), 200
+
+
+@dashboard.route("/dashboard/trail/<position_id>", methods=["POST"])
+@owner_required
+def dashboard_toggle_trail(position_id: str):
+    """Owner-only: switch SL trailing on/off for one live position."""
+    position_id = str(position_id or "").strip()
+    if not position_id:
+        return jsonify({"status": "error", "message": "missing_position_id"}), 400
+
+    payload = request.get_json(silent=True) or {}
+    enabled = payload.get("enabled")
+    if enabled is None:
+        enabled = trail_settings.is_trail_disabled(position_id)
+    else:
+        enabled = str(enabled).strip().lower() in ("1", "true", "yes", "on")
+
+    if not trail_settings.set_trail_enabled(position_id, enabled):
+        return jsonify({"status": "error", "message": "save_failed"}), 500
+    return jsonify({
+        "status": "success",
+        "enabled": enabled,
+        "message": f"SL Trail {'ON' if enabled else 'OFF'} for {position_id}.",
     }), 200
 
 

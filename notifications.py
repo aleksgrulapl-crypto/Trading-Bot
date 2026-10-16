@@ -235,17 +235,7 @@ def notify_position_closed(trade: Dict[str, Any], balance: Optional[float] = Non
 
     subject = f"Position closed: {ticker} {side} ({result}, {_fmt_money(display_pnl)})"
 
-    # The balance we're handed is fetched from the broker right after the
-    # close request returns, before the broker has necessarily settled this
-    # trade's realised P&L into the account's funds figure. Add this trade's
-    # own PnL on top so the reported balance reflects the win/loss that was
-    # just applied, rather than a pre-settlement snapshot.
     balance_after = balance
-    if balance is not None and display_pnl is not None:
-        try:
-            balance_after = float(balance) + float(display_pnl)
-        except (TypeError, ValueError):
-            balance_after = balance
 
     body = (
         f"A position was closed.\n\n"

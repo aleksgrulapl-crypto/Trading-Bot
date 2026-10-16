@@ -255,6 +255,7 @@ SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "True").lower() in ("1", "true", "yes")
 # NOTIFY_EMAIL_TO above when this file doesn't exist yet.
 NOTIFY_SETTINGS_PATH = os.getenv("NOTIFY_SETTINGS_PATH", "/data/notify_settings.json")
 # Stores the hash/date used to auto-stamp "last updated" on the Terms of Service.
+TRAIL_DISABLED_PATH = os.getenv("TRAIL_DISABLED_PATH", "/data/trail_disabled.json")
 TERMS_VERSION_PATH = os.getenv("TERMS_VERSION_PATH", "/data/terms_version.json")
 
 # File paths and persistence
