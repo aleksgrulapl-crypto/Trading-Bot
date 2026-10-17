@@ -33,6 +33,11 @@
       broker fees (e.g. Capital.com commission/financing charges) here so they stay
       out of the trade log/analytics as noise but are still reflected in the
       <a href="/dashboard/roi">ROI page</a>, deducted from the Overall P&amp;L.
+      A Withdrawal with operator <strong>Backend</strong> covers backend costs: the same
+      percentage of units is taken from every investor. A Backend Deposit adds units back
+      the same way (to balance an over-estimated cost). Deposits/withdrawals never affect
+      the Daily/Weekly/Monthly returns, which reflect trade profitability only.
+      {% if totals.backend_net_cost %}Net backend cost so far: £{{ "%.2f"|format(totals.backend_net_cost) }}.{% endif %}
     </p>
   </div>
 
@@ -55,10 +60,11 @@
                style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 120px;">
       </div>
       <div id="investor-field">
-        <label class="small" for="investor">Investor</label><br>
-        <input type="text" name="investor" id="investor" list="investor-list" maxlength="100" required placeholder="e.g. Aleks"
+        <label class="small" for="investor">Investor / Operator</label><br>
+        <input type="text" name="investor" id="investor" list="investor-list" maxlength="100" required placeholder="e.g. Aleks or Backend"
                style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 140px;">
         <datalist id="investor-list">
+          <option value="Backend">
           {% for inv in investors %}
           <option value="{{ inv }}">
           {% endfor %}

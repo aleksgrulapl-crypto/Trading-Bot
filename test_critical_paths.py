@@ -4686,3 +4686,58 @@ class TestRoiTierBreakdown:
         by_name = {i["investor"]: i for i in breakdown["investors"]}
         assert by_name["Bob"]["tv_allocated_gain_loss"] == pytest.approx(85.2, abs=0.01)
 
+
+
+class TestBackendEntries:
+    def _e(self, t, amt, inv, ts):
+        return {"type": t, "amount": amt, "investor": inv, "occurred_at": ts, "created_at": ts}
+
+    def test_backend_withdrawal_scales_every_investor_pro_rata(self):
+        import deposits
+        entries = [
+            self._e("deposit", 600.0, "A", "2026-01-01T00:00:00"),
+            self._e("deposit", 400.0, "B", "2026-01-01T00:00:00"),
+            self._e("withdrawal", 100.0, "backend", "2026-01-02T00:00:00"),
+        ]
+        r = deposits.investor_breakdown(entries, [], owner_override_pct_override=0)
+        by = {i["investor"]: i for i in r["investors"]}
+        assert set(by) == {"A", "B"}
+        assert by["A"]["current_value"] == 540.0
+        assert by["B"]["current_value"] == 360.0
+        assert by["A"]["net_contribution"] == 600.0
+        assert by["A"]["allocated_gain_loss"] == -60.0
+
+    def test_backend_deposit_adds_units_pro_rata(self):
+        import deposits
+        entries = [
+            self._e("deposit", 600.0, "A", "2026-01-01T00:00:00"),
+            self._e("deposit", 400.0, "B", "2026-01-01T00:00:00"),
+            self._e("deposit", 100.0, "Backend", "2026-01-02T00:00:00"),
+        ]
+        r = deposits.investor_breakdown(entries, [], owner_override_pct_override=0)
+        by = {i["investor"]: i for i in r["investors"]}
+        assert by["A"]["current_value"] == 660.0
+        assert by["B"]["current_value"] == 440.0
+
+    def test_backend_excluded_from_investor_list_totals_and_pledges(self):
+        import deposits
+        entries = [
+            self._e("deposit", 100.0, "A", "2026-01-01T00:00:00"),
+            self._e("withdrawal", 10.0, "Backend", "2026-01-02T00:00:00"),
+        ]
+        assert deposits.list_investors(entries) == ["A"]
+        s = deposits.summarize(entries)
+        assert s["total_withdrawals"] == 0 and s["backend_net_cost"] == 10.0
+        assert deposits.add_pledge("BACKEND", 100)[0] is False
+
+    def test_period_returns_ignore_withdrawals(self, tmp_path):
+        import deposits
+        from datetime import datetime
+        today = deposits._now_naive_uk().date().isoformat()
+        path = str(tmp_path / "h.json")
+        import json
+        json.dump([{"date": today, "balance": 1000.0, "recorded_at": today + "T00:00:01"}], open(path, "w"))
+        now_iso = deposits._now_iso()
+        entries = [{"type": "withdrawal", "amount": 100.0, "investor": "Backend", "created_at": now_iso}]
+        result = deposits.compute_period_returns(910.0, path=path, entries=entries)
+        assert result["daily"] == 1.0

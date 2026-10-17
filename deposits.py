@@ -48,6 +48,17 @@ VALID_TYPES = frozenset(("deposit", "withdrawal", "fee"))
 # label (any supplied investor name is ignored).
 FEE_ENTRY_LABEL = "Broker"
 
+# A deposit/withdrawal logged against this operator is a backend-cost entry,
+# not an investor's capital: a withdrawal removes the same percentage of
+# units from every investor (covering hosting/backend costs) and a deposit
+# adds units to every investor the same way (balancing an over-estimated
+# cost). The operator itself never holds units.
+BACKEND_ENTRY_LABEL = "Backend"
+
+
+def is_backend_investor(name: Any) -> bool:
+    return str(name or "").strip().lower() == BACKEND_ENTRY_LABEL.lower()
+
 # Module-level lock protecting all read-modify-write operations on the deposits log file.
 _deposits_lock = threading.Lock()
 
@@ -221,6 +232,8 @@ def add_entry(
     elif not investor_name:
         return False, None, "invalid_investor"
     investor_name = investor_name[:100]
+    if is_backend_investor(investor_name):
+        investor_name = BACKEND_ENTRY_LABEL
 
     # Accept a caller-supplied date (YYYY-MM-DD or ISO datetime); fall back to now.
     when = (str(occurred_at).strip() if occurred_at else "") or _now_iso()
@@ -264,6 +277,8 @@ def summarize(entries: List[Dict[str, Any]]) -> Dict[str, float]:
     total_deposits = 0.0
     total_withdrawals = 0.0
     total_fees = 0.0
+    backend_deposits = 0.0
+    backend_withdrawals = 0.0
     for e in entries or []:
         if not isinstance(e, dict):
             continue
@@ -272,16 +287,24 @@ def summarize(entries: List[Dict[str, Any]]) -> Dict[str, float]:
             amt = float(amt)
         except (TypeError, ValueError):
             continue
+        backend = is_backend_investor(e.get("investor"))
         if e.get("type") == "deposit":
-            total_deposits += amt
+            if backend:
+                backend_deposits += amt
+            else:
+                total_deposits += amt
         elif e.get("type") == "withdrawal":
-            total_withdrawals += amt
+            if backend:
+                backend_withdrawals += amt
+            else:
+                total_withdrawals += amt
         elif e.get("type") == "fee":
             total_fees += amt
     return {
         "total_deposits": round(total_deposits, 2),
         "total_withdrawals": round(total_withdrawals, 2),
         "total_fees": round(total_fees, 2),
+        "backend_net_cost": round(backend_withdrawals - backend_deposits, 2),
         "net": round(total_deposits - total_withdrawals, 2),
     }
 
@@ -330,7 +353,7 @@ def list_investors(entries: List[Dict[str, Any]]) -> List[str]:
         if isinstance(e, dict) and e.get("type") in ("deposit", "withdrawal")
     }
     names.discard("")
-    return sorted(names, key=str.lower)
+    return sorted((n for n in names if not is_backend_investor(n)), key=str.lower)
 
 
 # -----------------------------------------------------------------------
@@ -377,7 +400,7 @@ def save_pledges(pledges: List[Dict[str, Any]], path: str = PLEDGES_PATH) -> boo
 def add_pledge(name: str, amount: Any, note: str = "", path: str = PLEDGES_PATH) -> Tuple[bool, Optional[Dict[str, Any]], str]:
     """Record a new "intent to invest" pledge. Returns (ok, record, status)."""
     investor_name = str(name or "").strip()
-    if not investor_name:
+    if not investor_name or is_backend_investor(investor_name):
         return False, None, "invalid_investor"
     investor_name = investor_name[:100]
 
@@ -579,8 +602,14 @@ def investor_breakdown(
             continue
 
         occurred = _parse_entry_datetime(e.get("occurred_at")) or _parse_entry_datetime(e.get("created_at"))
-        capital_events.append({"ts": occurred or as_of, "kind": "capital", "ctype": etype, "investor": name, "amount": amt})
+        backend = is_backend_investor(name)
+        capital_events.append({
+            "ts": occurred or as_of, "kind": "capital", "ctype": etype,
+            "investor": name, "amount": amt, "backend": backend,
+        })
 
+        if backend:
+            continue
         if etype == "deposit":
             deposited_totals[name] = deposited_totals.get(name, 0.0) + amt
         else:
@@ -605,7 +634,7 @@ def investor_breakdown(
         None,
     ) if owner_name else None
 
-    first_capital_ts = min((ev["ts"] for ev in capital_events), default=None)
+    first_capital_ts = min((ev["ts"] for ev in capital_events if not ev["backend"]), default=None)
 
     pre_ledger_pnl = round(
         sum(ev["amount"] for ev in pnl_events if first_capital_ts is None or ev["ts"] < first_capital_ts),
@@ -652,6 +681,21 @@ def investor_breakdown(
                     nav_per_unit = fund_value / total_units if total_units > 0 else nav_per_unit
             high_water_mark = max(high_water_mark, nav_per_unit)
         else:  # capital event
+            if ev["backend"]:
+                # Backend cost: scale every holder's units by the same factor
+                # (NAV-per-unit is unchanged), so each investor bears or
+                # recovers the same percentage. No-op with no unit holders.
+                if total_units <= 0 or fund_value <= 0:
+                    continue
+                signed = -ev["amount"] if ev["ctype"] == "withdrawal" else ev["amount"]
+                factor = max(0.0, (fund_value + signed) / fund_value)
+                for holder in investor_units:
+                    investor_units[holder] *= factor
+                total_units *= factor
+                fund_value += signed if factor > 0 else -fund_value
+                if total_units > 0:
+                    nav_per_unit = fund_value / total_units
+                continue
             name = ev["investor"]
             safe_nav = nav_per_unit if nav_per_unit > 0 else 0.000001
             if ev["ctype"] == "deposit":
@@ -1007,6 +1051,44 @@ def _period_boundary_date(now: datetime, period: str):
     return today
 
 
+def _opening_row_on_or_after(history: List[Dict[str, Any]], boundary_date) -> Optional[Dict[str, Any]]:
+    boundary_s = boundary_date.isoformat()
+    candidates = [r for r in history if (r.get("date") or "") >= boundary_s]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda r: r.get("date") or "")
+
+
+def _row_start(row: Dict[str, Any]) -> Optional[datetime]:
+    """When a balance snapshot was taken (falls back to its date's midnight)."""
+    return _parse_entry_datetime(row.get("recorded_at")) or _parse_entry_datetime(row.get("date"))
+
+
+def _net_external_flow(
+    entries: List[Dict[str, Any]],
+    start: Optional[datetime],
+    end: Optional[datetime] = None,
+) -> float:
+    """Net deposits minus withdrawals (including Backend ones) logged in
+    [start, end). Calendar returns subtract this from the balance change so
+    they reflect trade profitability only, not money moved in or out.
+    Entries are placed by when they were logged (``created_at``), the same
+    clock the balance snapshots use."""
+    total = 0.0
+    for e in entries or []:
+        if not isinstance(e, dict) or e.get("type") not in ("deposit", "withdrawal"):
+            continue
+        ts = _parse_entry_datetime(e.get("created_at")) or _parse_entry_datetime(e.get("occurred_at"))
+        if ts is None or (start is not None and ts < start) or (end is not None and ts >= end):
+            continue
+        try:
+            amt = float(e.get("amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        total += amt if e.get("type") == "deposit" else -amt
+    return total
+
+
 def _opening_balance_on_or_after(history: List[Dict[str, Any]], boundary_date) -> Optional[float]:
     """Return the earliest recorded balance on/after *boundary_date*.
 
@@ -1015,13 +1097,11 @@ def _opening_balance_on_or_after(history: List[Dict[str, Any]], boundary_date) -
     before the bot began tracking balance history still gets a usable
     opening balance instead of no Return figure at all.
     """
-    boundary_s = boundary_date.isoformat()
-    candidates = [r for r in history if (r.get("date") or "") >= boundary_s]
-    if not candidates:
+    row = _opening_row_on_or_after(history, boundary_date)
+    if row is None:
         return None
-    candidates.sort(key=lambda r: r.get("date") or "")
     try:
-        return float(candidates[0].get("balance"))
+        return float(row.get("balance"))
     except (TypeError, ValueError):
         return None
 
@@ -1042,12 +1122,18 @@ def period_labels(now: Optional[datetime] = None) -> Dict[str, str]:
     }
 
 
-def compute_period_returns(current_balance: Optional[float], path: str = BALANCE_HISTORY_PATH) -> Dict[str, Optional[float]]:
+def compute_period_returns(
+    current_balance: Optional[float],
+    path: str = BALANCE_HISTORY_PATH,
+    entries: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Optional[float]]:
     """Return calendar-aligned {daily, weekly, monthly} % returns.
 
-    Each is ``(current_balance - opening_balance) / opening_balance * 100``
+    Each is ``(current_balance - net_flows - opening_balance) / opening_balance * 100``
     where *opening_balance* is the Balance recorded at that period's start
-    (today / this Monday / the 1st of this month). A period with no
+    (today / this Monday / the 1st of this month) and *net_flows* is the
+    deposits minus withdrawals (investor or Backend) logged since that
+    snapshot, so returns reflect trade profitability only. A period with no
     recorded opening balance yet returns ``None`` for both the percentage
     and the opening balance, rather than a misleading 0%.
     """
@@ -1067,14 +1153,21 @@ def compute_period_returns(current_balance: Optional[float], path: str = BALANCE
         return result
 
     now = _now_naive_uk()
+    if entries is None:
+        entries = load_entries()
     for period in ("daily", "weekly", "monthly"):
         boundary = _period_boundary_date(now, period)
-        opening = _opening_balance_on_or_after(history, boundary)
-        if opening is None:
+        row = _opening_row_on_or_after(history, boundary)
+        if row is None:
+            continue
+        try:
+            opening = float(row.get("balance"))
+        except (TypeError, ValueError):
             continue
         result[f"{period}_opening"] = round(opening, 2)
         if opening > 0:
-            result[period] = round((current_balance - opening) / opening * 100, 2)
+            flows = _net_external_flow(entries, _row_start(row))
+            result[period] = round((current_balance - flows - opening) / opening * 100, 2)
     return result
 
 
@@ -1162,6 +1255,7 @@ def compute_successful_weeks(
     path: str = BALANCE_HISTORY_PATH,
     closes_path: str = WEEKLY_CLOSES_PATH,
     now: Optional[datetime] = None,
+    entries: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Return {"successful_weeks", "total_weeks", "avg_weekly_return"}.
 
@@ -1175,7 +1269,8 @@ def compute_successful_weeks(
     now = now or _now_naive_uk()
     history = sorted(_load_balance_history(path), key=lambda r: r.get("date") or "")
     closes = _load_weekly_closes(closes_path)
-
+    if entries is None:
+        entries = load_entries()
     by_week: Dict[str, List[Dict[str, Any]]] = {}
     for r in history:
         try:
@@ -1196,6 +1291,7 @@ def compute_successful_weeks(
         except (TypeError, ValueError):
             continue
         closing = closes.get(ws)
+        window_end = None
         if closing is None:
             later = [w for w in weeks if w > ws]
             if not later:
@@ -1204,9 +1300,14 @@ def compute_successful_weeks(
                 closing = float(by_week[later[0]][0].get("balance"))
             except (TypeError, ValueError):
                 continue
+            window_end = _row_start(by_week[later[0]][0])
+        else:
+            week_monday = datetime.strptime(ws, "%Y-%m-%d")
+            window_end = week_monday + _timedelta(days=WEEK_CLOSE_WEEKDAY, hours=WEEK_CLOSE_HOUR)
         if opening <= 0:
             continue
-        returns.append((closing - opening) / opening * 100)
+        flows = _net_external_flow(entries, _row_start(by_week[ws][0]), window_end)
+        returns.append((closing - flows - opening) / opening * 100)
 
     returns = returns[-TRADING_YEAR_WEEKS:]
     return {
