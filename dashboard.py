@@ -770,10 +770,11 @@ def _build_request_context():
     # below, which are rolling trade-count/win-rate windows, not a Return %.
     try:
         deposits.record_daily_balance_snapshot((account or {}).get("balance"))
-        period_returns = deposits.compute_period_returns((account or {}).get("balance"))
+        pnl_events = _trade_pnl_events(combined_trades)
+        period_returns = deposits.compute_period_returns((account or {}).get("balance"), pnl_events=pnl_events)
         period_returns["goal"] = deposits.compute_weekly_return_goal_progress(period_returns.get("weekly"))
         deposits.record_weekly_close((account or {}).get("balance"))
-        period_returns["successful_weeks"] = deposits.compute_successful_weeks()
+        period_returns["successful_weeks"] = deposits.compute_successful_weeks(pnl_events=pnl_events)
     except Exception:
         logger.exception("dashboard: period return computation failed")
         period_returns = _default_period_returns()

@@ -4463,7 +4463,7 @@ class TestBalanceHistoryPeriodReturns:
 
     def test_compute_period_returns_computes_each_calendar_period(self, tmp_path):
         import deposits
-        from datetime import date, timedelta
+        from datetime import date, datetime, timedelta
         path = str(tmp_path / "history.json")
         today = date.today()
         history = [
@@ -4475,21 +4475,22 @@ class TestBalanceHistoryPeriodReturns:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(history, f)
 
-        result = deposits.compute_period_returns(1200.0, path=path)
+        ev = [{"ts": datetime.now(), "pnl": 20.0}]
+        result = deposits.compute_period_returns(1200.0, path=path, pnl_events=ev)
 
         assert result["daily_opening"] == 1180.0
         assert result["weekly_opening"] == 1150.0
         assert result["monthly_opening"] == 1100.0
-        assert result["daily"] == pytest.approx(round((1200.0 - 1180.0) / 1180.0 * 100, 2))
-        assert result["weekly"] == pytest.approx(round((1200.0 - 1150.0) / 1150.0 * 100, 2))
-        assert result["monthly"] == pytest.approx(round((1200.0 - 1100.0) / 1100.0 * 100, 2))
+        assert result["daily"] == pytest.approx(round(20.0 / 1180.0 * 100, 2))
+        assert result["weekly"] == pytest.approx(round(20.0 / 1150.0 * 100, 2))
+        assert result["monthly"] == pytest.approx(round(20.0 / 1100.0 * 100, 2))
 
     def test_compute_period_returns_falls_back_to_earliest_snapshot_in_period(self, tmp_path):
         """If tracking only started mid-month (no snapshot on the 1st), the
         earliest snapshot within the month is used as the opening balance
         rather than showing no Return at all."""
         import deposits
-        from datetime import date
+        from datetime import date, datetime
         path = str(tmp_path / "history.json")
         today = date.today()
         mid_month = today.replace(day=min(today.day, 28))
@@ -4497,7 +4498,7 @@ class TestBalanceHistoryPeriodReturns:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(history, f)
 
-        result = deposits.compute_period_returns(990.0, path=path)
+        result = deposits.compute_period_returns(990.0, path=path, pnl_events=[{"ts": datetime.now(), "pnl": 90.0}])
 
         assert result["monthly_opening"] == 900.0
         assert result["monthly"] == 10.0
@@ -4548,7 +4549,11 @@ class TestBalanceHistoryPeriodReturns:
             json.dump(history, f)
         now = datetime(2026, 10, 12, 10, 0)  # Monday: week 3 still in progress
 
-        result = deposits.compute_successful_weeks(path=path, closes_path=closes, now=now)
+        pnl = [
+            {"ts": datetime(2026, 9, 30, 12, 0), "pnl": 60.0},
+            {"ts": datetime(2026, 10, 7, 12, 0), "pnl": 21.2},
+        ]
+        result = deposits.compute_successful_weeks(path=path, closes_path=closes, now=now, pnl_events=pnl)
 
         assert result == {"successful_weeks": 1, "total_weeks": 2, "avg_weekly_return": 4.0}
 
@@ -4565,7 +4570,8 @@ class TestBalanceHistoryPeriodReturns:
 
         deposits.record_weekly_close(1100.0, path=closes, now=datetime(2026, 10, 9, 21, 0))
         deposits.record_weekly_close(1500.0, path=closes, now=datetime(2026, 10, 10, 9, 0))  # frozen: ignored
-        result = deposits.compute_successful_weeks(path=path, closes_path=closes, now=datetime(2026, 10, 10, 9, 0))
+        pnl = [{"ts": datetime(2026, 10, 7, 12, 0), "pnl": 100.0}]
+        result = deposits.compute_successful_weeks(path=path, closes_path=closes, now=datetime(2026, 10, 10, 9, 0), pnl_events=pnl)
         assert result == {"successful_weeks": 1, "total_weeks": 1, "avg_weekly_return": 10.0}
 
     def test_successful_weeks_with_no_history(self, tmp_path):
@@ -4737,7 +4743,8 @@ class TestBackendEntries:
         path = str(tmp_path / "h.json")
         import json
         json.dump([{"date": today, "balance": 1000.0, "recorded_at": today + "T00:00:01"}], open(path, "w"))
-        now_iso = deposits._now_iso()
-        entries = [{"type": "withdrawal", "amount": 100.0, "investor": "Backend", "created_at": now_iso}]
-        result = deposits.compute_period_returns(910.0, path=path, entries=entries)
+        result = deposits.compute_period_returns(910.0, path=path, pnl_events=[])
+        assert result["daily"] == 0.0
+        ev = [{"ts": deposits._now_naive_uk(), "pnl": 10.0}]
+        result = deposits.compute_period_returns(910.0, path=path, pnl_events=ev)
         assert result["daily"] == 1.0

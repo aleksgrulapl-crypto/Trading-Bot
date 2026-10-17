@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # deposits.py
 # Thread-safe manual bookkeeping ledger for deposits/withdrawals into the
 # broker trading account. This module never moves real money — it only
@@ -1064,30 +1064,30 @@ def _row_start(row: Dict[str, Any]) -> Optional[datetime]:
     return _parse_entry_datetime(row.get("recorded_at")) or _parse_entry_datetime(row.get("date"))
 
 
-def _net_external_flow(
-    entries: List[Dict[str, Any]],
+def _trade_pnl_between(
+    pnl_events: Optional[List[Dict[str, Any]]],
     start: Optional[datetime],
     end: Optional[datetime] = None,
 ) -> float:
-    """Net deposits minus withdrawals (including Backend ones) logged in
-    [start, end). Calendar returns subtract this from the balance change so
-    they reflect trade profitability only, not money moved in or out.
-    Entries are placed by when they were logged (``created_at``), the same
-    clock the balance snapshots use."""
+    """Sum closed-trade PnL (GBP) with exit time in [start, end).
+
+    Calendar returns are measured from trade profitability, not raw balance
+    changes, so deposits, withdrawals (including Backend ones) and any other
+    ledger bookkeeping can never move them."""
     total = 0.0
-    for e in entries or []:
-        if not isinstance(e, dict) or e.get("type") not in ("deposit", "withdrawal"):
+    for ev in pnl_events or []:
+        if not isinstance(ev, dict):
             continue
-        ts = _parse_entry_datetime(e.get("created_at")) or _parse_entry_datetime(e.get("occurred_at"))
+        ts = ev.get("ts")
+        if not isinstance(ts, datetime):
+            ts = _parse_entry_datetime(ts)
         if ts is None or (start is not None and ts < start) or (end is not None and ts >= end):
             continue
         try:
-            amt = float(e.get("amount") or 0)
+            total += float(ev.get("pnl") or 0)
         except (TypeError, ValueError):
             continue
-        total += amt if e.get("type") == "deposit" else -amt
     return total
-
 
 def _opening_balance_on_or_after(history: List[Dict[str, Any]], boundary_date) -> Optional[float]:
     """Return the earliest recorded balance on/after *boundary_date*.
@@ -1125,15 +1125,15 @@ def period_labels(now: Optional[datetime] = None) -> Dict[str, str]:
 def compute_period_returns(
     current_balance: Optional[float],
     path: str = BALANCE_HISTORY_PATH,
-    entries: Optional[List[Dict[str, Any]]] = None,
+    pnl_events: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Optional[float]]:
     """Return calendar-aligned {daily, weekly, monthly} % returns.
 
-    Each is ``(current_balance - net_flows - opening_balance) / opening_balance * 100``
-    where *opening_balance* is the Balance recorded at that period's start
-    (today / this Monday / the 1st of this month) and *net_flows* is the
-    deposits minus withdrawals (investor or Backend) logged since that
-    snapshot, so returns reflect trade profitability only. A period with no
+    Each is ``closed-trade PnL since the period's opening snapshot /
+    opening_balance * 100``, where *opening_balance* is the Balance recorded
+    at that period's start (today / this Monday / the 1st of this month), so
+    returns reflect trade profitability only (no trades = 0%, regardless of
+    deposits/withdrawals). A period with no
     recorded opening balance yet returns ``None`` for both the percentage
     and the opening balance, rather than a misleading 0%.
     """
@@ -1153,8 +1153,6 @@ def compute_period_returns(
         return result
 
     now = _now_naive_uk()
-    if entries is None:
-        entries = load_entries()
     for period in ("daily", "weekly", "monthly"):
         boundary = _period_boundary_date(now, period)
         row = _opening_row_on_or_after(history, boundary)
@@ -1166,8 +1164,7 @@ def compute_period_returns(
             continue
         result[f"{period}_opening"] = round(opening, 2)
         if opening > 0:
-            flows = _net_external_flow(entries, _row_start(row))
-            result[period] = round((current_balance - flows - opening) / opening * 100, 2)
+            result[period] = round(_trade_pnl_between(pnl_events, _row_start(row)) / opening * 100, 2)
     return result
 
 
@@ -1255,7 +1252,7 @@ def compute_successful_weeks(
     path: str = BALANCE_HISTORY_PATH,
     closes_path: str = WEEKLY_CLOSES_PATH,
     now: Optional[datetime] = None,
-    entries: Optional[List[Dict[str, Any]]] = None,
+    pnl_events: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Return {"successful_weeks", "total_weeks", "avg_weekly_return"}.
 
@@ -1269,8 +1266,6 @@ def compute_successful_weeks(
     now = now or _now_naive_uk()
     history = sorted(_load_balance_history(path), key=lambda r: r.get("date") or "")
     closes = _load_weekly_closes(closes_path)
-    if entries is None:
-        entries = load_entries()
     by_week: Dict[str, List[Dict[str, Any]]] = {}
     for r in history:
         try:
@@ -1306,8 +1301,8 @@ def compute_successful_weeks(
             window_end = week_monday + _timedelta(days=WEEK_CLOSE_WEEKDAY, hours=WEEK_CLOSE_HOUR)
         if opening <= 0:
             continue
-        flows = _net_external_flow(entries, _row_start(by_week[ws][0]), window_end)
-        returns.append((closing - flows - opening) / opening * 100)
+        week_pnl = _trade_pnl_between(pnl_events, _row_start(by_week[ws][0]), window_end)
+        returns.append(week_pnl / opening * 100)
 
     returns = returns[-TRADING_YEAR_WEEKS:]
     return {
