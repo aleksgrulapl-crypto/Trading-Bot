@@ -115,6 +115,7 @@ def _profit_in_gbp(profit: Optional[float], position: dict) -> Optional[float]:
 def _extract_tp_level(position: dict, side: str) -> Optional[float]:
     candidates = (
         position.get("profitLevel"),
+        position.get("limitLevel"),
         position.get("profit_level"),
         position.get("tp"),
         position.get("takeProfit"),
@@ -142,8 +143,8 @@ def _activation_threshold_perc(position: dict, side: str, entry_price: float) ->
         return default_activation
 
     activation_tp_fraction = _normalize_percent(
-        getattr(config, "TRAIL_ACTIVATION_TP_FRACTION", 0.25),
-        0.25,
+        getattr(config, "TRAIL_ACTIVATION_TP_FRACTION", 0.5),
+        0.5,
     )
     if activation_tp_fraction <= 0:
         return default_activation
@@ -161,7 +162,11 @@ def _activation_threshold_perc(position: dict, side: str, entry_price: float) ->
     if tp_move_perc <= 0:
         return default_activation
 
-    return max(default_activation, tp_move_perc * activation_tp_fraction)
+    # Whichever threshold is reached sooner activates the trail.
+    tp_activation = tp_move_perc * activation_tp_fraction
+    if default_activation <= 0:
+        return tp_activation
+    return min(default_activation, tp_activation)
 
 
 def _update_stop_level(deal_id: str, new_sl: float) -> bool:

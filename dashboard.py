@@ -1406,6 +1406,10 @@ def _build_roi_breakdown(entries, combined_trades, balance):
         # gain/loss via the NAV-per-unit timeline — shown here for
         # transparency on the ROI page.
         "total_fees": deposits.summarize(entries).get("total_fees", 0.0),
+        # Net Backend withdrawals (less Backend deposits). Already borne by
+        # every unit holder pro-rata through the NAV unit scaling, so it is
+        # inside the gain/loss figures; shown separately for transparency.
+        "backend_costs": deposits.summarize(entries).get("backend_net_cost", 0.0),
     }
 
 
