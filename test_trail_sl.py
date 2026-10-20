@@ -99,12 +99,12 @@ def test_trailing_sl_skips_unknown_direction(monkeypatch):
     assert calls == []
 
 
-def test_trailing_sl_activates_at_quarter_of_tp_move(monkeypatch):
-    pos = _mock_position(current_price=102.4, stopLevel=100.1, profitLevel=110.0)
+def test_trailing_sl_activates_at_half_of_tp_move(monkeypatch):
+    pos = _mock_position(current_price=104.9, stopLevel=100.1, profitLevel=110.0)
     monkeypatch.setattr(trail_sl.session, "get_positions", lambda: [{"position": {}, "market": {}}])
     monkeypatch.setattr(trail_sl.session, "enrich_positions", lambda _: [pos])
     monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_PERC", 0.0)
-    monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_TP_FRACTION", 0.25)
+    monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_TP_FRACTION", 0.5)
     monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.50)
 
     calls = []
@@ -113,10 +113,27 @@ def test_trailing_sl_activates_at_quarter_of_tp_move(monkeypatch):
     trail_sl.run_trailing_sl()
     assert calls == []
 
-    pos["current_price"] = 102.5
+    pos["current_price"] = 105.0
     trail_sl.run_trailing_sl()
     assert len(calls) == 1
-    assert calls[0][1] == 101.25
+
+
+def test_trailing_sl_reads_enriched_limit_level_as_tp(monkeypatch):
+    # Enriched positions expose the TP as "limitLevel"; BE-style trade:
+    # entry 228.81, TP 233.11 -> 50% of TP move (~0.94%) beats the 1% default.
+    pos = _mock_position(price=228.81, current_price=231.0, stopLevel=221.0, limitLevel=233.11)
+    monkeypatch.setattr(trail_sl.session, "get_positions", lambda: [{"position": {}, "market": {}}])
+    monkeypatch.setattr(trail_sl.session, "enrich_positions", lambda _: [pos])
+    monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_PERC", 0.01)
+    monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_TP_FRACTION", 0.5)
+    monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_PNL_GBP", 15.0)
+    monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.50)
+
+    calls = []
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl: calls.append((deal_id, sl)) or True)
+
+    trail_sl.run_trailing_sl()
+    assert len(calls) == 1 and calls[0][1] > 221.0
 
 
 def test_trailing_sl_activates_via_pnl_gbp_floor_before_perc_threshold(monkeypatch):

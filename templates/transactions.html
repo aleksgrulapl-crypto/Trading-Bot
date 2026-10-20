@@ -21,6 +21,10 @@
         <div class="metric-value metric-bad">£{{ "%.2f"|format(totals.total_fees) }}</div>
       </div>
       <div class="metric">
+        <div class="metric-label">Backend Costs/Fees</div>
+        <div class="metric-value metric-bad">£{{ "%.2f"|format(totals.backend_net_cost or 0) }}</div>
+      </div>
+      <div class="metric">
         <div class="metric-label">Net Contribution</div>
         <div class="metric-value {% if totals.net >= 0 %}metric-good{% else %}metric-bad{% endif %}">
           £{{ "%.2f"|format(totals.net) }}

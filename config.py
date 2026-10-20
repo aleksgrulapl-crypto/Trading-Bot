@@ -391,7 +391,7 @@ EPIC_MAP = {
 
 # Trailing stop defaults
 TRAIL_ACTIVATION_PERC = float(os.getenv("TRAIL_ACTIVATION_PERC", 0.01))
-TRAIL_ACTIVATION_TP_FRACTION = float(os.getenv("TRAIL_ACTIVATION_TP_FRACTION", 0.25))
+TRAIL_ACTIVATION_TP_FRACTION = float(os.getenv("TRAIL_ACTIVATION_TP_FRACTION", 0.5))
 # Absolute GBP unrealized-PnL floor: trailing activates as soon as EITHER
 # this amount of profit (converted to GBP) OR the percentage-based
 # activation threshold above is reached, whichever comes first. This lets

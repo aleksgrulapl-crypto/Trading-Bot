@@ -34,6 +34,10 @@
         <div class="metric-label">Total Broker Fees Deducted</div>
         <div class="metric-value metric-bad">£{{ "%.2f"|format(breakdown.total_fees or 0) }}</div>
       </div>
+      <div class="metric">
+        <div class="metric-label">Backend Costs/Fees</div>
+        <div class="metric-value metric-bad">£{{ "%.2f"|format(breakdown.backend_costs or 0) }}</div>
+      </div>
     </div>
     <p class="small" style="margin-top: 10px;">
       Each investor's gain/loss is computed with <strong>NAV-per-unit
