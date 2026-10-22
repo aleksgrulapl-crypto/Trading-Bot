@@ -3,6 +3,7 @@
 # SESSION MODULE (CLEAN ACCOUNT VALUES — BALANCE STATIC, EQUITY = BALANCE + PNL)
 
 import time
+import threading
 import pprint
 import logging
 from typing import Any, Dict, List, Optional
@@ -68,25 +69,68 @@ def request(method: str, url: str, json: Optional[dict] = None, **kwargs):
         return None
 
 
-def get_positions() -> List[dict]:
-    url = f"{API_POSITIONS}?includeProfitLoss=true"
-    response = request("GET", url)
+_positions_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
+_positions_lock = threading.Lock()
+_positions_state: Dict[str, Any] = {"failures": 0, "backoff_until": 0.0}
+_POSITIONS_CACHE_TTL = float(getattr(config, "POSITIONS_CACHE_TTL_SECONDS", 3))
+_POSITIONS_MAX_BACKOFF = float(getattr(config, "POSITIONS_MAX_BACKOFF_SECONDS", 30))
+_POSITIONS_STALE_MAX_AGE = float(getattr(config, "POSITIONS_STALE_MAX_AGE_SECONDS", 120))
 
-    if not response or response.status_code != 200:
-        logger.debug("get_positions: non-200 or no response")
-        return []
 
-    try:
-        data = response.json() or {}
-        positions = data.get("positions", []) or []
+def get_positions(fresh: bool = False) -> Optional[List[dict]]:
+    """Return live broker positions, or None if they could not be fetched.
+
+    None (a timeout / non-200) is deliberately distinct from [] (genuinely no
+    open positions) so callers never mistake an outage for "everything
+    closed". Results are cached briefly and shared by the scheduler jobs and
+    dashboard (one broker call instead of several per tick), and after a
+    failure further calls back off exponentially instead of hammering a slow
+    broker API. ``fresh=True`` bypasses the cache and back-off.
+    """
+    with _positions_lock:
+        now = time.monotonic()
+        if not fresh:
+            if _positions_cache["data"] is not None and now - _positions_cache["ts"] < _POSITIONS_CACHE_TTL:
+                return list(_positions_cache["data"])
+            if now < _positions_state["backoff_until"]:
+                return None
+
+        url = f"{API_POSITIONS}?includeProfitLoss=true"
+        response = request("GET", url)
+
+        positions = None
+        if response is not None and response.status_code == 200:
+            try:
+                data = response.json() or {}
+                positions = data.get("positions", []) or []
+            except Exception:
+                logger.exception("get_positions: failed to parse JSON")
+
+        if positions is None:
+            _positions_state["failures"] += 1
+            delay = min(_POSITIONS_MAX_BACKOFF, 2.0 ** _positions_state["failures"])
+            _positions_state["backoff_until"] = time.monotonic() + delay
+            logger.debug("get_positions: unavailable; backing off %.0fs", delay)
+            return None
+
+        _positions_state["failures"] = 0
+        _positions_state["backoff_until"] = 0.0
+        _positions_cache["ts"] = time.monotonic()
+        _positions_cache["data"] = positions
         if getattr(config, "DEBUG_LOGS", False) and positions:
             logger.debug("\n[DEBUG] RAW POSITION SAMPLE:")
             pprint.pprint(positions[0], width=200)
             logger.debug("\n")
-        return positions
-    except Exception:
-        logger.exception("get_positions: failed to parse JSON")
-        return []
+        return list(positions)
+
+
+def last_known_positions() -> Optional[List[dict]]:
+    """Most recent successfully fetched positions if still recent enough for
+    display purposes (never use for close detection), else None."""
+    data = _positions_cache["data"]
+    if data is None or time.monotonic() - _positions_cache["ts"] > _POSITIONS_STALE_MAX_AGE:
+        return None
+    return list(data)
 
 
 def _normalize_direction(direction: Optional[str]) -> Optional[str]:

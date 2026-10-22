@@ -1,4 +1,13 @@
+import pytest
+
 import trail_sl
+
+
+@pytest.fixture(autouse=True)
+def _reset_trail_state():
+    trail_sl._sent_state.clear()
+    yield
+    trail_sl._sent_state.clear()
 
 
 def _mock_position(**overrides):
@@ -173,3 +182,39 @@ def test_trailing_sl_pnl_floor_does_not_activate_below_threshold(monkeypatch):
     trail_sl.run_trailing_sl()
 
     assert calls == []
+
+
+def _setup_throttle(monkeypatch, positions):
+    monkeypatch.setattr(trail_sl.session, "get_positions", lambda: [{}])
+    monkeypatch.setattr(trail_sl.session, "enrich_positions", lambda _: positions)
+    monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_PERC", 0.005)
+    monkeypatch.setattr(trail_sl.config, "TRAIL_ACTIVATION_TP_FRACTION", 0)
+    monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.30)
+    monkeypatch.setattr(trail_sl.config, "TRAIL_TIGHTEN_STEP_PERC", 0.15)
+    calls = []
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda d, sl: calls.append(sl) or True)
+    return calls
+
+
+def test_trailing_sl_does_not_resend_same_sl_with_stale_broker_value(monkeypatch):
+    calls = _setup_throttle(monkeypatch, [_mock_position()])
+    trail_sl.run_trailing_sl()
+    trail_sl.run_trailing_sl()  # broker still reports the old stop
+    assert len(calls) == 1
+
+
+def test_trailing_sl_ignores_tiny_moves_after_first_lock(monkeypatch):
+    pos = _mock_position(stopLevel=100.45, current_price=101.0)
+    calls = _setup_throttle(monkeypatch, [pos])
+    monkeypatch.setattr(trail_sl.config, "TRAIL_TIGHTEN_STEP_PERC", 0.0)
+    pos["current_price"] = 101.1  # would nudge SL by ~0.03 (< 0.1% of entry)
+    trail_sl.run_trailing_sl()
+    assert calls == []
+
+
+def test_trailing_sl_failure_cooldown(monkeypatch):
+    calls = _setup_throttle(monkeypatch, [_mock_position()])
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda d, sl: calls.append(sl) or False)
+    trail_sl.run_trailing_sl()
+    trail_sl.run_trailing_sl()
+    assert len(calls) == 1

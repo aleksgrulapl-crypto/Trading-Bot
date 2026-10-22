@@ -908,8 +908,8 @@ def debug_market(epic):
 @app.route("/debug/positions")
 @_dashboard_login_required
 def debug_positions():
-    raw = session.get_positions()
-    enriched = session.enrich_positions(raw)
+    raw = session.get_positions(fresh=True)
+    enriched = session.enrich_positions(raw or [])
     return jsonify({"raw": raw, "enriched": enriched}), 200
 
 @app.route("/debug/sizing/<symbol>/<action>/<price>/<sl>/<tp>")
@@ -960,7 +960,7 @@ def debug_history():
 @app.route("/raw")
 @_dashboard_login_required
 def raw_positions():
-    raw = session.get_positions()
+    raw = session.get_positions(fresh=True)
     return jsonify(raw)
 
 @app.route("/raw/account")

@@ -31,7 +31,7 @@
               {{ t.entry_price is not none and t.entry_price or t.get('entryPrice') or '�' }}
             </td>
             <td>
-              {% if is_owner and t._log_index is not none and (t.status == 'CLOSED' or t.time_exited) %}
+              {% if is_owner and t._log_index is not none and (t.status == 'CLOSED' or t.time_exited or t.can_delete) %}
               <input
                 type="number"
                 step="any"

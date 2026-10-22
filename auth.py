@@ -9,7 +9,7 @@ from typing import Optional
 
 import requests
 from requests import Response
-from requests.exceptions import RequestException
+from requests.exceptions import RequestException, Timeout, ConnectionError
 
 from config import (
     API_LOGIN,
@@ -177,7 +177,17 @@ class CapitalAuth:
             resp = self.session.request(method, url, headers=headers, **kwargs)
         except RequestException as exc:
             logger.warning("Request exception for %s %s: %s", method, url, exc)
-            return None
+            resp = None
+            # Idempotent reads get one quick retry on transient network errors.
+            if method.upper() == "GET" and isinstance(exc, (Timeout, ConnectionError)):
+                time.sleep(0.5)
+                try:
+                    resp = self.session.request(method, url, headers=headers, **kwargs)
+                except RequestException as exc2:
+                    logger.warning("GET retry failed for %s: %s", url, exc2)
+                    return None
+            else:
+                return None
 
         # If unauthorized, try one re-login and retry once
         if resp is not None and resp.status_code in (401, 403):

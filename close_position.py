@@ -52,7 +52,7 @@ def _normalize_side(side: Optional[str]) -> Optional[str]:
 
 def _find_enriched_position(position_id: str):
     """Look up an enriched position dict from the live broker feed."""
-    raw_positions = session.get_positions() or []
+    raw_positions = session.get_positions(fresh=True) or []
     enriched = session.enrich_positions(raw_positions) or []
     for p in enriched:
         if str(p.get("id")) == str(position_id) or str(p.get("dealId")) == str(position_id):

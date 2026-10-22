@@ -1370,7 +1370,7 @@ class TestFetchExitFromHistory:
         ])
         trade = {"time_entered": "2026-09-08T10:00:00Z"}
         ep, pnl, ct = history_sync._fetch_exit_from_history("STX1", trade)
-        assert ep == 101.5 and pnl == 3.0 and ct == "2026-09-08 12:00:00"
+        assert ep == 101.5 and pnl == 3.0 and ct == "2026-09-08T13:00:00+01:00"
 
     def test_skips_non_close_rows_and_finds_real_close(self, monkeypatch):
         """Open/update rows sharing the dealId must be skipped in favour of the
