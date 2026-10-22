@@ -34,6 +34,7 @@ from trade_log import (
     load_raw_log,
     reconcile_with_positions,
     _parse_iso_like,
+    time_sort_ts,
 )
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
@@ -707,6 +708,10 @@ def _build_request_context():
         logger.debug("session cache not initialized")
 
     raw_positions = session.get_positions()
+    if raw_positions is None:
+        # Broker call timed out/failed: show the last known positions rather
+        # than an empty list that makes live trades look closed.
+        raw_positions = session.last_known_positions()
     raw_account = session.get_account() or {}
 
     positions = session.enrich_positions(raw_positions or [])
@@ -715,9 +720,11 @@ def _build_request_context():
     # Display Open Positions sorted alphabetically by ticker for easier scanning.
     positions.sort(key=lambda p: str((p or {}).get("ticker") or "").strip().lower())
 
-    # Reconcile local trade log against live positions (may update the log file)
+    # Reconcile local trade log against live positions (may update the log file).
+    # Skipped when the broker position feed is unavailable so a timeout can't
+    # be mistaken for "no open positions".
     try:
-        recon = reconcile_with_positions(positions)
+        recon = reconcile_with_positions(positions) if raw_positions is not None else {}
         if getattr(config, "DEBUG_LOGS", False):
             logger.debug("trade_log reconcile result: %s", recon)
     except Exception:
@@ -746,7 +753,7 @@ def _build_request_context():
     except Exception:
         logger.exception("dashboard: failed to annotate positions with trail state")
     combined_trades.sort(
-        key=lambda t: (t.get("time_exited") or t.get("time_entered") or ""),
+        key=lambda t: time_sort_ts(t.get("time_exited") or t.get("time_entered")) or 0.0,
         reverse=True,
     )
 
@@ -888,8 +895,8 @@ def dashboard_data():
 TRADES_PER_PAGE = 20
 
 _CLOSED_SORT_KEYS = {
-    "exited": lambda t: t.get("time_exited") or t.get("time_entered") or "",
-    "entered": lambda t: t.get("time_entered") or "",
+    "exited": lambda t: time_sort_ts(t.get("time_exited") or t.get("time_entered")),
+    "entered": lambda t: time_sort_ts(t.get("time_entered")),
     "ticker": lambda t: str(t.get("ticker") or "").lower(),
     "timeframe": lambda t: str(t.get("timeframe") or "").lower(),
     "type": lambda t: str(t.get("trade_type") or "").lower(),
@@ -1664,7 +1671,7 @@ def dashboard_update_trade_exit_price(trade_index: int):
         code = 400
     elif status == "not_found":
         code = 404
-    elif status == "not_completed":
+    elif status in ("not_completed", "broker_still_open"):
         code = 409
     else:
         code = 500

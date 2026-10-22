@@ -4,7 +4,8 @@
 # ============================
 
 import logging
-from typing import Optional
+import time
+from typing import Dict, Optional
 
 import config
 import session
@@ -194,6 +195,71 @@ def _update_stop_level(deal_id: str, new_sl: float) -> bool:
     return True
 
 
+_sent_state: Dict[str, Dict[str, float]] = {}
+
+
+def _cfg_float(name: str, default: float) -> float:
+    try:
+        return float(getattr(config, name, default))
+    except Exception:
+        return default
+
+
+def _record_sent(deal_id: str, sl: float) -> None:
+    _sent_state[deal_id] = {"sl": float(sl), "ts": time.monotonic(), "fail_ts": 0.0}
+
+
+def _record_failure(deal_id: str) -> None:
+    st = _sent_state.setdefault(deal_id, {"sl": None, "ts": 0.0, "fail_ts": 0.0})
+    st["fail_ts"] = time.monotonic()
+
+
+def _throttle_allows(deal_id: str, side: str, new_sl: float,
+                     existing_sl: Optional[float], entry: float) -> bool:
+    """Avoid spamming the broker with PUT /positions modifications: skip
+    tiny SL nudges, rate-limit per deal, and back off after failures.
+    The first move above entry-protective territory is never delayed."""
+    st = _sent_state.get(deal_id)
+    now = time.monotonic()
+
+    if st:
+        cooldown = _cfg_float("TRAIL_FAILURE_COOLDOWN_SECONDS", 120.0)
+        if st.get("fail_ts") and now - st["fail_ts"] < cooldown:
+            logger.debug("Trail SL for %s in failure cooldown", deal_id)
+            return False
+
+    # Reference = best SL we know of (broker value may be stale after a send).
+    ref = existing_sl
+    last_sl = st.get("sl") if st else None
+    if last_sl is not None:
+        if ref is None:
+            ref = last_sl
+        else:
+            ref = max(ref, last_sl) if side == "long" else min(ref, last_sl)
+
+    if ref is None:
+        return True
+
+    improvement = (new_sl - ref) if side == "long" else (ref - new_sl)
+    if improvement <= 0:
+        return False
+
+    # Still sitting at the initial (loss-side) stop: lock in profit at once.
+    first_lock = (ref < entry) if side == "long" else (ref > entry)
+    if first_lock:
+        return True
+
+    min_step = _cfg_float("TRAIL_MIN_STEP_PERC", 0.001) * entry
+    if improvement < min_step:
+        logger.debug("Trail SL step %.6f below min step %.6f for %s", improvement, min_step, deal_id)
+        return False
+
+    min_interval = _cfg_float("TRAIL_MIN_UPDATE_INTERVAL_SECONDS", 60.0)
+    if st and st.get("ts") and now - st["ts"] < min_interval:
+        return False
+    return True
+
+
 def run_trailing_sl() -> None:
     """
     Continuous trailing stop:
@@ -310,8 +376,13 @@ def run_trailing_sl() -> None:
             logger.debug("Trail SL not beneficial for %s: existing_sl=%s computed=%s", deal_id, existing_sl_f, trail_sl)
             continue
 
+        if not _throttle_allows(deal_id, side, trail_sl, existing_sl_f, entry_price_f):
+            continue
+
         # Apply the new stop level
         if _update_stop_level(deal_id, trail_sl):
+            _record_sent(deal_id, trail_sl)
             logger.info("Trail SL updated → deal=%s dir=%s entry=%s current=%s newSL=%s", deal_id, direction, entry_price_f, current_price_f, trail_sl)
         else:
+            _record_failure(deal_id)
             logger.warning("Failed to apply trail SL for deal %s", deal_id)

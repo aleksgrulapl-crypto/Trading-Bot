@@ -12,7 +12,7 @@ import json
 import os
 import tempfile
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 from urllib.parse import quote
@@ -119,11 +119,39 @@ def _parse_iso_like(s: Optional[str]) -> Optional[datetime]:
 
 
 def _humanize(dt_str: Optional[str]) -> Optional[str]:
-    """Convert an ISO timestamp string to a human-readable display string."""
+    """Convert an ISO timestamp string to a human-readable UK-time display
+    string. Timezone-aware values (UTC "Z", +00:00, +01:00, ...) are converted
+    to Europe/London so entry and exit times always share one timezone; naive
+    values are assumed to already be UK local time."""
     d = _parse_iso_like(dt_str)
     if not d:
         return None
+    if d.tzinfo is not None and UK_TZ:
+        try:
+            d = d.astimezone(UK_TZ)
+        except Exception:
+            pass
     return d.strftime("%d-%m-%Y %H:%M:%S")
+
+
+def time_sort_ts(value: Optional[str]) -> Optional[float]:
+    """Return a UTC epoch (seconds) for a trade-log timestamp so rows can be
+    ordered chronologically regardless of the string format or UTC offset
+    they were stored with (lexical string ordering is wrong across the
+    mixed ISO / "dd-mm-yyyy" / offset formats). Naive values are treated as
+    UK local time, matching how they are displayed. None if unparseable."""
+    d = _parse_iso_like(value) if isinstance(value, str) else None
+    if d is None:
+        return None
+    try:
+        if d.tzinfo is None:
+            if UK_TZ:
+                d = UK_TZ.localize(d)
+            else:
+                d = d.replace(tzinfo=timezone.utc)
+        return d.timestamp()
+    except Exception:
+        return None
 
 
 def _read_fx_rate() -> float:
@@ -550,7 +578,14 @@ def update_trade_exit_price_entry(
         status = str(trade.get("status") or "").strip().upper()
         is_completed = status == "CLOSED" or trade.get("time_exited") not in (None, "")
         if not is_completed:
-            return False, None, "not_completed"
+            # Stuck-open row: the broker no longer has the position but the
+            # sync never found a close price. Let the user finalise it here.
+            if not is_trade_delete_candidate(trade):
+                return False, None, "not_completed"
+            if not _confirm_trade_missing_from_broker(trade):
+                return False, None, "broker_still_open"
+            trade["status"] = "CLOSED"
+            trade["time_exited"] = _now_iso()
 
         trade["exit_price"] = exit_price
         # Recompute pnl/pnl_gbp from the corrected exit price, discarding any

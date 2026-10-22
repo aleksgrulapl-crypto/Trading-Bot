@@ -17,6 +17,11 @@ from trade_log import (
 )
 from utils import uk_timestamp
 from datetime import datetime, timezone
+try:
+    import pytz
+    _UK_TZ = pytz.timezone("Europe/London")
+except Exception:
+    _UK_TZ = None
 import notifications
 
 logger = logging.getLogger("sync_closed_trades")
@@ -35,6 +40,11 @@ _snapshot_cache = {}
 # tracks how many consecutive polls a row-scoped open trade key was absent
 # from live positions
 _absent_count: dict = {}
+# First time a trade was confirmed gone at the broker without history evidence,
+# and earliest time the (expensive) confirmation/history lookups may re-run.
+_gone_since: dict = {}
+_next_check: dict = {}
+_DEFERRED_RECHECK_SECONDS = 20.0
 
 
 def _now() -> float:
@@ -86,25 +96,39 @@ def _trade_age_seconds(trade) -> Optional[float]:
         return None
 
 
+def _to_uk_iso(dt_utc: datetime) -> str:
+    """Format a naive-UTC datetime as a UK-local ISO string (with offset) so it
+    matches uk_timestamp()/trade_log entries and displays in UK time."""
+    aware = dt_utc.replace(tzinfo=timezone.utc)
+    if _UK_TZ is not None:
+        try:
+            return aware.astimezone(_UK_TZ).isoformat()
+        except Exception:
+            pass
+    return aware.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _parse_broker_timestamp(value) -> Optional[str]:
     """
     Normalize a Capital.com transaction timestamp (Unix seconds/milliseconds
-    or an ISO string, with or without a trailing "Z") into the
-    "YYYY-MM-DD HH:MM:SS" string format understood by trade_log's timestamp
-    parsing (_parse_iso_like), or None if *value* is missing/unparseable.
+    or an ISO string, with or without a trailing "Z"; always UTC) into a
+    UK-local ISO string understood by trade_log's timestamp parsing, or None
+    if *value* is missing/unparseable.
     """
     if value is None:
         return None
     if isinstance(value, (int, float)):
         try:
             dt = datetime.utcfromtimestamp(value / 1000.0 if value > 1e12 else value)
-            return dt.strftime("%Y-%m-%d %H:%M:%S")
+            return _to_uk_iso(dt)
         except Exception:
             return None
     if isinstance(value, str):
         try:
-            dt = datetime.fromisoformat(value.replace("Z", ""))
-            return dt.strftime("%Y-%m-%d %H:%M:%S")
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return _to_uk_iso(dt)
         except Exception:
             return None
     return None
@@ -344,6 +368,8 @@ def sync_closed_trades():
             _absent_count[cache_key] = _absent_count.get(cache_key, 0) + 1
         else:
             _absent_count.pop(cache_key, None)
+            _gone_since.pop(cache_key, None)
+            _next_check.pop(cache_key, None)
 
     closed_in_run = set()
 
@@ -407,6 +433,8 @@ def sync_closed_trades():
                 continue
 
         if disappeared and not size_zero:
+            if _now() < _next_check.get(cache_key, 0.0):
+                continue
             # The aggregate /positions list is only a hint here – it can
             # transiently omit a genuinely-still-open position (broker-side
             # eventual consistency, pagination, rate limiting), which would
@@ -456,11 +484,26 @@ def sync_closed_trades():
             or exit_price is not None
         )
         if disappeared and not size_zero and not close_evidence_from_history:
-            logger.debug(
-                "sync_closed_trades: %s disappearance confirmed but no close evidence in history yet; deferring close",
-                deal_id,
+            # Confirmed gone at the broker but history has no row yet (or the
+            # row was rejected as stale). Defer for a while, then finalise
+            # anyway so the trade can't stay "Open" forever; the exit price
+            # can then be corrected from the dashboard.
+            first_gone = _gone_since.setdefault(cache_key, _now())
+            waited = _now() - first_gone
+            timeout = float(getattr(config, "CLOSE_EVIDENCE_TIMEOUT_SECONDS", 300) or 0)
+            if waited < timeout:
+                _next_check[cache_key] = _now() + _DEFERRED_RECHECK_SECONDS
+                logger.debug(
+                    "sync_closed_trades: %s disappearance confirmed but no close evidence in history yet; deferring close (%.0fs)",
+                    deal_id, waited,
+                )
+                continue
+            logger.warning(
+                "sync_closed_trades: %s gone from broker for %.0fs with no history evidence; force-closing",
+                deal_id, waited,
             )
-            continue
+        _gone_since.pop(cache_key, None)
+        _next_check.pop(cache_key, None)
 
         # Step 2: fall back to market snapshot if history didn't have it
         if exit_price is None:

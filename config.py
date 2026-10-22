@@ -408,3 +408,15 @@ TRAIL_SL_PERC = float(os.getenv("TRAIL_SL_PERC", 0.70))
 # closely the deeper a trade goes in-profit.
 TRAIL_TIGHTEN_STEP_PERC = float(os.getenv("TRAIL_TIGHTEN_STEP_PERC", 0.20))
 TRAIL_MAX_PERC = float(os.getenv("TRAIL_MAX_PERC", 0.95))
+# Throttling so the trail doesn't spam Capital.com with SL modifications.
+TRAIL_MIN_STEP_PERC = float(os.getenv("TRAIL_MIN_STEP_PERC", 0.001))
+TRAIL_MIN_UPDATE_INTERVAL_SECONDS = float(os.getenv("TRAIL_MIN_UPDATE_INTERVAL_SECONDS", 60))
+TRAIL_FAILURE_COOLDOWN_SECONDS = float(os.getenv("TRAIL_FAILURE_COOLDOWN_SECONDS", 120))
+
+# Shared broker-positions cache / back-off (reduces timeouts under load).
+POSITIONS_CACHE_TTL_SECONDS = float(os.getenv("POSITIONS_CACHE_TTL_SECONDS", 3))
+POSITIONS_MAX_BACKOFF_SECONDS = float(os.getenv("POSITIONS_MAX_BACKOFF_SECONDS", 30))
+POSITIONS_STALE_MAX_AGE_SECONDS = float(os.getenv("POSITIONS_STALE_MAX_AGE_SECONDS", 120))
+# Seconds a trade may be confirmed gone at the broker with no history
+# evidence before it is force-closed in the log.
+CLOSE_EVIDENCE_TIMEOUT_SECONDS = float(os.getenv("CLOSE_EVIDENCE_TIMEOUT_SECONDS", 300))
