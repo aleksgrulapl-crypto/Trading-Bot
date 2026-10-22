@@ -145,7 +145,8 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/London")
 #
 # TEMPORARY (2-month trial, started Oct 2026): the general daily lock windows
 # have been switched OFF while bot behaviour is monitored. Only the Monday
-# 08:30-09:30 UK window remains active, to avoid weekend-reopen spikes/drops.
+# 08:30-09:30 UK window (weekend-reopen spikes/drops) and a daily 14:00-15:00
+# UK window (US market open volatility) remain active.
 # This is not a removal of the feature — to restore the previous behaviour,
 # set TRADE_LOCK_WINDOWS back to "08:00-09:30,13:00-15:00" (applies every day)
 # or set TRADE_LOCK_ENABLED=False to disable the lock entirely.
@@ -154,7 +155,7 @@ TRADE_LOCK_START_HOUR = int(os.getenv("TRADE_LOCK_START_HOUR", 14))
 TRADE_LOCK_END_HOUR = int(os.getenv("TRADE_LOCK_END_HOUR", 15))
 # Each window is "HH:MM-HH:MM" (applies every day) or "Day:HH:MM-HH:MM" (applies
 # only on that day of the week, e.g. "Mon:08:30-09:30"). Comma-separated.
-TRADE_LOCK_WINDOWS_RAW = os.getenv("TRADE_LOCK_WINDOWS", "Mon:08:30-09:30")
+TRADE_LOCK_WINDOWS_RAW = os.getenv("TRADE_LOCK_WINDOWS", "Mon:08:30-09:30,14:00-15:00")
 
 _WEEKDAY_NAMES = {
     "mon": 0, "monday": 0,
