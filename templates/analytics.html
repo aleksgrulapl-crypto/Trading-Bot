@@ -76,7 +76,7 @@
     {% if detailed.best_trade %}
     <div class="trade-highlight">
       <div class="metric">
-        <div class="metric-label">Ticker / Timeframe</div>
+        <div class="metric-label">Stock / Timeframe</div>
         <div class="metric-value metric-neutral">{{ detailed.best_trade.ticker or '—' }} · {{ detailed.best_trade.timeframe or 'N/A' }}</div>
       </div>
       <div class="metric">
@@ -104,7 +104,7 @@
     {% if detailed.worst_trade %}
     <div class="trade-highlight">
       <div class="metric">
-        <div class="metric-label">Ticker / Timeframe</div>
+        <div class="metric-label">Stock / Timeframe</div>
         <div class="metric-value metric-neutral">{{ detailed.worst_trade.ticker or '—' }} · {{ detailed.worst_trade.timeframe or 'N/A' }}</div>
       </div>
       <div class="metric">
@@ -165,7 +165,7 @@
 
 <div class="card">
   <div class="card-header">
-    <div class="card-title">Win / Loss by Ticker</div>
+    <div class="card-title">Win / Loss by Stock</div>
   </div>
     {% if detailed.per_ticker_stats %}
     <div class="ticker-grid">

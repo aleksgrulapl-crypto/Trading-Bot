@@ -51,6 +51,7 @@ from trade_log import (
 )
 from close_position import close_position as close_position_module
 import notifications
+import gating
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -872,6 +873,25 @@ def webhook():
             sl_price, tp_price = fixed_sl, fixed_tp
             logger.info("[cid=%s] Fixed SL/TP fallback applied → sl=%s tp=%s", cid, sl_price, tp_price)
 
+        gate_scale = 1.0
+        if not is_hedge_signal:
+            try:
+                gate = gating.evaluate(epic)
+            except Exception:
+                logger.exception("[cid=%s] weekly gate evaluation failed; allowing trade", cid)
+                gate = {"action": "allow", "scale": 1.0}
+            if gate["action"] == "reject":
+                gating.record_rejected({
+                    "stock": epic, "symbol": symbol, "side": str(action).upper(), "timeframe": timeframe,
+                    "entry_price": entry_price, "tv_sl": alert_sl, "tv_tp": alert_tp,
+                    "applied_sl": sl_price, "applied_tp": tp_price,
+                    "reason": gate["reason"], "weekly_return": gate["weekly_return"],
+                    "sharpe": gate["sharpe"], "net_pnl": gate["net_pnl"], "closed_trades": gate["trades"],
+                })
+                logger.info("[cid=%s] Weekly gate rejected %s %s: %s", cid, epic, action, gate["reason"])
+                return _ok_response({"status": "blocked", "reason": "weekly_gate_rejected", "cid": cid})
+            gate_scale = gate["scale"]
+
         size_info = calculate_size(
             entry_price=entry_price,
             sl_price=sl_price,
@@ -882,6 +902,7 @@ def webhook():
             timeframe=timeframe,
             ignore_opposite_side_for_ticker_limits=is_hedge_signal,
             hedge_size_override=hedge_size_override,
+            size_scale=gate_scale,
         )
         if size_info.get("blocked"):
             logger.info("[cid=%s] Sizing blocked: %s", cid, size_info.get("reason"))

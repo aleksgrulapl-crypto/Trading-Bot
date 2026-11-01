@@ -72,7 +72,7 @@
           <tr>
             <th>Time Entered</th>
             <th>Time Exited</th>
-            <th>Ticker</th>
+            <th>Stock</th>
             <th>Timeframe</th>
             <th>Type</th>
             <th>Side</th>
@@ -107,7 +107,7 @@
           <tr>
             <th>{{ sort_th('entered', 'Time Entered') }}</th>
             <th>{{ sort_th('exited', 'Time Exited') }}</th>
-            <th>{{ sort_th('ticker', 'Ticker') }}</th>
+            <th>{{ sort_th('ticker', 'Stock') }}</th>
             <th>{{ sort_th('timeframe', 'Timeframe') }}</th>
             <th>{{ sort_th('type', 'Type') }}</th>
             <th>{{ sort_th('side', 'Side') }}</th>
@@ -127,5 +127,51 @@
       <div class="small">No closed trades.</div>
       {% endif %}
     </div>
+
+    {% if is_owner %}
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header">
+        <div class="card-title">Rejected ({{ rejected_trades|length }})</div>
+      </div>
+      {% if rejected_trades %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Stock</th>
+            <th>Timeframe</th>
+            <th>Side</th>
+            <th>Entry</th>
+            <th>TradingView SL</th>
+            <th>TradingView TP</th>
+            <th>Weekly Return</th>
+            <th>Sharpe</th>
+            <th>Net PnL</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rejected_trades %}
+          <tr>
+            <td class="small">{{ r.time_rejected }}</td>
+            <td>{{ r.stock or r.symbol or '-' }}</td>
+            <td class="small">{{ r.timeframe or 'N/A' }}</td>
+            <td>{{ r.side or '-' }}</td>
+            <td>{{ r.entry_price if r.entry_price is not none else '-' }}</td>
+            <td>{{ r.tv_sl if r.tv_sl is not none else '-' }}</td>
+            <td>{{ r.tv_tp if r.tv_tp is not none else '-' }}</td>
+            <td>{{ r.weekly_return if r.weekly_return is not none else '-' }}{% if r.weekly_return is not none %}%{% endif %}</td>
+            <td>{{ r.sharpe if r.sharpe is not none else '-' }}</td>
+            <td>{{ r.net_pnl if r.net_pnl is not none else '-' }}</td>
+            <td class="small">{{ r.reason }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="small">No rejected trades.</div>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
 </div>

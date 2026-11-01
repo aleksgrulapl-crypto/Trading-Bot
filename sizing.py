@@ -237,7 +237,8 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
                    ticker: Optional[str] = None,
                    timeframe: Optional[str] = None,
                    ignore_opposite_side_for_ticker_limits: bool = False,
-                   hedge_size_override: Optional[float] = None) -> Dict[str, Any]:
+                   hedge_size_override: Optional[float] = None,
+                   size_scale: float = 1.0) -> Dict[str, Any]:
     """
     Calculate position size using:
       - a fraction of AVAILABLE equity (config.EQUITY_PERCENT)
@@ -369,7 +370,10 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
 
     base_max_equity_per_trade = float(getattr(config, "MAX_EQUITY_PER_TRADE", 0) or 0)
     base_max_equity_per_ticker = float(getattr(config, "MAX_EQUITY_PER_TICKER", base_max_equity_per_trade) or 0)
-    max_equity_per_trade = base_max_equity_per_trade * equity_scale
+    # size_scale (weekly gate reduction) shrinks only this order's equity and
+    # exposure, not the stock's overall ticker capacity.
+    gate_scale = max(0.0, min(1.0, float(size_scale if size_scale is not None else 1.0)))
+    max_equity_per_trade = base_max_equity_per_trade * equity_scale * gate_scale
     max_equity_per_ticker = base_max_equity_per_ticker * equity_scale
     remaining_ticker_equity = None
     if max_equity_per_ticker > 0:
@@ -393,7 +397,7 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
 
     leverage = float(getattr(config, "LEVERAGE", 1))
     exposure = equity_to_use * leverage
-    max_exposure_per_trade = float(getattr(config, "MAX_EXPOSURE_PER_TRADE", 0) or 0) * equity_scale
+    max_exposure_per_trade = float(getattr(config, "MAX_EXPOSURE_PER_TRADE", 0) or 0) * equity_scale * gate_scale
     if max_exposure_per_trade > 0:
         exposure = min(exposure, max_exposure_per_trade)
 

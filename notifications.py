@@ -247,7 +247,7 @@ def notify_position_opened(trade: Dict[str, Any]) -> bool:
     subject = f"Position opened: {ticker} {side} ({source_label})"
     body = (
         f"A new position was opened.\n\n"
-        f"Ticker: {ticker}\n"
+        f"Stock: {ticker}\n"
         f"Side: {side}\n"
         f"Source: {source_label}\n"
         f"Size: {trade.get('size')}\n"
@@ -281,7 +281,7 @@ def notify_position_closed(trade: Dict[str, Any], balance: Optional[float] = Non
 
     body = (
         f"A position was closed.\n\n"
-        f"Ticker: {ticker}\n"
+        f"Stock: {ticker}\n"
         f"Side: {side}\n"
         f"Size: {trade.get('size')}\n"
         f"Entry price: {trade.get('entry_price')}\n"
