@@ -73,8 +73,12 @@
     {% if error %}
         <div class="error">{{ error }}</div>
     {% endif %}
+    {% if notice %}
+        <div style="color:#3fb950; margin-top:10px;">{{ notice }}</div>
+    {% endif %}
 
-    <p style="margin-top:20px; font-size:13px;">
+    <p style="margin-top:15px; font-size:13px;"><a href="/dashboard/forgot" style="color:#58a6ff;">Forgot password?</a></p>
+    <p style="margin-top:10px; font-size:13px;">
         No account yet? <a href="/dashboard/register" style="color:#58a6ff;">Create one</a>
         &middot; <a href="/dashboard/terms" style="color:#58a6ff;">Terms</a>
     </p>

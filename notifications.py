@@ -145,14 +145,10 @@ def _fmt_datetime(value: Any) -> str:
         return str(value)
 
 
-def _send_email_sync(subject: str, body: str) -> bool:
-    """Actually connect to SMTP and send. Runs on the calling thread."""
-    to_addrs = [a.strip() for a in (get_recipient() or "").split(",") if a.strip()]
-    if not to_addrs:
-        logger.warning("_send_email_sync: no recipient configured; skipping '%s'", subject)
-        return False
+def _smtp_send(to_addrs, subject: str, body: str) -> bool:
+    """Connect to SMTP and send one message. Runs on the calling thread."""
     if not config.SMTP_HOST or not config.SMTP_USERNAME or not config.SMTP_PASSWORD:
-        logger.warning("_send_email_sync: SMTP credentials not fully configured; skipping '%s'", subject)
+        logger.warning("_smtp_send: SMTP credentials not fully configured; skipping '%s'", subject)
         return False
 
     msg = EmailMessage()
@@ -172,16 +168,44 @@ def _send_email_sync(subject: str, body: str) -> bool:
             with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, timeout=10) as server:
                 server.login(config.SMTP_USERNAME, config.SMTP_PASSWORD)
                 server.send_message(msg)
-        logger.info("_send_email_sync: sent '%s' to %s", subject, ", ".join(to_addrs))
+        logger.info("_smtp_send: sent '%s' to %s", subject, ", ".join(to_addrs))
         return True
     except Exception:
-        logger.exception("_send_email_sync: failed to send '%s'", subject)
+        logger.exception("_smtp_send: failed to send '%s'", subject)
         return False
+
+
+def _send_email_sync(subject: str, body: str) -> bool:
+    """Send to the configured Owner notification recipient(s)."""
+    to_addrs = [a.strip() for a in (get_recipient() or "").split(",") if a.strip()]
+    if not to_addrs:
+        logger.warning("_send_email_sync: no recipient configured; skipping '%s'", subject)
+        return False
+    return _smtp_send(to_addrs, subject, body)
 
 
 def _send_email(subject: str, body: str) -> bool:
     threading.Thread(target=_send_email_sync, args=(subject, body), daemon=True).start()
     return True
+
+
+def send_user_email(to: str, subject: str, body: str) -> bool:
+    """Send an account email (welcome, approval, password reset) to one user
+    without blocking the request. Delivery failures are logged, not raised."""
+    to = (to or "").strip()
+    if not to:
+        return False
+    threading.Thread(target=_smtp_send, args=([to], subject, body), daemon=True).start()
+    return True
+
+
+def notify_owner_new_registration(name: str, email: str) -> bool:
+    """Tell the Owner a new account is waiting for approval."""
+    return _send_email(
+        "New registration awaiting approval",
+        f"{name} <{email}> has registered and is waiting for approval.\n\n"
+        "Review it on the dashboard under Users.",
+    )
 
 
 def notify_position_opened(trade: Dict[str, Any]) -> bool:

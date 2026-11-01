@@ -17,12 +17,14 @@ from statistics import mean
 from datetime import datetime, timedelta
 import logging
 import os
-from flask import Blueprint, request, render_template, redirect, jsonify
+from flask import Blueprint, request, render_template, redirect, jsonify, current_app
 from flask import session as flask_session
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 import session
 import config
 import users
+import account_emails
 import deposits
 import notifications
 import trail_settings
@@ -109,7 +111,10 @@ def _read_identity() -> dict:
 def dashboard_login():
     if _read_identity()["logged_in"]:
         return redirect("/dashboard")
-    return render_template("login.html", title="Dashboard Login")
+    return render_template(
+        "login.html", title="Dashboard Login",
+        notice="Password updated. Please log in." if request.args.get("reset") else None,
+    )
 
 
 @dashboard.route("/dashboard/login", methods=["POST"])
@@ -185,7 +190,80 @@ def dashboard_register_submit():
         return _fail(400, ERROR_MESSAGES.get(status, "Registration failed."))
 
     _start_session(user["role"], user["id"])
+    account_emails.send_welcome(user["name"], user["email"])
+    notifications.notify_owner_new_registration(user["name"], user["email"])
     return redirect("/dashboard/pending")
+
+
+RESET_TOKEN_MAX_AGE_SECONDS = 60 * 60
+_RESET_SALT = "dashboard-password-reset"
+
+
+def _reset_serializer():
+    return URLSafeTimedSerializer(current_app.secret_key, salt=_RESET_SALT)
+
+
+def _make_reset_token(user_id: str) -> str:
+    return _reset_serializer().dumps({"uid": user_id, "fp": users.password_fingerprint(user_id)})
+
+
+def _user_from_reset_token(token: str):
+    """Return the user for a valid, unexpired, unused reset token, else None.
+    The token embeds a password fingerprint, so it stops working once used."""
+    try:
+        data = _reset_serializer().loads(token, max_age=RESET_TOKEN_MAX_AGE_SECONDS)
+        user_id, fingerprint = data["uid"], data["fp"]
+    except (BadSignature, KeyError, TypeError):
+        return None
+    if not fingerprint or users.password_fingerprint(user_id) != fingerprint:
+        return None
+    return users.get_user(user_id)
+
+
+def _public_base_url() -> str:
+    return getattr(config, "PUBLIC_BASE_URL", "") or request.url_root.rstrip("/")
+
+
+@dashboard.route("/dashboard/forgot", methods=["GET"])
+def dashboard_forgot():
+    return render_template("forgot.html", title="Reset password")
+
+
+@dashboard.route("/dashboard/forgot", methods=["POST"])
+def dashboard_forgot_submit():
+    email = users.normalize_email(request.form.get("email", ""))
+    throttle_key = _client_key("forgot")
+    if users.is_throttled(throttle_key):
+        return render_template("forgot.html", title="Reset password",
+                               error="Too many requests. Please try again later."), 429
+    users.record_failure(throttle_key)
+
+    user = users.get_user_by_email(email) if email else None
+    if user:
+        link = f"{_public_base_url()}/dashboard/reset/{_make_reset_token(user['id'])}"
+        account_emails.send_password_reset(
+            user["name"], user["email"], link, RESET_TOKEN_MAX_AGE_SECONDS // 60,
+        )
+    # Same response whether or not the account exists, to avoid revealing who is registered.
+    return render_template("forgot.html", title="Reset password", sent=True)
+
+
+@dashboard.route("/dashboard/reset/<token>", methods=["GET", "POST"])
+def dashboard_reset(token: str):
+    user = _user_from_reset_token(token)
+    if not user:
+        return render_template("reset.html", title="Reset password", invalid=True), 400
+    if request.method == "GET":
+        return render_template("reset.html", title="Reset password")
+
+    password = request.form.get("password", "")
+    if password != request.form.get("confirm_password", ""):
+        return render_template("reset.html", title="Reset password", error="Passwords do not match."), 400
+    ok, status = users.set_password(user["id"], password)
+    if not ok:
+        return render_template("reset.html", title="Reset password",
+                               error=ERROR_MESSAGES.get(status, "Could not reset password.")), 400
+    return redirect("/dashboard/login?reset=1")
 
 
 @dashboard.route("/dashboard/pending")
@@ -211,6 +289,9 @@ PUBLIC_ENDPOINTS = frozenset({
     "dashboard.dashboard_register",
     "dashboard.dashboard_register_submit",
     "dashboard.dashboard_pending",
+    "dashboard.dashboard_forgot",
+    "dashboard.dashboard_forgot_submit",
+    "dashboard.dashboard_reset",
     "dashboard.dashboard_logout",
     "dashboard.dashboard_terms",
     "dashboard.dashboard_contact",
@@ -1389,7 +1470,10 @@ def dashboard_users():
 @owner_required
 def dashboard_users_set_role(user_id: str):
     role = (request.form.get("role") or (request.get_json(silent=True) or {}).get("role") or "").strip()
+    previous = users.get_user(user_id)
     ok, status = users.set_role(user_id, role)
+    if ok and previous and previous.get("role") == "pending" and role in ("viewer", "investor"):
+        account_emails.send_approved(previous["name"], previous["email"])
     if request.is_json:
         if ok:
             return jsonify({"status": "success"}), 200
@@ -1400,7 +1484,10 @@ def dashboard_users_set_role(user_id: str):
 @dashboard.route("/dashboard/users/<user_id>/delete", methods=["POST"])
 @owner_required
 def dashboard_users_delete(user_id: str):
+    previous = users.get_user(user_id)
     ok, status = users.delete_user(user_id)
+    if ok and previous and previous.get("role") == "pending":
+        account_emails.send_declined(previous["name"], previous["email"])
     if request.is_json:
         if ok:
             return jsonify({"status": "success"}), 200
