@@ -26,6 +26,7 @@ import config
 import users
 import account_emails
 import deposits
+import gating
 import notifications
 import public_snapshot
 import trail_settings
@@ -1284,6 +1285,13 @@ def build_trade_log_view(trades, args):
         "dir": direction,
     }
 
+def _rejected_for_role():
+    """Rejected-trade log rows (newest first), visible to the Owner only."""
+    if current_role() != "owner":
+        return []
+    return list(reversed(gating.load_rejected()))
+
+
 @dashboard.route("/dashboard/trades")
 @non_viewer_page_required
 def dashboard_trades():
@@ -1297,6 +1305,7 @@ def dashboard_trades():
         cache_bust=time.time(),
         account=ctx["account"],
         is_owner=current_role() == "owner",
+        rejected_trades=_rejected_for_role(),
         **build_trade_log_view(ctx["combined_trades"], request.args),
     )
 
@@ -1312,6 +1321,7 @@ def dashboard_trades_data():
             "trade_log_partial.html",
             cache_bust=time.time(),
             is_owner=current_role() == "owner",
+            rejected_trades=_rejected_for_role(),
             **build_trade_log_view(ctx["combined_trades"], request.args),
         )
         return jsonify({

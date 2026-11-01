@@ -50,8 +50,10 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `RISK_PER_TRADE` | Fraction of equity risked per trade (default `0.50`) | ⬜ |
 | `LEVERAGE` | Leverage multiplier (default `5`) | ⬜ |
 | `EQUITY_PERCENT` | Fraction of available margin used per trade before caps (default `0.50`) | ⬜ |
-| `MAX_EQUITY_PER_TRADE` | Maximum account equity allocated to a trade before leverage, in GBP (default `200`) | ⬜ |
-| `MAX_EXPOSURE_PER_TRADE` | Maximum leveraged exposure per trade in GBP (default `1000`) | ⬜ |
+| `MAX_EQUITY_PER_TRADE` | Maximum account equity allocated to a trade before leverage, in GBP (default `100`) | ⬜ |
+| `MAX_EQUITY_PER_TICKER` | Maximum combined equity across one stock's open trades, in GBP (default `300`) | ⬜ |
+| `MAX_EXPOSURE_PER_TRADE` | Maximum leveraged exposure per trade in GBP (default `500`) | ⬜ |
+| `WEEKLY_GATE_ENABLED` | Weekly-return gate on weak stocks (default `True`). Weak = bottom `GATE_BOTTOM_FRACTION` (`0.20`) by Sharpe ratio or net negative PnL, with at least `GATE_MIN_TRADES` (`5`) closed trades. Negative week: reject. Weekly return `GATE_REJECT_PCT` (`5`) to `GATE_REDUCE_PCT` (`10`): reject. At/above `GATE_REDUCE_PCT`: size x `GATE_REDUCE_SCALE` (`0.5`). Rejections appear in the Owner-only "Rejected" section of Trade Log. | ⬜ |
 | `FIXED_SL_PERC` | Stop-loss distance as a fraction of entry price (default `0.20` = `20%`, capping loss at £200 on £1000 max exposure) | ⬜ |
 | `FIXED_TP_PERC` | Take-profit distance as a fraction of entry price (default `0.40` = `40%`, capping gain at £400 on £1000 max exposure) | ⬜ |
 | `TRAIL_ACTIVATION_PERC` | Profit threshold to activate trailing SL (default `0.01` = `1%`) | ⬜ |

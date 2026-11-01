@@ -44,14 +44,34 @@ LEVERAGE = int(os.getenv("LEVERAGE", 5))
 #   MAX_EQUITY_PER_TRADE    – equity (before leverage) allocated to one trade
 #   MAX_EQUITY_PER_TICKER   – combined equity allowed across all open trades for one ticker
 #   MAX_EXPOSURE_PER_TRADE  – leveraged exposure allocated to one trade
-# Defaults: up to £200 equity per trade/timeframe (£1000 exposure at 5x
-# leverage), and up to £600 combined equity per ticker across its 3
-# timeframes (3 x £200). These are the CEILING values for a ticker with a
+# Defaults: up to £100 equity per trade/timeframe (£500 exposure at 5x
+# leverage), and up to £300 combined equity per ticker across its 3
+# timeframes (3 x £100). These are the CEILING values for a ticker with a
 # strong (or not-yet-known) win rate; sizing.py scales them down per ticker
 # based on TICKER_EQUITY_SCALE_MIN / the ticker's TradingView win rate below.
-MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 200))
-MAX_EQUITY_PER_TICKER = float(os.getenv("MAX_EQUITY_PER_TICKER", 600))
-MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 1000))
+MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 100))
+MAX_EQUITY_PER_TICKER = float(os.getenv("MAX_EQUITY_PER_TICKER", 300))
+MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 500))
+
+# Weekly-return gating (see gating.py). Stocks are ranked by Sharpe ratio
+# (and net PnL) from closed TradingView/Hedge trades; the bottom
+# GATE_BOTTOM_FRACTION (plus any net-negative stock) is "weak". Weak stocks'
+# new entries are then:
+#   - rejected when the week's return is below GATE_LOSS_PCT (negative week),
+#   - rejected when it is between GATE_REJECT_PCT and GATE_REDUCE_PCT,
+#   - sized down by GATE_REDUCE_SCALE when it is at/above GATE_REDUCE_PCT.
+# Stocks with fewer than GATE_MIN_TRADES closed trades are never gated.
+WEEKLY_GATE_ENABLED = os.getenv("WEEKLY_GATE_ENABLED", "True").lower() in ("1", "true", "yes")
+GATE_BOTTOM_FRACTION = float(os.getenv("GATE_BOTTOM_FRACTION", 0.20))
+GATE_MIN_TRADES = int(os.getenv("GATE_MIN_TRADES", 5))
+GATE_LOSS_PCT = float(os.getenv("GATE_LOSS_PCT", 0.0))
+GATE_REJECT_PCT = float(os.getenv("GATE_REJECT_PCT", 5.0))
+GATE_REDUCE_PCT = float(os.getenv("GATE_REDUCE_PCT", 10.0))
+GATE_REDUCE_SCALE = float(os.getenv("GATE_REDUCE_SCALE", 0.5))
+REJECTED_TRADES_PATH = os.getenv(
+    "REJECTED_TRADES_PATH",
+    os.path.join(os.path.dirname(os.getenv("TRADE_LOG_PATH", os.getenv("TRADE_LOG_FILE", "/data/trade_log.json"))) or ".", "rejected_trades.json"),
+)
 
 # Per-ticker equity scaling by win rate: sizing.calculate_size() scales the
 # equity caps above down for tickers with a weaker TradingView/Hedge win

@@ -4697,3 +4697,52 @@ class TestBackendEntries:
         ev = [{"ts": deposits._now_naive_uk(), "pnl": 10.0}]
         result = deposits.compute_period_returns(910.0, path=path, pnl_events=ev)
         assert result["daily"] == 1.0
+
+
+class TestWeeklyGate:
+    @staticmethod
+    def _trades():
+        def mk(stock, pnls):
+            return [{"ticker": stock, "trade_type": "tradingview", "status": "CLOSED", "pnl_gbp": p} for p in pnls]
+        return (
+            mk("AAA", [10, 12, 9, 11, 10])
+            + mk("BBB", [5, -1, 4, 6, 3])
+            + mk("CCC", [8, -2, 7, 6, 5])
+            + mk("DDD", [6, -3, 5, 4, 7])
+            + mk("EEE", [-4, 5, -6, 3, -2])
+            + mk("NEW", [-5, -5])
+        )
+
+    def test_negative_week_rejects_weak_stock_only(self):
+        import gating
+        t = self._trades()
+        assert gating.evaluate("EEE", weekly_return=-1.0, trades=t)["action"] == "reject"
+        assert gating.evaluate("AAA", weekly_return=-1.0, trades=t)["action"] == "allow"
+        assert gating.evaluate("NEW", weekly_return=-1.0, trades=t)["action"] == "allow"
+
+    def test_profit_bands(self):
+        import gating
+        t = self._trades()
+        assert gating.evaluate("EEE", weekly_return=3.0, trades=t)["action"] == "allow"
+        assert gating.evaluate("EEE", weekly_return=7.0, trades=t)["action"] == "reject"
+        r = gating.evaluate("EEE", weekly_return=12.0, trades=t)
+        assert r["action"] == "reduce" and r["scale"] == 0.5
+
+    def test_rejected_log_round_trip(self, tmp_path):
+        import gating
+        p = str(tmp_path / "rej.json")
+        assert gating.record_rejected({"stock": "EEE", "tv_sl": 1.0, "tv_tp": 2.0}, path=p)
+        rows = gating.load_rejected(p)
+        assert rows[0]["tv_sl"] == 1.0 and rows[0]["time_rejected"]
+
+    def test_size_scale_reduces_order(self, monkeypatch):
+        import sizing
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 100)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 300)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 500)
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"available": 5000})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda a: a)
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [])
+        full = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA", ticker="NVDA")
+        half = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA", ticker="NVDA", size_scale=0.5)
+        assert full["size"] == 5.0 and half["size"] == 2.5
