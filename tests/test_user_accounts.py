@@ -306,3 +306,60 @@ def test_login_and_register_pages_link_to_legal_pages(env):
     for path in ("/dashboard/login", "/dashboard/register", "/dashboard/forgot"):
         html = client.get(path).get_data(as_text=True)
         assert "/dashboard/terms" in html and "/dashboard/faq" in html and "/dashboard/contact" in html, path
+
+
+@pytest.fixture
+def investor_env(env, tmp_path, monkeypatch):
+    import deposits
+    monkeypatch.setattr(deposits, "PLEDGES_PATH", str(tmp_path / "pledges.json"))
+    monkeypatch.setattr(deposits, "TIERS_PATH", str(tmp_path / "tiers.json"))
+    entries = []
+    monkeypatch.setattr(deposits, "list_entries_sorted", lambda: entries)
+    monkeypatch.setattr(deposits, "list_pledges_sorted", lambda path=str(tmp_path / "pledges.json"): deposits.load_pledges(path))
+    return env, entries
+
+
+def test_become_investor_prefills_name_and_records_tier(investor_env, tmp_path):
+    import deposits
+    env, _entries = investor_env
+    client = env()
+    _register(client)
+    _approve("jane@example.com")
+    html = client.get("/dashboard/investors").get_data(as_text=True)
+    assert "Become an Investor" in html and "Make a deposit" not in html
+    assert 'value="Jane Doe"' in html and "TradingView only" in html and "Full Investor" in html
+
+    resp = client.post("/dashboard/investors/pledge",
+                       json={"investor": "Someone Else", "amount": "100", "tier": "full"})
+    assert resp.status_code == 200
+    pledge = resp.get_json()["pledge"]
+    assert pledge["investor"] == "Jane Doe" and pledge["tier"] == "full"
+
+    deposits.set_pledge_status(pledge["id"], "confirmed")
+    assert deposits.get_investor_tier("Jane Doe") == "full"
+
+
+def test_existing_investor_sees_make_a_deposit(investor_env):
+    env, entries = investor_env
+    client = env()
+    _register(client)
+    _approve("jane@example.com", role="investor")
+    entries.append({"type": "deposit", "investor": "Jane Doe", "amount": 100.0})
+    html = client.get("/dashboard/investors").get_data(as_text=True)
+    assert "Make a deposit" in html and "Become an Investor" not in html
+    assert 'id="pledge-tier"' not in html
+
+
+def test_viewer_open_positions_show_side(env, monkeypatch):
+    client = env()
+    _register(client)
+    _approve("jane@example.com")
+    monkeypatch.setattr(dashboard_module, "_build_request_context", lambda: {
+        "account": {"equity": 1, "balance": 1, "pnl": 0, "available": 1},
+        "positions": [{"ticker": "AAPL", "direction": "Short"}],
+        "combined_trades": [], "analytics": dashboard_module._safe_analytics({}),
+        "weekly_analytics": dashboard_module._safe_analytics({}),
+        "monthly_analytics": dashboard_module._safe_analytics({}),
+    })
+    html = client.get("/dashboard/data").get_data(as_text=True)
+    assert "AAPL" in html and "pill-short" in html and "text-align:center" in html

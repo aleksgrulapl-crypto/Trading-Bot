@@ -368,11 +368,12 @@ def non_viewer_page_required(view):
 def _viewer_safe_context(ctx):
     """Return a copy of the dashboard context for the Viewer role: account
     figures are dropped and open positions are reduced to the stock name
-    only."""
+    and side only."""
     safe = dict(ctx)
     safe["account"] = {}
     safe["positions"] = [
-        {"ticker": p.get("ticker") or p.get("epic")}
+        {"ticker": p.get("ticker") or p.get("epic"),
+         "direction": p.get("direction") or p.get("side")}
         for p in (ctx.get("positions") or [])
         if isinstance(p, dict)
     ]
@@ -1492,7 +1493,9 @@ def dashboard_investors():
 
     role = current_role()
     all_requests = deposits.list_withdrawal_requests_sorted()
-    my_name = _read_identity().get("name") if role == "investor" else None
+    my_name = _read_identity().get("name") if role in ("investor", "viewer", "pending") else None
+    prefill_name = my_name or ""
+    is_existing_investor = bool(my_name) and deposits.canonical_investor_name(my_name, entries) is not None
     if role == "owner":
         visible_requests = all_requests
     elif my_name:
@@ -1525,6 +1528,8 @@ def dashboard_investors():
         closed_withdrawals=closed_withdrawals,
         withdrawal_investors=[n for n in investors if not (owner_name and deposits._same_name(n, owner_name))] if is_owner_role else [],
         my_withdrawable=my_withdrawable,
+        prefill_name=prefill_name,
+        is_existing_investor=is_existing_investor,
         lock_days=deposits.lock_days(),
         auto_settle_days=float(getattr(config, "WITHDRAWAL_AUTO_SETTLE_DAYS", 3) or 0),
         pending_pledges=pending_pledges,
@@ -1545,8 +1550,16 @@ def dashboard_investors_add_pledge():
     name = payload.get("investor", "") or payload.get("name", "")
     amount = payload.get("amount")
     note = payload.get("note", "")
+    tier = payload.get("tier") or None
 
-    ok, record, status = deposits.add_pledge(name, amount, note)
+    # Non-owners always pledge under their registered account name.
+    if current_role() != "owner":
+        name = _read_identity().get("name") or name
+        # Existing investors keep their stored tier; only new investors choose one.
+        if deposits.canonical_investor_name(name, deposits.list_entries_sorted()):
+            tier = None
+
+    ok, record, status = deposits.add_pledge(name, amount, note, tier=tier)
 
     if request.is_json:
         if ok:

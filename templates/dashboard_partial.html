@@ -88,9 +88,9 @@
       <table class="table">
         <thead>
           <tr>
-            <th>Stock</th>
+            <th{% if limited %} style="text-align:center"{% endif %}>Stock</th>
+            <th{% if limited %} style="text-align:center"{% endif %}>Side</th>
             {% if not limited %}
-            <th>Side</th>
             <th>Size</th>
             <th>Entry</th>
             <th>Current</th>
@@ -103,9 +103,8 @@
         <tbody>
           {% for p in positions %}
           <tr>
-            <td>{{ p.ticker or p.epic or '—' }}</td>
-            {% if not limited %}
-            <td>
+            <td{% if limited %} style="text-align:center; font-weight:600"{% endif %}>{{ p.ticker or p.epic or '—' }}</td>
+            <td{% if limited %} style="text-align:center"{% endif %}>
               {% set dir = p.direction or p.side %}
               {% if dir == 'Long' %}
                 <span class="pill pill-long">Long</span>
@@ -115,6 +114,7 @@
                 <span class="pill pill-status">{{ dir or '—' }}</span>
               {% endif %}
             </td>
+            {% if not limited %}
             <td>{{ p.size|default('—') }}</td>
             <td>{{ p.entry_price is not none and p.entry_price or p.price|default('—') }}</td>
             <td>{{ p.current_price|default('—') }}</td>

@@ -81,8 +81,9 @@ DEFAULT_TIER = "tradingview"
 _tiers_lock = threading.Lock()
 
 
-def load_tiers(path: str = TIERS_PATH) -> Dict[str, str]:
+def load_tiers(path: Optional[str] = None) -> Dict[str, str]:
     """Load the investor-tier map (lowercased investor name -> tier). Returns {} if absent/invalid."""
+    path = path or TIERS_PATH
     if not os.path.exists(path):
         return {}
     try:
@@ -97,15 +98,16 @@ def load_tiers(path: str = TIERS_PATH) -> Dict[str, str]:
         return {}
 
 
-def save_tiers(tiers: Dict[str, str], path: str = TIERS_PATH) -> bool:
+def save_tiers(tiers: Dict[str, str], path: Optional[str] = None) -> bool:
     """Persist *tiers* to *path* via an atomic write."""
+    path = path or TIERS_PATH
     ok = _atomic_write(path, tiers)
     if not ok:
         logger.error("deposits: atomic write of tiers failed")
     return ok
 
 
-def get_investor_tier(name: str, tiers: Optional[Dict[str, str]] = None, path: str = TIERS_PATH) -> str:
+def get_investor_tier(name: str, tiers: Optional[Dict[str, str]] = None, path: Optional[str] = None) -> str:
     """Return the stored tier for *name* ("tradingview" or "full"), defaulting
     to "tradingview" when unset/invalid. Lookup is case-insensitive."""
     key = str(name or "").strip().lower()
@@ -116,7 +118,7 @@ def get_investor_tier(name: str, tiers: Optional[Dict[str, str]] = None, path: s
     return tier if tier in VALID_TIERS else DEFAULT_TIER
 
 
-def set_investor_tier(name: str, tier: str, path: str = TIERS_PATH) -> Tuple[bool, str]:
+def set_investor_tier(name: str, tier: str, path: Optional[str] = None) -> Tuple[bool, str]:
     """Set the ROI tier for investor *name*. Returns (ok, status)."""
     key = str(name or "").strip().lower()
     if not key:
@@ -397,8 +399,9 @@ VALID_PLEDGE_STATUSES = frozenset(("pending", "confirmed", "declined"))
 _pledges_lock = threading.Lock()
 
 
-def load_pledges(path: str = PLEDGES_PATH) -> List[Dict[str, Any]]:
+def load_pledges(path: Optional[str] = None) -> List[Dict[str, Any]]:
     """Load the investor-pledge log. Returns [] if absent/invalid."""
+    path = path or PLEDGES_PATH
     if not os.path.exists(path):
         return []
     try:
@@ -413,16 +416,20 @@ def load_pledges(path: str = PLEDGES_PATH) -> List[Dict[str, Any]]:
         return []
 
 
-def save_pledges(pledges: List[Dict[str, Any]], path: str = PLEDGES_PATH) -> bool:
+def save_pledges(pledges: List[Dict[str, Any]], path: Optional[str] = None) -> bool:
     """Persist *pledges* to *path* via an atomic write."""
+    path = path or PLEDGES_PATH
     ok = _atomic_write(path, pledges)
     if not ok:
         logger.error("deposits: atomic write of pledges failed")
     return ok
 
 
-def add_pledge(name: str, amount: Any, note: str = "", path: str = PLEDGES_PATH) -> Tuple[bool, Optional[Dict[str, Any]], str]:
-    """Record a new "intent to invest" pledge. Returns (ok, record, status)."""
+def add_pledge(name: str, amount: Any, note: str = "", path: Optional[str] = None, tier: Optional[str] = None) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """Record a new "intent to invest" pledge. Returns (ok, record, status).
+
+    *tier* ("tradingview" or "full") is the investor type chosen by a new
+    investor; it is applied once the pledge is confirmed. Ignored if invalid."""
     investor_name = str(name or "").strip()
     if not investor_name or is_backend_investor(investor_name):
         return False, None, "invalid_investor"
@@ -445,6 +452,9 @@ def add_pledge(name: str, amount: Any, note: str = "", path: str = PLEDGES_PATH)
         "status": "pending",
         "created_at": _now_iso(),
     }
+    chosen_tier = str(tier or "").strip().lower()
+    if chosen_tier in VALID_TIERS:
+        record["tier"] = chosen_tier
 
     with _pledges_lock:
         pledges = load_pledges(path)
@@ -454,7 +464,7 @@ def add_pledge(name: str, amount: Any, note: str = "", path: str = PLEDGES_PATH)
         return True, record, "created"
 
 
-def list_pledges_sorted(path: str = PLEDGES_PATH) -> List[Dict[str, Any]]:
+def list_pledges_sorted(path: Optional[str] = None) -> List[Dict[str, Any]]:
     """Return pledges newest-first by ``created_at``."""
     pledges = load_pledges(path)
     return sorted(pledges, key=lambda p: str(p.get("created_at") or ""), reverse=True)
@@ -472,7 +482,7 @@ def split_pledges(pledges: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], 
 def set_pledge_status(
     pledge_id: str,
     status: str,
-    path: str = PLEDGES_PATH,
+    path: Optional[str] = None,
     resolved_by: str = "owner",
 ) -> Tuple[bool, Optional[Dict[str, Any]], str]:
     """Update a pledge's status (e.g. Owner confirming payment arrived).
@@ -500,11 +510,14 @@ def set_pledge_status(
                     pledge.pop("resolved_by", None)
                 if not save_pledges(pledges, path):
                     return False, None, "save_failed"
+                pledge_tier = str(pledge.get("tier") or "")
+                if normalized_status == "confirmed" and pledge_tier in VALID_TIERS and pledge.get("investor"):
+                    set_investor_tier(pledge["investor"], pledge_tier)
                 return True, pledge, "updated"
         return False, None, "not_found"
 
 
-def delete_pledge(pledge_id: str, path: str = PLEDGES_PATH) -> Tuple[bool, str]:
+def delete_pledge(pledge_id: str, path: Optional[str] = None) -> Tuple[bool, str]:
     """Remove one pledge row by its ``id``."""
     target = str(pledge_id or "").strip()
     if not target:
@@ -1145,7 +1158,7 @@ def _save_balance_state(balance: float, as_of: str, path: str = BALANCE_STATE_PA
     return ok
 
 
-def _find_matching_pending_pledge(amount: float, path: str = PLEDGES_PATH) -> Optional[Dict[str, Any]]:
+def _find_matching_pending_pledge(amount: float, path: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Return the pending pledge whose amount is closest to *amount*,
     within ``config.PLEDGE_MATCH_TOLERANCE`` GBP, or ``None``."""
     tolerance = float(getattr(config, "PLEDGE_MATCH_TOLERANCE", 2.0) or 2.0) if config else 2.0
