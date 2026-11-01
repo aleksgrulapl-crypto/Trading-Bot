@@ -296,6 +296,28 @@ app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.jinja_env.auto_reload = True
 app.jinja_env.cache = {}
 
+# Signed session cookies for dashboard logins. Set SECRET_KEY in the environment;
+# without it a random key is used and everyone is logged out on each restart.
+_secret_key = os.getenv("SECRET_KEY")
+if not _secret_key:
+    import secrets as _secrets
+    _secret_key = _secrets.token_hex(32)
+    logging.getLogger("webhook").warning(
+        "SECRET_KEY is not set; using a temporary key. Dashboard logins will reset on restart."
+    )
+app.secret_key = _secret_key
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=bool(os.getenv("RENDER")),
+    PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 7,
+)
+if os.getenv("RENDER"):
+    # Render terminates TLS in front of the app; trust one proxy hop so the
+    # client IP (used for login throttling) and scheme are correct.
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
 # Register blueprint if available and valid
 if dashboard_blueprint is not None:
     try:
@@ -320,25 +342,35 @@ if not logger.handlers:
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _dashboard_identity() -> dict:
+    """Current dashboard identity (see dashboard._read_identity); anonymous if
+    the dashboard module is unavailable."""
+    try:
+        import dashboard as _dashboard_module
+        return _dashboard_module._read_identity()
+    except Exception:
+        logging.getLogger("webhook").exception("dashboard identity unavailable")
+        return {"role": None, "name": None, "logged_in": False}
+
+
 def _dashboard_login_required(view):
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
-        if not request.cookies.get("dashboard_auth"):
+        ident = _dashboard_identity()
+        if not ident["logged_in"] or ident["role"] not in ("owner", "viewer", "investor"):
             return redirect("/dashboard/login")
         return view(*args, **kwargs)
     return wrapper
 
 def _dashboard_owner_required(view):
-    """Like _dashboard_login_required, but also blocks the Viewer role from
+    """Like _dashboard_login_required, but also blocks the non-Owner roles from
     debug routes that place orders or close positions."""
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
-        if not request.cookies.get("dashboard_auth"):
+        ident = _dashboard_identity()
+        if not ident["logged_in"] or ident["role"] not in ("owner", "viewer", "investor"):
             return redirect("/dashboard/login")
-        role = request.cookies.get("dashboard_role") or "owner"
-        if role not in ("owner", "viewer"):
-            role = "owner"
-        if role != "owner":
+        if ident["role"] != "owner":
             return jsonify({"status": "error", "message": "forbidden_viewer_role"}), 403
         return view(*args, **kwargs)
     return wrapper

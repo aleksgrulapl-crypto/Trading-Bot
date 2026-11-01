@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="analytics-wrap">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Users{% if pending_count %} · {{ pending_count }} awaiting approval{% endif %}</div>
+    </div>
+    {% if user_rows %}
+    <table style="width:100%; border-collapse:collapse;">
+      <thead>
+        <tr style="text-align:left;">
+          <th>Name</th><th>Email</th><th>Registered</th><th>Role</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in user_rows %}
+        <tr>
+          <td>{{ u.name }}</td>
+          <td>{{ u.email }}</td>
+          <td>{{ u.created_at_human }}</td>
+          <td>{{ {'pending': 'Pending', 'viewer': 'Viewer', 'investor': 'Investor'}.get(u.role, u.role) }}</td>
+          <td>
+            {% if u.role == 'pending' %}
+            <form method="POST" action="/dashboard/users/{{ u.id }}/role" style="display:inline;">
+              <input type="hidden" name="role" value="viewer"><button type="submit">Approve</button>
+            </form>
+            {% elif u.role == 'viewer' %}
+            <form method="POST" action="/dashboard/users/{{ u.id }}/role" style="display:inline;">
+              <input type="hidden" name="role" value="investor"><button type="submit">Upgrade to investor</button>
+            </form>
+            {% elif u.role == 'investor' %}
+            <form method="POST" action="/dashboard/users/{{ u.id }}/role" style="display:inline;">
+              <input type="hidden" name="role" value="viewer"><button type="submit">Downgrade to viewer</button>
+            </form>
+            {% endif %}
+            <form method="POST" action="/dashboard/users/{{ u.id }}/delete" style="display:inline;"
+                  onsubmit="return confirm('Delete this user?');">
+              <button type="submit">{{ 'Reject' if u.role == 'pending' else 'Delete' }}</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="small">No registered users yet.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

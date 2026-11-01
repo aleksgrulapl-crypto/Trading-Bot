@@ -3724,6 +3724,7 @@ class TestDashboardRoles:
             "monthly_analytics": dashboard._safe_analytics({}),
         })
         app = Flask(__name__)
+        app.secret_key = "test-secret"
         app.register_blueprint(dashboard.dashboard)
         client = app.test_client()
         if with_cookie:
@@ -3764,68 +3765,7 @@ class TestDashboardRoles:
         client = self._viewer_client(monkeypatch, with_cookie=True)
         assert ">Logout<" in client.get("/dashboard").get_data(as_text=True)
         resp = client.get("/dashboard/logout")
-        assert resp.headers["Location"].endswith("/dashboard")
-
-    def test_owner_login_sets_owner_role_cookie(self, monkeypatch):
-        from flask import Flask
-        from dashboard import dashboard
-        import dashboard as dashboard_module
-
-        monkeypatch.delenv("DASHBOARD_OWNER_PASSWORD", raising=False)
-        monkeypatch.delenv("DASHBOARD_VIEWER_PASSWORD", raising=False)
-        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_OWNER_PASSWORD", "owner-pw")
-        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_VIEWER_PASSWORD", "viewer-pw")
-
-        app = Flask(__name__)
-        app.register_blueprint(dashboard)
-        client = app.test_client()
-
-        response = client.post("/dashboard/login", data={"username": "owner", "password": "owner-pw"})
-
-        assert response.status_code == 302
-        assert response.headers["Location"] == "/dashboard"
-        set_cookie_headers = response.headers.get_all("Set-Cookie")
-        assert any("dashboard_auth=1" in h for h in set_cookie_headers)
-        assert any("dashboard_role=owner" in h for h in set_cookie_headers)
-
-    def test_viewer_login_sets_viewer_role_cookie(self, monkeypatch):
-        from flask import Flask
-        from dashboard import dashboard
-        import dashboard as dashboard_module
-
-        monkeypatch.delenv("DASHBOARD_OWNER_PASSWORD", raising=False)
-        monkeypatch.delenv("DASHBOARD_VIEWER_PASSWORD", raising=False)
-        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_OWNER_PASSWORD", "owner-pw")
-        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_VIEWER_PASSWORD", "viewer-pw")
-
-        app = Flask(__name__)
-        app.register_blueprint(dashboard)
-        client = app.test_client()
-
-        response = client.post("/dashboard/login", data={"username": "viewer", "password": "viewer-pw"})
-
-        assert response.status_code == 302
-        set_cookie_headers = response.headers.get_all("Set-Cookie")
-        assert any("dashboard_role=viewer" in h for h in set_cookie_headers)
-
-    def test_viewer_password_rejected_for_owner_username(self, monkeypatch):
-        from flask import Flask
-        from dashboard import dashboard
-        import dashboard as dashboard_module
-
-        monkeypatch.delenv("DASHBOARD_OWNER_PASSWORD", raising=False)
-        monkeypatch.delenv("DASHBOARD_VIEWER_PASSWORD", raising=False)
-        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_OWNER_PASSWORD", "owner-pw")
-        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_VIEWER_PASSWORD", "viewer-pw")
-
-        app = Flask(__name__)
-        app.register_blueprint(dashboard)
-        client = app.test_client()
-
-        response = client.post("/dashboard/login", data={"username": "owner", "password": "viewer-pw"})
-
-        assert response.status_code == 401
-        assert "Invalid" in response.get_data(as_text=True)
+        assert resp.headers["Location"].endswith("/dashboard/login")
 
     def test_viewer_role_is_blocked_from_close_endpoint(self, monkeypatch):
         from flask import Flask
@@ -4027,26 +3967,6 @@ class TestDashboardRoles:
         assert "Contact Us" in body
         assert "FAQ" in body
         assert "Weekly Goal: 5.0%" in body
-
-    def test_investor_login_sets_investor_role_cookie(self, monkeypatch):
-        from flask import Flask
-        from dashboard import dashboard
-        import dashboard as dashboard_module
-
-        monkeypatch.delenv("DASHBOARD_OWNER_PASSWORD", raising=False)
-        monkeypatch.delenv("DASHBOARD_INVESTOR_PASSWORD", raising=False)
-        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_OWNER_PASSWORD", "owner-pw")
-        monkeypatch.setattr(dashboard_module.config, "DASHBOARD_INVESTOR_PASSWORD", "investor-pw")
-
-        app = Flask(__name__)
-        app.register_blueprint(dashboard)
-        client = app.test_client()
-
-        response = client.post("/dashboard/login", data={"username": "investor", "password": "investor-pw"})
-
-        assert response.status_code == 302
-        set_cookie_headers = response.headers.get_all("Set-Cookie")
-        assert any("dashboard_role=investor" in h for h in set_cookie_headers)
 
     def test_investor_role_is_blocked_from_close_endpoint(self, monkeypatch):
         """Investor has the same read-only restrictions as Viewer."""

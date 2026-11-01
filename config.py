@@ -126,15 +126,13 @@ TICKER_SETTINGS = {
 
 # UI / dashboard
 DASHBOARD_TITLE = os.getenv("DASHBOARD_TITLE", "AGC Trader")
-DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "Killen123%")
-# Dual login roles: "Owner" has full control (close/delete/edit trades); "Viewer"
-# can only view the Dashboard/Analytics pages. DASHBOARD_OWNER_PASSWORD falls back
-# to the original single DASHBOARD_PASSWORD so existing deployments keep working.
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
+# The Owner logs in as "owner" with DASHBOARD_OWNER_PASSWORD (falls back to the
+# legacy DASHBOARD_PASSWORD). There is no built-in default: if neither is set,
+# Owner login is disabled. Viewer/Investor access comes from registered accounts
+# approved by the Owner (see users.py), not from shared passwords.
 DASHBOARD_OWNER_PASSWORD = os.getenv("DASHBOARD_OWNER_PASSWORD", DASHBOARD_PASSWORD)
-DASHBOARD_VIEWER_PASSWORD = os.getenv("DASHBOARD_VIEWER_PASSWORD", "Viewer123$")
-# "Investor" has the same read-only access as Viewer, plus the ROI page
-# (per-investor gain/loss breakdown) so investors can check their own returns.
-DASHBOARD_INVESTOR_PASSWORD = os.getenv("DASHBOARD_INVESTOR_PASSWORD", "Investor123$")
+USERS_PATH = os.getenv("USERS_PATH", "/data/users.json")
 
 # Timezone and reporting
 TIMEZONE = os.getenv("TIMEZONE", "Europe/London")

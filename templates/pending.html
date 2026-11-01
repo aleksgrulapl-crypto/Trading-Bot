@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="analytics-wrap">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Awaiting approval</div>
+    </div>
+    <p>Thanks{% if user_name %}, {{ user_name }}{% endif %}. Your account has been created and is waiting for the Owner to approve it.</p>
+    <p class="small">Once approved, the rest of the dashboard unlocks automatically. Refresh this page or log in again later to check.</p>
+    <p class="small"><strong>Capital at risk.</strong> Returns are not guaranteed. See the <a href="/dashboard/terms">Terms of Service</a>.</p>
+  </div>
+</div>
+{% endblock %}

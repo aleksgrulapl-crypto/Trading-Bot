@@ -38,7 +38,9 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `CAPITAL_API_KEY` | Capital.com API key | ✅ |
 | `CAPITAL_USERNAME` | Capital.com account username | ✅ |
 | `CAPITAL_PASSWORD` | Capital.com account password | ✅ |
-| `DASHBOARD_PASSWORD` | Password for the `/dashboard` login page | ✅ |
+| `DASHBOARD_OWNER_PASSWORD` | Password for the Owner login (username `owner`). No default - Owner login is disabled if unset. `DASHBOARD_PASSWORD` is still accepted as a fallback | ✅ |
+| `SECRET_KEY` | Secret used to sign dashboard login sessions (generate with `python -c "import secrets; print(secrets.token_hex(32))"`). Keep it stable, or everyone is logged out | ✅ |
+| `USERS_PATH` | Path for the registered-users JSON file (default `/data/users.json`) | ⬜ |
 | `FX_USD_GBP` | USD→GBP conversion rate (default `0.78`) | ⬜ |
 | `TRADE_LOG_PATH` | Path for the trade-log JSON file (default `/data/trade_log.json`) | ⬜ |
 | `DEBUG_LOGS` | Set to `true` to enable verbose logging | ⬜ |
@@ -89,7 +91,7 @@ and overrides `NOTIFY_EMAIL_ENABLED`/`NOTIFY_EMAIL_TO` from then on.
 export CAPITAL_API_KEY=...
 export CAPITAL_USERNAME=...
 export CAPITAL_PASSWORD=...
-export DASHBOARD_PASSWORD=my_secure_password
+export DASHBOARD_OWNER_PASSWORD=my_secure_password
 
 python webhook.py
 ```
@@ -104,7 +106,7 @@ docker run -p 5000:5000 \
   -e CAPITAL_API_KEY=... \
   -e CAPITAL_USERNAME=... \
   -e CAPITAL_PASSWORD=... \
-  -e DASHBOARD_PASSWORD=my_secure_password \
+  -e DASHBOARD_OWNER_PASSWORD=my_secure_password \
   -v /host/data:/data \
   trading-bot
 ```
@@ -227,6 +229,6 @@ pytest reconcile_test.py -v
 
 ## Security Notes
 
-- Change `DASHBOARD_PASSWORD` from the default before deploying.
+- Set `DASHBOARD_OWNER_PASSWORD` and `SECRET_KEY` before deploying (there are no default passwords).
 - Never commit credentials to the repository.
 - The `/debug/*` endpoints should be restricted or disabled in production.

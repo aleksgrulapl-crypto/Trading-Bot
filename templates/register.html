@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AGC Trader - Create an account</title>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .box {
+            background-color: #161b22;
+            padding: 30px;
+            border-radius: 8px;
+            width: 340px;
+            box-shadow: 0 0 10px #000;
+        }
+        h2, p.sub { text-align: center; }
+        input[type="text"], input[type="email"], input[type="password"] {
+            width: 92%;
+            padding: 10px;
+            margin-top: 12px;
+            border-radius: 5px;
+            border: none;
+            background-color: #21262d;
+            color: #c9d1d9;
+        }
+        .risk {
+            margin-top: 16px;
+            font-size: 12px;
+            line-height: 1.5;
+            background: #21262d;
+            border-left: 3px solid #d29922;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        label.check { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: 13px; }
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            width: 100%;
+            background-color: #238636;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .error { color: #ff7b72; margin-top: 12px; text-align: center; }
+        a { color: #58a6ff; }
+        .links { text-align: center; margin-top: 18px; font-size: 13px; }
+    </style>
+</head>
+<body>
+<div class="box">
+    <h2>AGC Trader</h2>
+    <p class="sub">Create an account. New accounts are reviewed and approved by the Owner before access is granted.</p>
+
+    <form method="POST">
+        <input type="text" name="name" placeholder="Full name" value="{{ name|default('') }}" autocomplete="name" required maxlength="80">
+        <input type="email" name="email" placeholder="Email address (your login)" value="{{ email|default('') }}" autocomplete="email" required>
+        <input type="password" name="password" placeholder="Password (min 8 characters)" autocomplete="new-password" required minlength="8">
+        <input type="password" name="confirm_password" placeholder="Confirm password" autocomplete="new-password" required minlength="8">
+
+        <div class="risk">
+            <strong>Capital at risk.</strong> Trading involves risk and you may lose some or all of the money you
+            contribute. Returns are not guaranteed and past performance is not a reliable indicator of future results.
+        </div>
+        <label class="check">
+            <input type="checkbox" name="accept_risk" value="1" required>
+            <span>I understand my capital is at risk and I have read the <a href="/dashboard/terms" target="_blank" rel="noopener">Terms of Service</a>.</span>
+        </label>
+
+        <button type="submit">Create account</button>
+    </form>
+
+    {% if error %}
+        <div class="error">{{ error }}</div>
+    {% endif %}
+
+    <div class="links">Already registered? <a href="/dashboard/login">Log in</a></div>
+</div>
+</body>
+</html>
