@@ -236,6 +236,9 @@ HEDGING_ENABLED = os.getenv("HEDGING_ENABLED", "True").lower() in ("1", "true", 
 DAILY_REPORT_ENABLED = os.getenv("DAILY_REPORT_ENABLED", "True").lower() in ("1", "true", "yes")
 DAILY_REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", 22))
 DAILY_REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", 0))
+# Weekday-only daily PnL email to NOTIFY_EMAIL_TO (UK time).
+DAILY_PNL_EMAIL_HOUR = int(os.getenv("DAILY_PNL_EMAIL_HOUR", 21))
+DAILY_PNL_EMAIL_MINUTE = int(os.getenv("DAILY_PNL_EMAIL_MINUTE", 0))
 
 # Email notifications: sent directly to NOTIFY_EMAIL_TO via SMTP when a
 # position is closed (always) and opened (only when NOTIFY_EMAIL_ENABLED / the

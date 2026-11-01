@@ -137,6 +137,32 @@
   {% endif %}
 </div>
 
+{% if group == 'tradingview' %}
+{% for title, rows, key in [('Performance by Timeframe', detailed.timeframe_stats, 'timeframe'), ('Performance by Day of Week', detailed.weekday_stats, 'day')] %}
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">{{ title }}</div>
+  </div>
+  {% if rows %}
+  <div class="ticker-grid">
+    {% for r in rows %}
+    <div class="ticker-card {% if r.total_pnl >= 0 %}ticker-pos{% else %}ticker-neg{% endif %}">
+      <div class="ticker-name">{{ r[key] }}</div>
+      <div class="ticker-row"><span>Trades</span><span>{{ r.trade_count }}</span></div>
+      <div class="ticker-row"><span>Wins / Losses</span><span>{{ r.wins }} / {{ r.losses }}</span></div>
+      <div class="ticker-row"><span>Win Rate</span><span>{{ r.win_rate if r.win_rate is not none else 'n/a' }}{% if r.win_rate is not none %}%{% endif %}</span></div>
+      <div class="ticker-row"><span>Avg PnL (GBP)</span><span>{{ r.avg_pnl if r.avg_pnl is not none else 'n/a' }}</span></div>
+      <div class="ticker-row"><span>Total PnL (GBP)</span><span class="{% if r.total_pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">{{ r.total_pnl }}</span></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="small">No closed trades yet.</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
 <div class="card">
   <div class="card-header">
     <div class="card-title">Win / Loss by Ticker</div>
@@ -150,6 +176,7 @@
         <div class="ticker-row"><span>Wins</span><span>{{ s.wins }}</span></div>
         <div class="ticker-row"><span>Losses</span><span>{{ s.losses }}</span></div>
         <div class="ticker-row"><span>Win Rate</span><span>{{ s.win_rate is not none and s.win_rate or '—' }}%</span></div>
+        <div class="ticker-row" title="Mean / std-dev of per-trade PnL (needs 2+ trades)"><span>Sharpe Ratio</span><span class="{% if s.sharpe is not none %}{% if s.sharpe >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}{% endif %}">{{ s.sharpe if s.sharpe is not none else 'n/a' }}</span></div>
         <div class="ticker-row"><span>Total PnL (GBP)</span><span class="{% if s.total_pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">{{ s.total_pnl }}</span></div>
       </div>
       {% endfor %}

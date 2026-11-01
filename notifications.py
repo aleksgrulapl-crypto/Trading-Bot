@@ -208,6 +208,24 @@ def notify_owner_new_registration(name: str, email: str) -> bool:
     )
 
 
+def notify_daily_pnl(summary: Dict[str, Any]) -> bool:
+    """Email the day's realised PnL summary to the Owner recipient(s)."""
+    day = summary["date"]
+    lines = [
+        f"Daily PnL for {day.strftime('%A %d %b %Y')}",
+        "",
+        f"Total PnL: {_fmt_money(summary['total'])}",
+        f"Closed trades: {len(summary['trades'])} ({summary['wins']} wins, {summary['losses']} losses)",
+    ]
+    if summary["trades"]:
+        lines.append("")
+        for r in summary["trades"]:
+            lines.append(f"- {r['ticker']} {r['side']} [{r['timeframe']}, {r['source']}]: {_fmt_money(r['pnl'])}")
+    else:
+        lines += ["", "No trades were closed today."]
+    return _send_email(f"Daily PnL {day.strftime('%a %d %b')}: {_fmt_money(summary['total'])}", "\n".join(lines))
+
+
 def notify_position_opened(trade: Dict[str, Any]) -> bool:
     """Email when a position is opened, only when the dashboard toggle is On."""
     if not trade:
