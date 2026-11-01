@@ -42,6 +42,7 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `SECRET_KEY` | Secret used to sign dashboard login sessions (generate with `python -c "import secrets; print(secrets.token_hex(32))"`). Keep it stable, or everyone is logged out | ✅ |
 | `USERS_PATH` | Path for the registered-users JSON file (default `/data/users.json`) | ⬜ |
 | `PUBLIC_BASE_URL` | Public site URL used in emailed password-reset links, e.g. `https://your-app.onrender.com` (set this; otherwise the request host is used) | ⬜ |
+| `PUBLIC_SNAPSHOT_PATH` | Where the hourly public landing-page snapshot (percentages only) is cached. Default `/data/public_snapshot.json` | ⬜ |
 | `FX_USD_GBP` | USD→GBP conversion rate (default `0.78`) | ⬜ |
 | `TRADE_LOG_PATH` | Path for the trade-log JSON file (default `/data/trade_log.json`) | ⬜ |
 | `DEBUG_LOGS` | Set to `true` to enable verbose logging | ⬜ |

@@ -212,6 +212,12 @@ def sync_open_positions() -> None:
 scheduler = Scheduler()
 
 
+def refresh_public_snapshot() -> None:
+    # Imported lazily: the dashboard module pulls in the web layer.
+    from dashboard import refresh_public_snapshot as _refresh
+    _refresh()
+
+
 def start_scheduler() -> None:
     """
     Configure and start the scheduler with the desired jobs.
@@ -231,6 +237,8 @@ def start_scheduler() -> None:
 
     # Open position sync (manual/trader opens that bypass the webhook)
     scheduler.add_interval_job(10, sync_open_positions)
+    # Public landing-page snapshot (percentages for the last completed week/month)
+    scheduler.add_interval_job(3600, refresh_public_snapshot)
     # Optional daily/hourly logging jobs (examples)
     scheduler.add_daily_job(getattr(config, "DAILY_REPORT_HOUR", 22), getattr(config, "DAILY_REPORT_MINUTE", 0), lambda: log_equity("equity_log.json"))
     scheduler.add_hourly_job(0, lambda: log_available("available_log.json"))

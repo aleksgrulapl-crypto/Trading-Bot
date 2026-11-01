@@ -27,6 +27,7 @@ import users
 import account_emails
 import deposits
 import notifications
+import public_snapshot
 import trail_settings
 from display_helpers import format_human
 from close_position import close_position as close_live_position
@@ -284,6 +285,7 @@ def dashboard_logout():
 
 # Pages reachable without an approved account (login flow and legal pages).
 PUBLIC_ENDPOINTS = frozenset({
+    "dashboard.landing",
     "dashboard.dashboard_login",
     "dashboard.dashboard_login_submit",
     "dashboard.dashboard_register",
@@ -1309,6 +1311,38 @@ def dashboard_contact():
 @login_required
 def dashboard_faq():
     return _render_static_page("faq.html")
+
+
+@dashboard.route("/")
+def landing():
+    """Public welcome page. Serves only the cached, percentages-only snapshot,
+    so it never touches the broker or the trade log."""
+    resp = current_app.make_response(render_template(
+        "landing.html",
+        title=getattr(config, "DASHBOARD_TITLE", "AGC Trader"),
+        snapshot=public_snapshot.load_snapshot(),
+        identity=_read_identity(),
+        account=_page_account(),
+    ))
+    resp.headers["Cache-Control"] = "no-store" if _read_identity()["logged_in"] else "public, max-age=300"
+    return resp
+
+
+def refresh_public_snapshot() -> None:
+    """Recompute and store the public landing-page figures (scheduled job)."""
+    # Record the daily balance and weekly close here too, so the public
+    # figures don't depend on the owner opening the dashboard.
+    try:
+        balance = (session.enrich_account(session.get_account() or {}) or {}).get("balance")
+        deposits.record_daily_balance_snapshot(balance)
+        deposits.record_weekly_close(balance)
+    except Exception:
+        logger.exception("dashboard: balance snapshot from scheduler failed")
+    try:
+        trades = normalize_trades(dedupe_trades(load_raw_log()))
+        public_snapshot.write_snapshot(public_snapshot.build_snapshot(_trade_pnl_events(trades)))
+    except Exception:
+        logger.exception("dashboard: public snapshot refresh failed")
 
 @dashboard.route("/dashboard/investors")
 @login_required

@@ -447,6 +447,11 @@
         {% endif %}
 
         <div class="nav">
+            {% if not logged_in %}
+            <a href="/">Home</a>
+            <a href="/dashboard/register">Register</a>
+            <a href="/dashboard/login" class="login-link">Login</a>
+            {% else %}
             <span class="role-badge {% if role == 'owner' %}role-badge-owner{% elif role == 'investor' %}role-badge-investor{% else %}role-badge-viewer{% endif %}">
                 {{ {'owner': 'Owner', 'investor': 'Investor', 'pending': 'Pending'}.get(role, 'Viewer') }}
             </span>
@@ -465,10 +470,7 @@
             <a href="/dashboard/users">Users</a>
             {% endif %}
             {% endif %}
-            {% if logged_in %}
             <a href="/dashboard/logout" class="logout">Logout</a>
-            {% else %}
-            <a href="/dashboard/login" class="login-link">Login</a>
             {% endif %}
         </div>
     </div>

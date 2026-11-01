@@ -1248,20 +1248,16 @@ def record_weekly_close(current_balance: Optional[float], path: str = WEEKLY_CLO
         _atomic_write(path, closes)
 
 
-def compute_successful_weeks(
+def _completed_week_returns(
     path: str = BALANCE_HISTORY_PATH,
     closes_path: str = WEEKLY_CLOSES_PATH,
     now: Optional[datetime] = None,
     pnl_events: Optional[List[Dict[str, Any]]] = None,
-) -> Dict[str, Any]:
-    """Return {"successful_weeks", "total_weeks", "avg_weekly_return"}.
-
-    Each completed week's return is (close - open) / open, where open is the
-    first balance snapshot of that week and close is the frozen Friday 21:00
-    balance (falling back to the next week's first snapshot). Only the last
-    52 weeks count (the trading year). avg_weekly_return is the mean return
-    across those weeks, or None when there are none.
-    """
+) -> List[Tuple[str, float]]:
+    """Return [(week_start_iso, return_pct)] for every completed week, oldest
+    first. A week is complete once its Friday 21:00 close is frozen or a later
+    week has started; each return is closed-trade PnL / the week's opening
+    balance."""
     from datetime import timedelta as _timedelta
     now = now or _now_naive_uk()
     history = sorted(_load_balance_history(path), key=lambda r: r.get("date") or "")
@@ -1277,7 +1273,7 @@ def compute_successful_weeks(
 
     current_ws = (now.date() - _timedelta(days=now.weekday())).isoformat()
     weeks = sorted(by_week)
-    returns: List[float] = []
+    returns: List[Tuple[str, float]] = []
     for ws in weeks:
         if ws > current_ws or (ws == current_ws and ws not in closes):
             continue
@@ -1302,11 +1298,73 @@ def compute_successful_weeks(
         if opening <= 0:
             continue
         week_pnl = _trade_pnl_between(pnl_events, _row_start(by_week[ws][0]), window_end)
-        returns.append(week_pnl / opening * 100)
+        returns.append((ws, week_pnl / opening * 100))
+    return returns
 
-    returns = returns[-TRADING_YEAR_WEEKS:]
+
+def compute_successful_weeks(
+    path: str = BALANCE_HISTORY_PATH,
+    closes_path: str = WEEKLY_CLOSES_PATH,
+    now: Optional[datetime] = None,
+    pnl_events: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Return {"successful_weeks", "total_weeks", "avg_weekly_return"}.
+
+    Each completed week's return is (close - open) / open, where open is the
+    first balance snapshot of that week and close is the frozen Friday 21:00
+    balance (falling back to the next week's first snapshot). Only the last
+    52 weeks count (the trading year). avg_weekly_return is the mean return
+    across those weeks, or None when there are none.
+    """
+    weekly = _completed_week_returns(path, closes_path, now, pnl_events)
+    returns = [r for _, r in weekly][-TRADING_YEAR_WEEKS:]
     return {
         "successful_weeks": sum(1 for r in returns if r >= SUCCESSFUL_WEEK_PCT),
         "total_weeks": len(returns),
         "avg_weekly_return": round(sum(returns) / len(returns), 2) if returns else None,
     }
+
+
+def compute_last_completed_week(
+    path: str = BALANCE_HISTORY_PATH,
+    closes_path: str = WEEKLY_CLOSES_PATH,
+    now: Optional[datetime] = None,
+    pnl_events: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return {"label", "return_pct"} for the most recent completed week."""
+    from datetime import timedelta as _timedelta
+    weekly = _completed_week_returns(path, closes_path, now, pnl_events)
+    if not weekly:
+        return None
+    ws, ret = weekly[-1]
+    monday = datetime.strptime(ws, "%Y-%m-%d").date()
+    friday = monday + _timedelta(days=4)
+    return {
+        "label": f"{monday.strftime('%d/%m/%y')} - {friday.strftime('%d/%m/%y')}",
+        "return_pct": round(ret, 2),
+    }
+
+
+def compute_last_completed_month(
+    path: str = BALANCE_HISTORY_PATH,
+    now: Optional[datetime] = None,
+    pnl_events: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return {"label", "return_pct"} for the previous calendar month, measured
+    like the weekly figures (closed-trade PnL / the month's opening balance).
+    None when no balance was recorded during that month."""
+    from datetime import timedelta as _timedelta
+    now = now or _now_naive_uk()
+    this_month = now.date().replace(day=1)
+    prev_month = (this_month - _timedelta(days=1)).replace(day=1)
+    row = _opening_row_on_or_after(_load_balance_history(path), prev_month)
+    if row is None or (row.get("date") or "") >= this_month.isoformat():
+        return None
+    try:
+        opening = float(row.get("balance"))
+    except (TypeError, ValueError):
+        return None
+    if opening <= 0:
+        return None
+    pnl = _trade_pnl_between(pnl_events, _row_start(row), datetime.combine(this_month, datetime.min.time()))
+    return {"label": prev_month.strftime("%B %Y"), "return_pct": round(pnl / opening * 100, 2)}
