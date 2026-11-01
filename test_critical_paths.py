@@ -4746,3 +4746,33 @@ class TestWeeklyGate:
         full = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA", ticker="NVDA")
         half = sizing.calculate_size(100, 95, 110, "buy", symbol="NVDA", ticker="NVDA", size_scale=0.5)
         assert full["size"] == 5.0 and half["size"] == 2.5
+
+
+class TestTradingSwitch:
+    def test_defaults_on_and_persists(self, tmp_path, monkeypatch):
+        import trading_switch
+        monkeypatch.setattr(trading_switch.config, "TRADING_SWITCH_PATH", str(tmp_path / "s.json"), raising=False)
+        assert trading_switch.is_enabled() is True
+        assert trading_switch.set_enabled(False)
+        assert trading_switch.is_enabled() is False
+        assert trading_switch.set_enabled(True)
+        assert trading_switch.is_enabled() is True
+
+    def test_webhook_rejects_when_off_and_logs_to_rejected(self, tmp_path, monkeypatch):
+        import webhook, gating, trading_switch
+        monkeypatch.setattr(trading_switch.config, "TRADING_SWITCH_PATH", str(tmp_path / "s.json"), raising=False)
+        monkeypatch.setattr(gating.config, "REJECTED_TRADES_PATH", str(tmp_path / "rej.json"), raising=False)
+        trading_switch.set_enabled(False)
+        monkeypatch.setattr(webhook, "parse_tradingview_alert",
+                            lambda p: {"symbol": "INTC", "action": "buy", "sl": 90.0, "tp": 120.0, "timeframe": "15m"})
+        placed = []
+        monkeypatch.setattr(webhook, "place_order", lambda *a, **k: placed.append(1) or {"status": "ok"})
+        resp = webhook.app.test_client().post("/webhook", json={"symbol": "INTC", "action": "buy"})
+        assert (resp.get_json() or {}).get("reason") == "trading_off"
+        assert placed == []
+        rows = gating.load_rejected()
+        assert rows and rows[0]["tv_sl"] == 90.0 and rows[0]["tv_tp"] == 120.0
+
+    def test_time_lock_off_by_default(self):
+        import config
+        assert config.TRADE_LOCK_ENABLED is False

@@ -63,6 +63,15 @@
         {% if is_owner %}
         <div class="email-notify-toggle" style="position:absolute; right:0; top:0;">
           <button
+            id="trading-switch-btn"
+            class="pill {% if trading_enabled %}pill-long{% else %}pill-short{% endif %}"
+            style="cursor:pointer; border:none; margin-right:6px;"
+            onclick="toggleTrading()"
+            title="Master switch: OFF rejects every new trade"
+          >
+            Trading: {{ 'ON' if trading_enabled else 'OFF' }}
+          </button>
+          <button
             id="email-notify-btn"
             class="pill {% if email_notify_enabled %}pill-long{% else %}pill-status{% endif %}"
             style="cursor:pointer; border:none;"

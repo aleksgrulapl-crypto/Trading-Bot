@@ -30,6 +30,7 @@ import gating
 import notifications
 import public_snapshot
 import trail_settings
+import trading_switch
 from display_helpers import format_human
 from close_position import close_position as close_live_position
 from trade_log import (
@@ -1178,6 +1179,7 @@ def dashboard_home():
         is_owner=current_role() == "owner",
         email_notify_enabled=notifications.is_enabled(),
         email_notify_recipient=notifications.get_recipient(),
+        trading_enabled=trading_switch.is_enabled(),
     )
 
 
@@ -1205,6 +1207,7 @@ def dashboard_data():
             is_owner=current_role() == "owner",
             email_notify_enabled=notifications.is_enabled(),
             email_notify_recipient=notifications.get_recipient(),
+            trading_enabled=trading_switch.is_enabled(),
         )
         return jsonify({
             "html": html,
@@ -1901,6 +1904,27 @@ def dashboard_transactions_delete(entry_id: str):
 
     code = 404 if status == "not_found" else (400 if status == "invalid_id" else 500)
     return jsonify({"status": "error", "message": status}), code
+
+
+@dashboard.route("/dashboard/trading/toggle", methods=["POST"])
+@owner_required
+def dashboard_toggle_trading():
+    """Owner-only master switch: OFF rejects every new trade until turned back ON."""
+    payload = request.get_json(silent=True) or request.form or {}
+    enabled = payload.get("enabled")
+    if enabled is None:
+        enabled = not trading_switch.is_enabled()
+    else:
+        enabled = str(enabled).strip().lower() in ("1", "true", "yes", "on")
+
+    if not trading_switch.set_enabled(enabled):
+        return jsonify({"status": "error", "message": "save_failed"}), 500
+    return jsonify({
+        "status": "success",
+        "enabled": enabled,
+        "message": f"Trading turned {'ON' if enabled else 'OFF'}."
+                   + ("" if enabled else " All new trades will be rejected."),
+    }), 200
 
 
 @dashboard.route("/dashboard/notifications/email/toggle", methods=["POST"])

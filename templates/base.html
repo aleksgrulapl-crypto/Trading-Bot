@@ -568,6 +568,28 @@ function toggleTrail(dealId, enabled) {
         .catch(err => console.error("Trail toggle error:", err));
 }
 
+function toggleTrading() {
+    const errorBanner = document.getElementById('error-banner');
+    const btn = document.getElementById('trading-switch-btn');
+    const currentlyOn = btn && btn.textContent.includes('ON');
+    if (currentlyOn && !window.confirm('Turn trading OFF? All new trades will be rejected until you switch it back on.')) {
+        return;
+    }
+
+    fetch('/dashboard/trading/toggle', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !currentlyOn })
+    })
+        .then(r => r.json())
+        .then(data => {
+            errorBanner.innerText = (data && data.message) || "Could not update trading switch.";
+            errorBanner.style.display = "block";
+            refreshDashboard();
+        })
+        .catch(err => console.error("Toggle trading error:", err));
+}
+
 function toggleEmailNotifications() {
     const errorBanner = document.getElementById('error-banner');
     const btn = document.getElementById('email-notify-btn');

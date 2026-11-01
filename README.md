@@ -65,6 +65,8 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `TP_TRAIL_TRIGGER_FRACTION` | TP trail (all trades): once a trade is this far to its TP (default `0.90`) the TP is removed and the SL starts trailing | ⬜ |
 | `TP_TRAIL_LOCK_FRACTION` | Share of the profit locked by the SL once the TP trail is active, ratcheting as the trade runs (default `0.80`) | ⬜ |
 | `TRAIL_SETTINGS_PATH` | JSON file holding per-trade trail state (default `/data/trail_settings.json`). The SL trail is Trader-only, OFF by default, and the Trader can set the GBP profit level it starts at (blank = standard `TRAIL_ACTIVATION_*` rules). TradingView/Hedge trades only use the TP trail. | ⬜ |
+| `TRADING_SWITCH_PATH` | JSON file for the Owner-only "Trading: ON/OFF" dashboard switch (default `/data/trading_switch.json`). OFF rejects every new trade (logged in the Owner-only Rejected list) until switched back ON. | ⬜ |
+| `TRADE_LOCK_ENABLED` | Time-of-day trade lock. Temporarily OFF by default; set `True` to restore the windows in `TRADE_LOCK_WINDOWS` (default `Mon:08:30-09:30,14:00-15:00`). | ⬜ |
 | `NOTIFY_EMAIL_ENABLED` | Default for the "Receive Notifications" toggle: `True` emails on position open and close, `False` emails on close only (default `False`) | ⬜ |
 | `NOTIFY_EMAIL_TO` | Comma-separated recipient email address(es) | ⬜ |
 | `NOTIFY_EMAIL_FROM` | "From" address on the email (default: `SMTP_USERNAME`) | ⬜ |

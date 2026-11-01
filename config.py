@@ -165,15 +165,11 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/London")
 # Trade time lock: block opening new trades during a high-volatility window
 # (e.g. the US cash market open at 14:30 UK time), to reduce volatility
 # exposure and improve winrate. Hours are in 24h UK local time (TIMEZONE).
-#
-# TEMPORARY (2-month trial, started Oct 2026): the general daily lock windows
-# have been switched OFF while bot behaviour is monitored. Only the Monday
-# 08:30-09:30 UK window (weekend-reopen spikes/drops) and a daily 14:00-15:00
-# UK window (US market open volatility) remain active.
-# This is not a removal of the feature — to restore the previous behaviour,
-# set TRADE_LOCK_WINDOWS back to "08:00-09:30,13:00-15:00" (applies every day)
-# or set TRADE_LOCK_ENABLED=False to disable the lock entirely.
-TRADE_LOCK_ENABLED = os.getenv("TRADE_LOCK_ENABLED", "True").lower() in ("1", "true", "yes")
+# TEMPORARY: the trade time lock is switched OFF by default while the bot is
+# monitored (no windows block trading). To restore it, set
+# TRADE_LOCK_ENABLED=True (the windows below, e.g. "Mon:08:30-09:30,14:00-15:00",
+# then apply); nothing else needs to change.
+TRADE_LOCK_ENABLED = os.getenv("TRADE_LOCK_ENABLED", "False").lower() in ("1", "true", "yes")
 TRADE_LOCK_START_HOUR = int(os.getenv("TRADE_LOCK_START_HOUR", 14))
 TRADE_LOCK_END_HOUR = int(os.getenv("TRADE_LOCK_END_HOUR", 15))
 # Each window is "HH:MM-HH:MM" (applies every day) or "Day:HH:MM-HH:MM" (applies
@@ -283,6 +279,8 @@ SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "True").lower() in ("1", "true", "yes")
 NOTIFY_SETTINGS_PATH = os.getenv("NOTIFY_SETTINGS_PATH", "/data/notify_settings.json")
 # Stores the hash/date used to auto-stamp "last updated" on the Terms of Service.
 TRAIL_SETTINGS_PATH = os.getenv("TRAIL_SETTINGS_PATH", "/data/trail_settings.json")
+# Owner master switch for accepting new trades (see trading_switch.py).
+TRADING_SWITCH_PATH = os.getenv("TRADING_SWITCH_PATH", "/data/trading_switch.json")
 TERMS_VERSION_PATH = os.getenv("TERMS_VERSION_PATH", "/data/terms_version.json")
 
 # File paths and persistence
