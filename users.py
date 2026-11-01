@@ -162,6 +162,38 @@ def get_user(user_id):
     return _public(user) if user else None
 
 
+def get_user_by_email(email):
+    email = normalize_email(email)
+    with _lock:
+        user = next((u for u in _load() if u.get("email") == email), None)
+    return _public(user) if user else None
+
+
+def password_fingerprint(user_id):
+    """Short value that changes whenever the password changes; used to make
+    password-reset links single-use."""
+    with _lock:
+        user = next((u for u in _load() if u.get("id") == user_id), None)
+    return (user.get("password_hash") or "")[-16:] if user else None
+
+
+def set_password(user_id, new_password):
+    """Returns (ok, status)."""
+    new_password = str(new_password or "")
+    if len(new_password) < MIN_PASSWORD_LENGTH:
+        return False, "password_too_short"
+    if len(new_password) > MAX_PASSWORD_LENGTH:
+        return False, "password_too_long"
+    with _lock:
+        users = _load()
+        for u in users:
+            if u.get("id") == user_id:
+                u["password_hash"] = generate_password_hash(new_password)
+                _save(users)
+                return True, "ok"
+    return False, "not_found"
+
+
 def list_users():
     with _lock:
         users = [_public(u) for u in _load()]

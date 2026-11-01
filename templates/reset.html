@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AGC Trader - Choose a new password</title>
+    <style>
+        body { background-color:#0d1117; color:#c9d1d9; font-family:Arial,sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; }
+        .box { background-color:#161b22; padding:30px; border-radius:8px; width:320px; text-align:center; box-shadow:0 0 10px #000; }
+        input { width:90%; padding:10px; margin-top:15px; border-radius:5px; border:none; background-color:#21262d; color:#c9d1d9; }
+        button { margin-top:20px; padding:10px 20px; width:100%; background-color:#238636; border:none; border-radius:5px; color:white; font-weight:bold; cursor:pointer; }
+        .error { color:#ff7b72; margin-top:10px; }
+        a { color:#58a6ff; }
+    </style>
+</head>
+<body>
+<div class="box">
+    <h2>New password</h2>
+    {% if invalid %}
+        <p>This reset link is invalid or has expired.</p>
+        <p><a href="/dashboard/forgot">Request a new link</a></p>
+    {% else %}
+        <form method="POST">
+            <input type="password" name="password" placeholder="New password (min 8 characters)" autocomplete="new-password" required>
+            <input type="password" name="confirm_password" placeholder="Confirm password" autocomplete="new-password" required>
+            <button type="submit">Update password</button>
+        </form>
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    {% endif %}
+</div>
+</body>
+</html>

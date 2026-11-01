@@ -133,6 +133,9 @@ DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
 # approved by the Owner (see users.py), not from shared passwords.
 DASHBOARD_OWNER_PASSWORD = os.getenv("DASHBOARD_OWNER_PASSWORD", DASHBOARD_PASSWORD)
 USERS_PATH = os.getenv("USERS_PATH", "/data/users.json")
+# Public site URL used in emailed links (password reset), e.g. https://your-app.onrender.com
+# Set this so links never depend on the request's Host header.
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 
 # Timezone and reporting
 TIMEZONE = os.getenv("TIMEZONE", "Europe/London")

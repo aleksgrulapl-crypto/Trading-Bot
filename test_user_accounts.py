@@ -180,3 +180,70 @@ def test_logout_clears_session(env):
     assert client.get("/dashboard").status_code == 200
     client.get("/dashboard/logout")
     assert client.get("/dashboard").headers["Location"].endswith("/dashboard/login")
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    import notifications
+    box = []
+    monkeypatch.setattr(notifications, "send_user_email", lambda to, subject, body: box.append((to, subject, body)) or True)
+    monkeypatch.setattr(notifications, "notify_owner_new_registration", lambda n, e: box.append(("owner", n, e)))
+    return box
+
+
+def test_registration_sends_welcome_and_owner_notice(env, sent):
+    _register(env())
+    assert any(m[0] == "jane@example.com" and "has been noted" in m[2] for m in sent)
+    assert ("owner", "Jane Doe", "jane@example.com") in sent
+
+
+def test_approval_and_decline_emails(env, sent):
+    _register(env())
+    _register(env(), email="bob@example.com", name="Bob")
+    sent.clear()
+    owner = env()
+    owner.post("/dashboard/login", data={"username": "owner", "password": "owner-pw-123"})
+    jane = next(u for u in users.list_users() if u["email"] == "jane@example.com")
+    bob = next(u for u in users.list_users() if u["email"] == "bob@example.com")
+    owner.post(f"/dashboard/users/{jane['id']}/role", data={"role": "viewer"})
+    owner.post(f"/dashboard/users/{bob['id']}/delete")
+    assert any(m[0] == "jane@example.com" and "approved" in m[2] for m in sent)
+    assert any(m[0] == "bob@example.com" and "unable to approve" in m[2] for m in sent)
+
+
+def _reset_link(sent):
+    import re
+    body = next(m[2] for m in sent if "reset your password" in m[2])
+    return re.search(r"http\S*(/dashboard/reset/\S+)", body).group(1)
+
+
+def test_password_reset_flow_is_single_use(env, sent):
+    _register(env())
+    sent.clear()
+    client = env()
+    assert client.post("/dashboard/forgot", data={"email": "JANE@example.com"}).status_code == 200
+    path = _reset_link(sent)
+    assert client.get(path).status_code == 200
+    assert client.post(path, data={"password": "short", "confirm_password": "short"}).status_code == 400
+    assert client.post(path, data={"password": "brand-new-pass1", "confirm_password": "other"}).status_code == 400
+    assert client.post(path, data={"password": "brand-new-pass1", "confirm_password": "brand-new-pass1"}).status_code == 302
+    assert client.get(path).status_code == 400
+    assert env().post("/dashboard/login", data={"username": "jane@example.com", "password": "brand-new-pass1"}).status_code == 302
+
+
+def test_forgot_does_not_reveal_unknown_accounts(env, sent):
+    client = env()
+    known = client.post("/dashboard/forgot", data={"email": "nobody@example.com"})
+    assert known.status_code == 200 and "reset link has been sent" in known.get_data(as_text=True)
+    assert sent == []
+
+
+def test_invalid_and_expired_reset_tokens(env, sent, monkeypatch):
+    _register(env())
+    client = env()
+    assert client.get("/dashboard/reset/garbage").status_code == 400
+    sent.clear()
+    client.post("/dashboard/forgot", data={"email": "jane@example.com"})
+    path = _reset_link(sent)
+    monkeypatch.setattr(dashboard_module, "RESET_TOKEN_MAX_AGE_SECONDS", -1)
+    assert client.get(path).status_code == 400
