@@ -4381,11 +4381,14 @@ class TestBalanceHistoryPeriodReturns:
             "daily_opening": None, "weekly_opening": None, "monthly_opening": None,
         }
 
-    def test_compute_period_returns_computes_each_calendar_period(self, tmp_path):
+    def test_compute_period_returns_computes_each_calendar_period(self, tmp_path, monkeypatch):
         import deposits
         from datetime import date, datetime, timedelta
         path = str(tmp_path / "history.json")
-        today = date.today()
+        # Fixed mid-week, mid-month "now" so day/week/month boundaries are distinct.
+        fixed_now = datetime(2026, 10, 14, 12, 0)
+        monkeypatch.setattr(deposits, "_now_naive_uk", lambda: fixed_now)
+        today = fixed_now.date()
         history = [
             {"date": (today - timedelta(days=40)).isoformat(), "balance": 1000.0},
             {"date": today.replace(day=1).isoformat(), "balance": 1100.0},
@@ -4395,7 +4398,7 @@ class TestBalanceHistoryPeriodReturns:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(history, f)
 
-        ev = [{"ts": datetime.now(), "pnl": 20.0}]
+        ev = [{"ts": fixed_now, "pnl": 20.0}]
         result = deposits.compute_period_returns(1200.0, path=path, pnl_events=ev)
 
         assert result["daily_opening"] == 1180.0
@@ -4776,3 +4779,83 @@ class TestTradingSwitch:
     def test_time_lock_off_by_default(self):
         import config
         assert config.TRADE_LOCK_ENABLED is False
+
+
+class TestWithdrawalRequests:
+    @pytest.fixture
+    def paths(self, tmp_path, monkeypatch):
+        import deposits
+        monkeypatch.setattr(deposits, "LOG_PATH", str(tmp_path / "ledger.json"))
+        monkeypatch.setattr(deposits, "WITHDRAWALS_PATH", str(tmp_path / "wd.json"))
+        monkeypatch.setattr(deposits.config, "OWNER_INVESTOR_NAME", "Aleks", raising=False)
+        return deposits
+
+    def _deposit(self, dep, name, amount, days_ago):
+        when = (dep._now_naive_uk() - __import__("datetime").timedelta(days=days_ago)).isoformat()
+        ok, _e, _s = dep.add_entry("deposit", amount, name, "", occurred_at=when, path=dep.LOG_PATH)
+        assert ok
+
+    def test_deposit_is_locked_for_30_days(self, paths):
+        dep = paths
+        self._deposit(dep, "Jane", 200, 10)
+        ok, _r, status = dep.add_withdrawal_request("jane", 50)
+        assert (ok, status) == (False, "funds_locked")
+        self._deposit(dep, "Jane", 100, 40)
+        assert dep.add_withdrawal_request("jane", 150)[2] == "amount_exceeds_unlocked"
+        ok, rec, _s = dep.add_withdrawal_request("jane", 80)
+        assert ok and rec["investor"] == "Jane" and rec["status"] == "pending"
+        # pending request reserves the unlocked capital
+        assert dep.add_withdrawal_request("Jane", 30)[2] == "amount_exceeds_unlocked"
+
+    def test_owner_request_bypasses_lock_and_rejects_unknown(self, paths):
+        dep = paths
+        self._deposit(dep, "Jane", 200, 1)
+        assert dep.add_withdrawal_request("Jane", 50, enforce_lock=False)[0] is True
+        assert dep.add_withdrawal_request("Nobody", 50, enforce_lock=False)[2] == "invalid_investor"
+
+    def test_approved_request_matched_by_balance_drop_redeems_units(self, paths, monkeypatch, tmp_path):
+        dep = paths
+        state_path = str(tmp_path / "bal.json")
+        orig_load, orig_save = dep._load_balance_state, dep._save_balance_state
+        monkeypatch.setattr(dep, "_load_balance_state", lambda: orig_load(state_path))
+        monkeypatch.setattr(dep, "_save_balance_state", lambda b, a: orig_save(b, a, state_path))
+        monkeypatch.setattr(dep, "_last_balance_check_monotonic", 0.0)
+        self._deposit(dep, "Jane", 300, 40)
+        _ok, rec, _s = dep.add_withdrawal_request("Jane", 120)
+        # not approved yet: a drop is just an unassigned withdrawal, not a match
+        assert dep.find_matching_approved_withdrawal(120.0) is None
+        assert dep.approve_withdrawal_request(rec["id"])[0]
+        dep._save_balance_state(1000.0, dep._now_iso())
+        result = dep.detect_and_record_balance_change(880.0, [], min_interval_seconds=0)
+        assert result["action"] == "withdrawal_matched"
+        done = dep.load_withdrawal_requests()[0]
+        assert done["status"] == "completed" and done["completed_via"] == "broker"
+        w = [e for e in dep.load_entries(dep.LOG_PATH) if e["type"] == "withdrawal"]
+        assert len(w) == 1 and w[0]["investor"] == "Jane" and w[0]["amount"] == 120.0
+
+    def test_unmatched_approved_request_transfers_units_to_owner(self, paths):
+        dep = paths
+        self._deposit(dep, "Aleks", 100, 60)
+        self._deposit(dep, "Jane", 300, 40)
+        _ok, rec, _s = dep.add_withdrawal_request("Jane", 120)
+        dep.approve_withdrawal_request(rec["id"])
+        # too recent for the automatic fallback
+        assert dep.settle_stale_approved_withdrawals() == []
+        later = dep._now_naive_uk() + __import__("datetime").timedelta(days=4)
+        assert dep.settle_stale_approved_withdrawals(now=later) == [rec["id"]]
+        entries = dep.load_entries(dep.LOG_PATH)
+        assert any(e["type"] == "withdrawal" and e["investor"] == "Jane" and e["amount"] == 120.0 for e in entries)
+        assert any(e["type"] == "deposit" and e["investor"] == "Aleks" and e["amount"] == 120.0 for e in entries)
+        bd = {r["investor"]: r for r in dep.investor_breakdown(entries, [], current_balance=400.0)["investors"]}
+        assert bd["Jane"]["current_value"] == pytest.approx(180.0)
+        assert bd["Aleks"]["current_value"] == pytest.approx(220.0)
+        assert dep.load_withdrawal_requests()[0]["completed_via"] == "owner"
+
+    def test_manual_settle_requires_approval(self, paths):
+        dep = paths
+        self._deposit(dep, "Jane", 300, 40)
+        _ok, rec, _s = dep.add_withdrawal_request("Jane", 100)
+        assert dep.complete_withdrawal_request(rec["id"], "owner")[2] == "invalid_transition"
+        dep.approve_withdrawal_request(rec["id"])
+        assert dep.complete_withdrawal_request(rec["id"], "owner")[0] is True
+        assert dep.complete_withdrawal_request(rec["id"], "owner")[2] == "invalid_transition"

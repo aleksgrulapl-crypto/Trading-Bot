@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # deposits.py
 # Thread-safe manual bookkeeping ledger for deposits/withdrawals into the
 # broker trading account. This module never moves real money — it only
@@ -13,7 +13,7 @@ import tempfile
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 
@@ -496,6 +496,294 @@ def delete_pledge(pledge_id: str, path: str = PLEDGES_PATH) -> Tuple[bool, str]:
         return True, "deleted"
 
 
+# -----------------------------------------------------------------------
+# Investor withdrawal requests.
+#
+# pending -> approved (Owner) -> completed. Completion happens one of two ways:
+#   * "broker": the balance-change detector sees funds leave the trading
+#     account and matches it to the approved request (units are redeemed);
+#   * "owner": no balance change appeared, i.e. the Owner paid the investor
+#     personally. The investor's units are then transferred to the Owner at
+#     the current NAV (a withdrawal for the investor + an equal deposit for
+#     the Owner), so the fund balance and everyone else's share are unchanged.
+# -----------------------------------------------------------------------
+WITHDRAWALS_PATH = os.environ.get("WITHDRAWAL_REQUESTS_PATH") or (getattr(config, "WITHDRAWAL_REQUESTS_PATH", None) if config else None) or "/data/withdrawal_requests.json"
+VALID_WITHDRAWAL_STATUSES = frozenset(("pending", "approved", "completed", "declined"))
+_withdrawals_lock = threading.Lock()
+
+
+def lock_days() -> int:
+    try:
+        return max(0, int(getattr(config, "INVESTOR_LOCK_DAYS", 30))) if config else 30
+    except (TypeError, ValueError):
+        return 30
+
+
+def load_withdrawal_requests(path: Optional[str] = None) -> List[Dict[str, Any]]:
+    path = path or WITHDRAWALS_PATH
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception as exc:
+        logger.exception("deposits: failed to load withdrawal requests: %s", exc)
+        return []
+
+
+def save_withdrawal_requests(requests_: List[Dict[str, Any]], path: Optional[str] = None) -> bool:
+    ok = _atomic_write(path or WITHDRAWALS_PATH, requests_)
+    if not ok:
+        logger.error("deposits: atomic write of withdrawal requests failed")
+    return ok
+
+
+def list_withdrawal_requests_sorted(path: Optional[str] = None) -> List[Dict[str, Any]]:
+    return sorted(load_withdrawal_requests(path), key=lambda r: str(r.get("created_at") or ""), reverse=True)
+
+
+def split_withdrawal_requests(requests_: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Split into (open: pending/approved, closed: completed/declined)."""
+    open_ = [r for r in requests_ if str(r.get("status")) in ("pending", "approved")]
+    closed = [r for r in requests_ if str(r.get("status")) not in ("pending", "approved")]
+    return open_, closed
+
+
+def _same_name(a: Any, b: Any) -> bool:
+    return str(a or "").strip().lower() == str(b or "").strip().lower()
+
+
+def canonical_investor_name(name: Any, entries: List[Dict[str, Any]]) -> Optional[str]:
+    """Return the ledger spelling of *name*, or None if they have no capital recorded."""
+    for known in list_investors(entries):
+        if _same_name(known, name):
+            return known
+    return None
+
+
+def withdrawable_summary(
+    investor: str,
+    entries: List[Dict[str, Any]],
+    requests_: Optional[List[Dict[str, Any]]] = None,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Capital an investor may currently request back.
+
+    Each deposit is locked for ``lock_days()`` after it was made. Unlocked
+    capital = deposits past their lock less everything already withdrawn,
+    minus amounts already tied up in pending/approved requests."""
+    now = now or _now_naive_uk()
+    days = lock_days()
+    unlocked = 0.0
+    locked = 0.0
+    withdrawn = 0.0
+    next_unlock: Optional[datetime] = None
+    for e in entries or []:
+        if not isinstance(e, dict) or not _same_name(e.get("investor"), investor):
+            continue
+        try:
+            amt = float(e.get("amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        if e.get("type") == "withdrawal":
+            withdrawn += amt
+        elif e.get("type") == "deposit":
+            when = _parse_entry_datetime(e.get("occurred_at")) or _parse_entry_datetime(e.get("created_at")) or now
+            unlock_at = when + timedelta(days=days)
+            if unlock_at <= now:
+                unlocked += amt
+            else:
+                locked += amt
+                if next_unlock is None or unlock_at < next_unlock:
+                    next_unlock = unlock_at
+    reserved = sum(
+        float(r.get("amount") or 0) for r in (requests_ if requests_ is not None else load_withdrawal_requests())
+        if _same_name(r.get("investor"), investor) and str(r.get("status")) in ("pending", "approved")
+    )
+    available = max(0.0, unlocked - withdrawn - reserved)
+    return {
+        "available": round(available, 2),
+        "locked": round(locked, 2),
+        "reserved": round(reserved, 2),
+        "next_unlock": next_unlock,
+        "lock_days": days,
+    }
+
+
+def add_withdrawal_request(
+    investor: str,
+    amount: Any,
+    note: str = "",
+    requested_by: str = "investor",
+    enforce_lock: bool = True,
+    path: Optional[str] = None,
+    entries: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """Record a pending withdrawal request. Returns (ok, record, status)."""
+    entries = entries if entries is not None else load_entries(LOG_PATH)
+    name = canonical_investor_name(investor, entries)
+    owner_name = str(getattr(config, "OWNER_INVESTOR_NAME", "") or "").strip() if config else ""
+    if not name or (owner_name and _same_name(name, owner_name)):
+        return False, None, "invalid_investor"
+    amt = _coerce_amount(amount)
+    if amt is None:
+        return False, None, "invalid_amount"
+
+    with _withdrawals_lock:
+        existing = load_withdrawal_requests(path)
+        if enforce_lock:
+            summary = withdrawable_summary(name, entries, existing)
+            if amt > summary["available"] + 0.005:
+                return False, None, "funds_locked" if summary["available"] <= 0 else "amount_exceeds_unlocked"
+        record = {
+            "id": uuid.uuid4().hex,
+            "investor": name,
+            "amount": amt,
+            "note": (str(note).strip() if note else "")[:500],
+            "status": "pending",
+            "requested_by": requested_by,
+            "created_at": _now_iso(),
+        }
+        existing.append(record)
+        if not save_withdrawal_requests(existing, path):
+            return False, None, "save_failed"
+        return True, record, "created"
+
+
+def _update_withdrawal(request_id: str, allowed_from: Tuple[str, ...], changes: Dict[str, Any], path: str):
+    target = str(request_id or "").strip()
+    with _withdrawals_lock:
+        existing = load_withdrawal_requests(path)
+        for r in existing:
+            if str(r.get("id")) == target:
+                if str(r.get("status")) not in allowed_from:
+                    return False, None, "invalid_transition"
+                r.update(changes)
+                if not save_withdrawal_requests(existing, path):
+                    return False, None, "save_failed"
+                return True, r, "updated"
+    return False, None, "not_found"
+
+
+def approve_withdrawal_request(request_id: str, path: Optional[str] = None):
+    return _update_withdrawal(request_id, ("pending",), {"status": "approved", "approved_at": _now_iso()}, path)
+
+
+def decline_withdrawal_request(request_id: str, path: Optional[str] = None):
+    return _update_withdrawal(request_id, ("pending", "approved"), {"status": "declined", "resolved_at": _now_iso(), "resolved_by": "owner"}, path)
+
+
+def delete_withdrawal_request(request_id: str, path: Optional[str] = None) -> Tuple[bool, str]:
+    target = str(request_id or "").strip()
+    with _withdrawals_lock:
+        existing = load_withdrawal_requests(path)
+        remaining = [r for r in existing if str(r.get("id")) != target]
+        if len(remaining) == len(existing):
+            return False, "not_found"
+        return (True, "deleted") if save_withdrawal_requests(remaining, path) else (False, "save_failed")
+
+
+def _ledger_add(*args, **kwargs):
+    """add_entry against the ledger path resolved at call time."""
+    return add_entry(*args, path=LOG_PATH, **kwargs)
+
+
+def complete_withdrawal_request(
+    request_id: str,
+    method: str,
+    resolved_by: str = "owner",
+    path: Optional[str] = None,
+) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """Complete an *approved* request. ``method`` is "broker" (funds left the
+    trading account) or "owner" (Owner paid personally: units move to Owner)."""
+    if method not in ("broker", "owner"):
+        return False, None, "invalid_method"
+    target = str(request_id or "").strip()
+    with _withdrawals_lock:
+        existing = load_withdrawal_requests(path)
+        req = next((r for r in existing if str(r.get("id")) == target), None)
+        if req is None:
+            return False, None, "not_found"
+        if str(req.get("status")) != "approved":
+            return False, None, "invalid_transition"
+        investor = req.get("investor", "")
+        amount = req.get("amount")
+
+        if method == "broker":
+            ok, _e, status = _ledger_add(
+                "withdrawal", amount, investor,
+                f"Approved withdrawal detected as a balance decrease ({resolved_by})",
+            )
+            if not ok:
+                return False, None, status
+        else:
+            owner_name = str(getattr(config, "OWNER_INVESTOR_NAME", "") or "").strip() if config else ""
+            if not owner_name or _same_name(owner_name, investor):
+                return False, None, "no_owner"
+            ok, w_entry, status = _ledger_add(
+                "withdrawal", amount, investor,
+                "Approved withdrawal paid by Owner personally: units transferred to Owner at current NAV",
+            )
+            if not ok:
+                return False, None, status
+            ok, _e, status = _ledger_add(
+                "deposit", amount, owner_name,
+                f"Units taken over from {investor} (approved withdrawal paid by Owner)",
+            )
+            if not ok:
+                delete_entry((w_entry or {}).get("id"), LOG_PATH)
+                return False, None, status
+
+        req.update({
+            "status": "completed",
+            "completed_via": method,
+            "resolved_at": _now_iso(),
+            "resolved_by": resolved_by,
+        })
+        if not save_withdrawal_requests(existing, path):
+            return False, None, "save_failed"
+        return True, req, "completed"
+
+
+def find_matching_approved_withdrawal(amount: float, path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Approved request whose amount is closest to *amount* (within
+    ``PLEDGE_MATCH_TOLERANCE``), or None."""
+    tolerance = float(getattr(config, "PLEDGE_MATCH_TOLERANCE", 2.0) or 2.0) if config else 2.0
+    best = None
+    for r in load_withdrawal_requests(path):
+        if str(r.get("status")) != "approved":
+            continue
+        try:
+            diff = abs(float(r.get("amount")) - amount)
+        except (TypeError, ValueError):
+            continue
+        if diff <= tolerance and (best is None or diff < best[0]):
+            best = (diff, r)
+    return best[1] if best else None
+
+
+def settle_stale_approved_withdrawals(now: Optional[datetime] = None, path: Optional[str] = None) -> List[str]:
+    """Approved requests with no matching balance change after
+    ``WITHDRAWAL_AUTO_SETTLE_DAYS`` are settled via the Owner (units
+    transferred). Returns the ids settled."""
+    days = float(getattr(config, "WITHDRAWAL_AUTO_SETTLE_DAYS", 3) or 0) if config else 3.0
+    if days <= 0:
+        return []
+    now = now or _now_naive_uk()
+    settled = []
+    for r in load_withdrawal_requests(path):
+        if str(r.get("status")) != "approved":
+            continue
+        approved_at = _parse_entry_datetime(r.get("approved_at"))
+        if approved_at is None or now - approved_at < timedelta(days=days):
+            continue
+        ok, _rec, _status = complete_withdrawal_request(r.get("id"), "owner", resolved_by="auto", path=path)
+        if ok:
+            settled.append(r.get("id"))
+    return settled
+
+
 def _now_naive_uk() -> datetime:
     """Return the current time as a naive datetime using UK local wall-clock
     values (GMT/BST), matching the naive values produced by
@@ -951,6 +1239,19 @@ def detect_and_record_balance_change(
                 if not ok:
                     result["status"] = status
         else:
+            matched_withdrawal = find_matching_approved_withdrawal(abs(delta))
+            if matched_withdrawal:
+                ok, _rec, status = complete_withdrawal_request(matched_withdrawal.get("id"), "broker", resolved_by="auto")
+                result.update({
+                    "action": "withdrawal_matched" if ok else "failed",
+                    "request_id": matched_withdrawal.get("id"),
+                    "investor": matched_withdrawal.get("investor"),
+                })
+                if not ok:
+                    result["status"] = status
+                _save_balance_state(current_balance, now_iso)
+                logger.info("deposits: balance auto-detection result: %s", result)
+                return result
             withdrawal_min = float(getattr(config, "BALANCE_AUTO_DETECT_WITHDRAWAL_MIN", 100.0) or 100.0) if config else 100.0
             if abs(delta) < withdrawal_min:
                 # Too small to be a real withdrawal (e.g. overnight/swap

@@ -320,6 +320,18 @@ INVESTOR_PLEDGES_PATH = os.getenv("INVESTOR_PLEDGES_PATH", "/data/investor_pledg
 PLEDGE_MIN_AMOUNT = float(os.getenv("PLEDGE_MIN_AMOUNT", 50.0))
 PLEDGE_MAX_AMOUNT = float(os.getenv("PLEDGE_MAX_AMOUNT", 500.0))
 
+# Investor withdrawal requests. A withdrawal is requested, then approved by
+# the Owner. Once approved, a matching drop in the live trading balance is
+# auto-detected and recorded. If no balance change shows up within
+# WITHDRAWAL_AUTO_SETTLE_DAYS (the Owner paid the investor personally), the
+# investor's units are transferred to the Owner at the current NAV instead
+# (0 disables the automatic fallback; the Owner can still settle manually).
+WITHDRAWAL_REQUESTS_PATH = os.getenv("WITHDRAWAL_REQUESTS_PATH", "/data/withdrawal_requests.json")
+WITHDRAWAL_AUTO_SETTLE_DAYS = float(os.getenv("WITHDRAWAL_AUTO_SETTLE_DAYS", 3))
+# Deposited capital is locked for this many days before it can be requested
+# back (applies to self-service requests, not to requests the Owner records).
+INVESTOR_LOCK_DAYS = int(os.getenv("INVESTOR_LOCK_DAYS", 30))
+
 # Automatic balance-change detection: on each dashboard refresh, the live
 # broker balance is compared against what trading PnL alone would explain
 # since the last check. An unexplained jump (no corresponding closed

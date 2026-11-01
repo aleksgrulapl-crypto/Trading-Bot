@@ -13,6 +13,8 @@
       performance, and capital is at risk. Funds are paid directly into the live trading
       account below, so the balance updates automatically once received; pledge an amount
       so it can be matched to you.
+      Deposited funds are <strong>locked for {{ lock_days }} days</strong>; after that you can
+      request a withdrawal, which the Owner must approve.
     </p>
 
     <div style="display: flex; flex-wrap: wrap; gap: 24px; margin-bottom: 14px;">
@@ -150,6 +152,100 @@
   {% endif %}
 
 
+  {% if is_owner or is_investor_role %}
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Withdrawals</div>
+    </div>
+    <p class="small" style="margin-top: -4px;">
+      Withdrawals are requested, then approved by the Owner. Once approved, funds leaving the
+      trading account are detected automatically. If no balance change is detected
+      {% if auto_settle_days %}within {{ "%g"|format(auto_settle_days) }} days{% endif %}
+      (the Owner paid you personally), your fund units are transferred to the Owner instead.
+      Deposits are locked for {{ lock_days }} days.
+    </p>
+    {% if is_investor_role %}
+      {% if my_withdrawable %}
+      <p class="small">
+        Available to request: <strong>&pound;{{ "%.2f"|format(my_withdrawable.available) }}</strong>
+        {% if my_withdrawable.locked %}
+        &middot; Locked: &pound;{{ "%.2f"|format(my_withdrawable.locked) }}
+        {% if my_withdrawable.next_unlock_human %}(next release {{ my_withdrawable.next_unlock_human }}){% endif %}
+        {% endif %}
+      </p>
+      {% else %}
+      <p class="small">No invested capital is recorded against your account yet.</p>
+      {% endif %}
+    {% endif %}
+    {% if is_owner or my_withdrawable %}
+    <form id="withdrawal-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 12px;">
+      {% if is_owner %}
+      <div>
+        <label class="small" for="withdrawal-investor">Investor</label><br>
+        <select id="withdrawal-investor" required class="type-select">
+          {% for n in withdrawal_investors %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <div>
+        <label class="small" for="withdrawal-amount">Amount (&pound;)</label><br>
+        <input type="number" step="0.01" min="0.01" id="withdrawal-amount" required
+               style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 120px;">
+      </div>
+      <div style="flex: 1; min-width: 160px;">
+        <label class="small" for="withdrawal-note">Note (optional)</label><br>
+        <input type="text" id="withdrawal-note" maxlength="500"
+               style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 100%;">
+      </div>
+      <div><button type="submit">{% if is_owner %}Record Request{% else %}Request Withdrawal{% endif %}</button></div>
+    </form>
+    <div class="small" id="withdrawal-status" style="margin-bottom: 8px;"></div>
+    {% endif %}
+
+    <table class="table table-spaced">
+      <thead>
+        <tr><th>Requested</th><th>Name</th><th>Amount</th><th>Status</th><th>Details</th>{% if is_owner %}<th></th>{% endif %}</tr>
+      </thead>
+      <tbody>
+        {% for r in open_withdrawals + closed_withdrawals %}
+        <tr>
+          <td>{{ r.created_at_human or r.created_at }}</td>
+          <td>{{ r.investor }}</td>
+          <td>&pound;{{ "%.2f"|format(r.amount or 0) }}</td>
+          <td>
+            <span class="pill {% if r.status == 'completed' %}pill-long{% elif r.status == 'declined' %}pill-short{% else %}pill-status{% endif %}">{{ r.status|capitalize }}</span>
+          </td>
+          <td class="small">
+            {% if r.status == 'completed' %}
+              {% if r.completed_via == 'owner' %}Paid by Owner (units transferred){% else %}Detected from trading account{% endif %}
+              {% if r.resolved_by == 'auto' %}(auto){% endif %}
+            {% elif r.status == 'approved' %}Approved {{ r.approved_at_human or '' }}
+            {% elif r.status == 'declined' %}Declined
+            {% else %}Awaiting Owner approval{% endif %}
+            {% if r.note %}<br>{{ r.note }}{% endif %}
+          </td>
+          {% if is_owner %}
+          <td>
+            {% if r.status == 'pending' %}
+              <button onclick="withdrawalAction('{{ r.id }}', 'approve')">Approve</button>
+              <button class="button-danger" onclick="withdrawalAction('{{ r.id }}', 'decline')">Decline</button>
+            {% elif r.status == 'approved' %}
+              <button onclick="if (confirm('Transfer this investor\'s units to you (you paid them personally)?')) withdrawalAction('{{ r.id }}', 'settle')">Paid by me</button>
+              <button class="button-danger" onclick="withdrawalAction('{{ r.id }}', 'decline')">Cancel</button>
+            {% else %}
+              <button class="button-danger" onclick="withdrawalAction('{{ r.id }}', 'delete')">Delete</button>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="small">No withdrawal requests.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   {% if is_owner %}
   <div class="card">
     <div class="card-header">
@@ -247,6 +343,53 @@ document.getElementById('pledge-form').addEventListener('submit', function (evt)
             statusEl.style.color = "var(--bad, #e05d5d)";
         });
 });
+
+function withdrawalAction(id, action) {
+    fetch(`/dashboard/investors/withdrawal/${encodeURIComponent(id)}/${action}`, { method: "POST" })
+        .then(r => r.json())
+        .then(data => {
+            if (data && data.status === 'success') { window.location.reload(); return; }
+            alert((data && data.message) || "Action failed.");
+        })
+        .catch(err => console.error("Withdrawal action error:", err));
+}
+
+const withdrawalForm = document.getElementById('withdrawal-form');
+if (withdrawalForm) {
+    withdrawalForm.addEventListener('submit', function (evt) {
+        evt.preventDefault();
+        const statusEl = document.getElementById('withdrawal-status');
+        const investorEl = document.getElementById('withdrawal-investor');
+        const messages = {
+            invalid_investor: "No invested capital found for that investor.",
+            invalid_amount: "Please enter a valid amount.",
+            funds_locked: "Your deposits are still within the {{ lock_days }}-day lock period.",
+            amount_exceeds_unlocked: "That is more than your currently unlocked capital.",
+        };
+        fetch('/dashboard/investors/withdrawal', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                investor: investorEl ? investorEl.value : "",
+                amount: document.getElementById('withdrawal-amount').value,
+                note: document.getElementById('withdrawal-note').value.trim()
+            })
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (!data || data.status !== 'success') {
+                    statusEl.innerText = (data && messages[data.message]) || (data && data.message) || "Failed to record request.";
+                    statusEl.style.color = "var(--bad, #e05d5d)";
+                    return;
+                }
+                window.location.reload();
+            })
+            .catch(err => {
+                statusEl.innerText = "Withdrawal error: " + err.message;
+                statusEl.style.color = "var(--bad, #e05d5d)";
+            });
+    });
+}
 
 function confirmPledge(pledgeId) {
     fetch(`/dashboard/investors/pledge/${encodeURIComponent(pledgeId)}/confirm`, { method: "POST" })
