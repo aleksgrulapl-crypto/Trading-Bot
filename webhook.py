@@ -1001,9 +1001,6 @@ def raw_account():
     r = session.request("GET", API_ACCOUNTS, timeout=BROKER_API_TIMEOUT)
     return jsonify(r.json() if r else {}), 200
 
-@app.route("/")
-def root():
-    return redirect("/dashboard")
 
 
 # ---------------------------------------------------------------------------

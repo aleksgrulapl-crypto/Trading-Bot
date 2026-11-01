@@ -247,3 +247,62 @@ def test_invalid_and_expired_reset_tokens(env, sent, monkeypatch):
     path = _reset_link(sent)
     monkeypatch.setattr(dashboard_module, "RESET_TOKEN_MAX_AGE_SECONDS", -1)
     assert client.get(path).status_code == 400
+
+
+@pytest.fixture
+def snapshot_path(tmp_path, monkeypatch):
+    import public_snapshot
+    path = str(tmp_path / "public_snapshot.json")
+    monkeypatch.setattr(public_snapshot, "SNAPSHOT_PATH", path)
+    public_snapshot._cache.update(ts=0.0, path=None, data=None)
+    return path
+
+
+def test_landing_page_is_public_with_risk_warning_and_register_cta(env, snapshot_path):
+    resp = env().get("/")
+    html = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert "Capital at risk" in html
+    assert "/dashboard/register" in html
+    assert "Performance figures will appear here" in html
+    # anonymous visitors only get public navigation
+    assert 'href="/dashboard/trades"' not in html and 'href="/dashboard/roi"' not in html
+
+
+def test_landing_page_shows_only_percentages_from_snapshot(env, snapshot_path):
+    import public_snapshot
+    public_snapshot.write_snapshot({
+        "last_week": {"label": "05/10/26 - 09/10/26", "return_pct": 6.0},
+        "last_month": {"label": "September 2026", "return_pct": -1.5},
+        "hit_rate": {"successful_weeks": 26, "total_weeks": 52, "pct": 50, "target_pct": 5.0},
+        "avg_weekly_return": 3.25,
+    })
+    html = env().get("/").get_data(as_text=True)
+    assert "+6.00%" in html and "-1.50%" in html
+    assert "26 of 52" in html and "50% of weeks" in html
+    assert "+3.25%" in html
+    assert "£" not in html
+
+
+def test_landing_page_adapts_for_logged_in_users(env, snapshot_path):
+    client = env()
+    _register(client)
+    assert "View registration status" in client.get("/").get_data(as_text=True)
+    _approve("jane@example.com")
+    html = client.get("/").get_data(as_text=True)
+    assert "Go to dashboard" in html and "Register your interest" not in html
+
+
+def test_snapshot_job_writes_percentages_only(env, snapshot_path, monkeypatch):
+    import public_snapshot
+    monkeypatch.setattr(dashboard_module, "load_raw_log", lambda: [])
+    dashboard_module.refresh_public_snapshot()
+    data = public_snapshot.load_snapshot()
+    assert set(data) == {"generated_at", "last_week", "last_month", "hit_rate", "avg_weekly_return"}
+
+
+def test_login_and_register_pages_link_to_legal_pages(env):
+    client = env()
+    for path in ("/dashboard/login", "/dashboard/register", "/dashboard/forgot"):
+        html = client.get(path).get_data(as_text=True)
+        assert "/dashboard/terms" in html and "/dashboard/faq" in html and "/dashboard/contact" in html, path

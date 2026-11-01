@@ -4499,6 +4499,35 @@ class TestBalanceHistoryPeriodReturns:
         result = deposits.compute_successful_weeks(path=str(tmp_path / "h.json"), closes_path=str(tmp_path / "c.json"))
         assert result == {"successful_weeks": 0, "total_weeks": 0, "avg_weekly_return": None}
 
+    def test_last_completed_week_and_month_exclude_the_current_period(self, tmp_path):
+        import deposits
+        from datetime import datetime
+        path = str(tmp_path / "history.json")
+        closes = str(tmp_path / "closes.json")
+        history = [
+            {"date": "2026-09-28", "balance": 1000.0},
+            {"date": "2026-10-05", "balance": 1060.0},
+            {"date": "2026-10-12", "balance": 1081.2},
+        ]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(history, f)
+        now = datetime(2026, 10, 14, 10, 0)  # week of 12 Oct is still in progress
+        pnl = [
+            {"ts": datetime(2026, 9, 30, 12, 0), "pnl": 60.0},
+            {"ts": datetime(2026, 10, 7, 12, 0), "pnl": 21.2},
+            {"ts": datetime(2026, 10, 13, 12, 0), "pnl": 500.0},  # current week: must not leak
+        ]
+        week = deposits.compute_last_completed_week(path=path, closes_path=closes, now=now, pnl_events=pnl)
+        assert week == {"label": "05/10/26 - 09/10/26", "return_pct": 2.0}
+
+        month = deposits.compute_last_completed_month(path=path, now=now, pnl_events=pnl)
+        assert month == {"label": "September 2026", "return_pct": 6.0}
+
+    def test_last_completed_month_none_without_history(self, tmp_path):
+        import deposits
+        assert deposits.compute_last_completed_month(path=str(tmp_path / "h.json")) is None
+        assert deposits.compute_last_completed_week(path=str(tmp_path / "h.json"), closes_path=str(tmp_path / "c.json")) is None
+
 
 class TestInvestorBreakdownOwnerFeeOverride:
     """Tests for the owner_override_pct_override parameter added to

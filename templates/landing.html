@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  .lp { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+  .lp-hero { text-align: center; padding: 28px 12px 8px; }
+  .lp-hero h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: 0.04em; color: var(--accent-soft); }
+  .lp-hero p { margin: 0 auto; max-width: 640px; font-size: 16px; line-height: 1.55; color: var(--text); }
+  .lp-actions { display: flex; justify-content: center; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
+  .lp-btn { display: inline-block; padding: 11px 22px; border-radius: 8px; font-weight: 700; font-size: 14px; text-decoration: none; }
+  .lp-btn-primary { background: #238636; color: #fff; }
+  .lp-btn-primary:hover { background: #2ea043; }
+  .lp-btn-secondary { border: 1px solid rgba(56, 189, 248, 0.5); color: var(--accent); }
+  .lp-btn-secondary:hover { background: rgba(56, 189, 248, 0.12); }
+  .lp-risk { border: 1px solid rgba(250, 204, 21, 0.45); background: rgba(250, 204, 21, 0.07); border-radius: 10px; padding: 12px 16px; font-size: 13px; line-height: 1.55; }
+  .lp-risk strong { color: var(--warning); }
+  .lp h2 { margin: 0 0 10px; font-size: 18px; color: var(--accent); }
+  .lp p, .lp li { font-size: 14px; line-height: 1.6; }
+  .lp ul { margin: 10px 0 0; padding-left: 20px; }
+  .lp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 12px; }
+  .lp-stat { background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(31, 41, 55, 0.9); border-radius: 10px; padding: 14px; text-align: center; }
+  .lp-stat .label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .lp-stat .value { font-size: 26px; font-weight: 700; margin: 6px 0 2px; }
+  .lp-stat .sub { font-size: 12px; color: var(--text-muted); }
+  .lp-pos { color: var(--success); }
+  .lp-neg { color: var(--danger); }
+  .lp-cta { text-align: center; }
+</style>
+
+<div class="lp">
+  <section class="lp-hero">
+    <h1>{{ title }}</h1>
+    <p>A private algorithmic trading project built around rules-based strategies and risk management.</p>
+    <div class="lp-actions">
+      {% if identity.logged_in and identity.role == 'pending' %}
+        <a class="lp-btn lp-btn-primary" href="/dashboard/pending">View registration status</a>
+      {% elif identity.logged_in %}
+        <a class="lp-btn lp-btn-primary" href="/dashboard">Go to dashboard</a>
+      {% else %}
+        <a class="lp-btn lp-btn-primary" href="/dashboard/register">Register your interest</a>
+        <a class="lp-btn lp-btn-secondary" href="/dashboard/login">Log in</a>
+      {% endif %}
+    </div>
+  </section>
+
+  <div class="lp-risk" role="note">
+    <strong>Capital at risk.</strong> Trading involves risk and you may lose some or all of the money you contribute.
+    Returns are not guaranteed, and past performance is not a reliable indicator of future results.
+    {{ title }} is a private, pre-commercial project. It is not a regulated investment service, and nothing on this
+    site is investment advice. Please read the <a href="/dashboard/terms">Terms of Service</a>.
+  </div>
+
+  <section class="card">
+    <h2>About the project</h2>
+    <p>
+      {{ title }} trades stocks automatically using rules-based strategies. Signals are generated on three
+      timeframes (15-minute, 30-minute and 1-hour) across a watchlist of 30 stocks. The strategies are back-tested and
+      reviewed on an ongoing basis, and the project owner, who is a trader, provides input on how they are run.
+    </p>
+    <ul>
+      <li><strong>Rules-based:</strong> trades are triggered by defined strategy signals.</li>
+      <li><strong>Back-tested:</strong> strategies are tested against historical data and reviewed regularly. Back-tested results are not a guide to future results.</li>
+      <li><strong>Risk management:</strong> position sizes are limited and stop-losses (including trailing stops) are used to limit the risk on each trade. Losses can still occur.</li>
+      <li><strong>Trader input:</strong> the owner also places discretionary trades alongside the automated signals.</li>
+    </ul>
+    <p class="small" style="margin-top:10px;">Other markets, such as forex and commodities, may be explored in future. Nothing is promised.</p>
+  </section>
+
+  <section class="card">
+    <h2>Recent performance</h2>
+    {% if snapshot and (snapshot.last_week or snapshot.last_month or (snapshot.hit_rate and snapshot.hit_rate.total_weeks)) %}
+      <div class="lp-stats">
+        {% if snapshot.last_week %}
+        <div class="lp-stat">
+          <div class="label">Last completed week</div>
+          <div class="value {{ 'lp-pos' if snapshot.last_week.return_pct >= 0 else 'lp-neg' }}">{{ '%+.2f'|format(snapshot.last_week.return_pct) }}%</div>
+          <div class="sub">{{ snapshot.last_week.label }}</div>
+        </div>
+        {% endif %}
+        {% if snapshot.last_month %}
+        <div class="lp-stat">
+          <div class="label">Last completed month</div>
+          <div class="value {{ 'lp-pos' if snapshot.last_month.return_pct >= 0 else 'lp-neg' }}">{{ '%+.2f'|format(snapshot.last_month.return_pct) }}%</div>
+          <div class="sub">{{ snapshot.last_month.label }}</div>
+        </div>
+        {% endif %}
+        {% if snapshot.hit_rate and snapshot.hit_rate.total_weeks %}
+        <div class="lp-stat">
+          <div class="label">Weeks reaching the {{ '%g'|format(snapshot.hit_rate.target_pct) }}% target</div>
+          <div class="value">{{ snapshot.hit_rate.successful_weeks }} of {{ snapshot.hit_rate.total_weeks }}</div>
+          <div class="sub">{{ snapshot.hit_rate.pct }}% of weeks (last 52 weeks)</div>
+        </div>
+        {% endif %}
+        {% if snapshot.avg_weekly_return is not none %}
+        <div class="lp-stat">
+          <div class="label">Average weekly return</div>
+          <div class="value {{ 'lp-pos' if snapshot.avg_weekly_return >= 0 else 'lp-neg' }}">{{ '%+.2f'|format(snapshot.avg_weekly_return) }}%</div>
+          <div class="sub">last 52 weeks</div>
+        </div>
+        {% endif %}
+      </div>
+    {% else %}
+      <p class="small">Performance figures will appear here once the first full week has been completed.</p>
+    {% endif %}
+    <p class="small" style="margin-top:12px;">
+      Figures show completed periods only and are percentages of trading profit or loss. They are informational, may not
+      reflect fees or tax, and are not a forecast. The {{ '%g'|format((snapshot.hit_rate.target_pct if snapshot and snapshot.hit_rate else 5)) }}%
+      weekly figure is an internal target, not a promise. Past performance is not a reliable indicator of future results.
+    </p>
+  </section>
+
+  {% if not identity.logged_in %}
+  <section class="card lp-cta">
+    <h2>Interested in taking part?</h2>
+    <p>
+      Register your interest by creating an account. Each registration is reviewed by the project owner and you will
+      receive an email with the outcome. Registering does not commit you to anything.
+    </p>
+    <div class="lp-actions">
+      <a class="lp-btn lp-btn-primary" href="/dashboard/register">Register your interest</a>
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

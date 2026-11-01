@@ -136,6 +136,8 @@ USERS_PATH = os.getenv("USERS_PATH", "/data/users.json")
 # Public site URL used in emailed links (password reset), e.g. https://your-app.onrender.com
 # Set this so links never depend on the request's Host header.
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+# Cached, percentages-only performance figures for the public landing page.
+PUBLIC_SNAPSHOT_PATH = os.getenv("PUBLIC_SNAPSHOT_PATH", "/data/public_snapshot.json")
 
 # Timezone and reporting
 TIMEZONE = os.getenv("TIMEZONE", "Europe/London")
