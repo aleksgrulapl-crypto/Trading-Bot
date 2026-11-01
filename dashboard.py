@@ -838,6 +838,61 @@ def _format_duration(seconds):
     return " ".join(parts)
 
 
+WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def sharpe_ratio(pnls):
+    """Per-trade Sharpe ratio: mean(PnL) / sample stdev(PnL), risk-free rate 0
+    and not annualised. Needs at least 2 trades with non-zero variance;
+    otherwise returns None."""
+    values = [float(p) for p in pnls if p is not None]
+    if len(values) < 2:
+        return None
+    avg = sum(values) / len(values)
+    var = sum((v - avg) ** 2 for v in values) / (len(values) - 1)
+    sd = math.sqrt(var)
+    if sd == 0:
+        return None
+    return round(avg / sd, 2)
+
+
+def _bucket_stats(pnls):
+    wins = sum(1 for p in pnls if p > 0)
+    losses = sum(1 for p in pnls if p < 0)
+    decided = wins + losses
+    total = round(sum(pnls), 2)
+    return {
+        "trade_count": len(pnls),
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round(wins / decided * 100, 2) if decided else None,
+        "total_pnl": total,
+        "avg_pnl": round(total / len(pnls), 2) if pnls else None,
+    }
+
+
+def compute_timeframe_breakdown(trades):
+    """Group closed trades (with ``pnl_gbp_display``) by timeframe."""
+    buckets = {}
+    for t in trades:
+        buckets.setdefault(str(t.get("timeframe") or "N/A"), []).append(t["pnl_gbp_display"])
+    rows = [dict(_bucket_stats(p), timeframe=tf) for tf, p in buckets.items()]
+    rows.sort(key=lambda r: r["total_pnl"], reverse=True)
+    return rows
+
+
+def compute_weekday_breakdown(trades):
+    """Group closed trades (with ``pnl_gbp_display``) by exit weekday, Monday
+    to Sunday; days with no trades are included with zero counts."""
+    buckets = {i: [] for i in range(7)}
+    for t in trades:
+        ts = _naive_dt(_parse_iso_like(t.get("time_exited")) or _parse_iso_like(t.get("time_entered")))
+        if ts is not None:
+            buckets[ts.weekday()].append(t["pnl_gbp_display"])
+    rows = [dict(_bucket_stats(buckets[i]), day=WEEKDAY_NAMES[i]) for i in range(7)]
+    return [r for r in rows if r["trade_count"] or WEEKDAY_NAMES.index(r["day"]) < 5]
+
+
 def compute_detailed_analytics(trades):
     """
     Build in-depth analytics for the Analytics page: best/worst trade,
@@ -850,6 +905,8 @@ def compute_detailed_analytics(trades):
         "per_ticker_stats": [],
         "equity_curve": [],
         "avg_hold_time": None,
+        "timeframe_stats": [],
+        "weekday_stats": [],
     }
     if not trades:
         return defaults
@@ -887,6 +944,7 @@ def compute_detailed_analytics(trades):
         })
         stats["trade_count"] += 1
         pnl = t["pnl_gbp_display"]
+        stats.setdefault("pnls", []).append(pnl)
         stats["total_pnl"] += pnl
         if pnl > 0:
             stats["wins"] += 1
@@ -898,6 +956,7 @@ def compute_detailed_analytics(trades):
         decided = stats["wins"] + stats["losses"]
         stats["win_rate"] = round((stats["wins"] / decided) * 100, 2) if decided else None
         stats["total_pnl"] = round(stats["total_pnl"], 2)
+        stats["sharpe"] = sharpe_ratio(stats.pop("pnls", []))
         per_ticker_stats.append(stats)
     per_ticker_stats.sort(key=lambda s: s["total_pnl"], reverse=True)
 
@@ -923,6 +982,39 @@ def compute_detailed_analytics(trades):
         "per_ticker_stats": per_ticker_stats,
         "equity_curve": equity_curve,
         "avg_hold_time": _format_duration(avg_hold_seconds),
+        "timeframe_stats": compute_timeframe_breakdown(closed_with_pnl),
+        "weekday_stats": compute_weekday_breakdown(closed_with_pnl),
+    }
+
+
+def build_daily_pnl_summary(trades, day):
+    """Closed trades whose exit date (UK local, as logged) is *day*, with
+    GBP PnL totals. Returns {"date", "trades", "total", "wins", "losses"}."""
+    fx_rate = float(getattr(config, "FX_USD_GBP", 0.78) or 0.78)
+    rows = []
+    for t in trades or []:
+        if not (t.get("status") == "CLOSED" or t.get("time_exited")):
+            continue
+        ts = _naive_dt(_parse_iso_like(t.get("time_exited")))
+        if ts is None or ts.date() != day:
+            continue
+        try:
+            if t.get("pnl_gbp") not in (None, ""):
+                pnl = float(t["pnl_gbp"])
+            elif t.get("pnl") not in (None, ""):
+                pnl = round(float(t["pnl"]) * fx_rate, 2)
+            else:
+                continue
+        except Exception:
+            continue
+        rows.append({"ticker": t.get("ticker") or "?", "side": str(t.get("side") or "").upper(),
+                     "timeframe": t.get("timeframe") or "N/A", "source": _trade_type_label(t), "pnl": pnl})
+    return {
+        "date": day,
+        "trades": rows,
+        "total": round(sum(r["pnl"] for r in rows), 2),
+        "wins": sum(1 for r in rows if r["pnl"] > 0),
+        "losses": sum(1 for r in rows if r["pnl"] < 0),
     }
 
 

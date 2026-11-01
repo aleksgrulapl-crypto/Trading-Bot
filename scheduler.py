@@ -208,6 +208,24 @@ def sync_open_positions() -> None:
         logger.exception("sync_open_positions failed")
 
 
+def send_daily_pnl_email() -> None:
+    """Weekdays only: email today's realised PnL. Scheduled at 21:00 UK."""
+    now_uk = datetime.now(UK_TZ)
+    if now_uk.weekday() >= 5:
+        return
+    try:
+        # Imported lazily: the dashboard module pulls in the web layer.
+        import dashboard
+        import notifications
+        from trade_log import load_raw_log
+        trades = dashboard.normalize_trades(dashboard.dedupe_trades(load_raw_log()))
+        summary = dashboard.build_daily_pnl_summary(trades, now_uk.date())
+        notifications.notify_daily_pnl(summary)
+        logger.info("Daily PnL email queued (%d trades, total %s)", len(summary["trades"]), summary["total"])
+    except Exception:
+        logger.exception("send_daily_pnl_email failed")
+
+
 # single scheduler instance
 scheduler = Scheduler()
 
@@ -242,6 +260,11 @@ def start_scheduler() -> None:
     # Optional daily/hourly logging jobs (examples)
     scheduler.add_daily_job(getattr(config, "DAILY_REPORT_HOUR", 22), getattr(config, "DAILY_REPORT_MINUTE", 0), lambda: log_equity("equity_log.json"))
     scheduler.add_hourly_job(0, lambda: log_available("available_log.json"))
+    scheduler.add_daily_job(
+        getattr(config, "DAILY_PNL_EMAIL_HOUR", 21),
+        getattr(config, "DAILY_PNL_EMAIL_MINUTE", 0),
+        send_daily_pnl_email,
+    )
 
     scheduler.start()
     logger.info("Started background scheduler (TrailSL + ClosedSync).")
