@@ -22,7 +22,7 @@
             text-align: center;
             box-shadow: 0 0 10px #000;
         }
-        input[type="password"] {
+        input[type="password"], input[type="text"], input[type="email"] {
             width: 90%;
             padding: 10px;
             margin-top: 15px;
@@ -65,18 +65,19 @@
     <p>Sign in to the Dashboard</p>
 
     <form method="POST">
-        <select name="username">
-            <option value="owner">Owner</option>
-            <option value="viewer">Viewer</option>
-            <option value="investor">Investor</option>
-        </select>
-        <input type="password" name="password" placeholder="Password">
+        <input type="text" name="username" placeholder="Email address" value="{{ username|default('') }}" autocomplete="username" required>
+        <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
         <button type="submit">Login</button>
     </form>
 
     {% if error %}
         <div class="error">{{ error }}</div>
     {% endif %}
+
+    <p style="margin-top:20px; font-size:13px;">
+        No account yet? <a href="/dashboard/register" style="color:#58a6ff;">Create one</a>
+        &middot; <a href="/dashboard/terms" style="color:#58a6ff;">Terms</a>
+    </p>
 </div>
 
 </body>

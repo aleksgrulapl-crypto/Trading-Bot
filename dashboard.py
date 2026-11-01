@@ -10,6 +10,7 @@
 #   - Clearer login env configuration and logging
 
 import functools
+import hmac
 import time
 import math
 from statistics import mean
@@ -17,9 +18,11 @@ from datetime import datetime, timedelta
 import logging
 import os
 from flask import Blueprint, request, render_template, redirect, jsonify
+from flask import session as flask_session
 
 import session
 import config
+import users
 import deposits
 import notifications
 import trail_settings
@@ -51,51 +54,201 @@ if not logger.handlers:
 # -----------------------------
 # Login routes
 # -----------------------------
+APPROVED_ROLES = ("owner", "viewer", "investor")
+SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 7
+
+ERROR_MESSAGES = {
+    "invalid_name": "Please enter your name (2-80 characters).",
+    "invalid_email": "Please enter a valid email address.",
+    "password_too_short": f"Password must be at least {users.MIN_PASSWORD_LENGTH} characters.",
+    "password_too_long": f"Password must be at most {users.MAX_PASSWORD_LENGTH} characters.",
+    "email_taken": "An account with this email already exists.",
+}
+
+
+def _owner_password() -> str:
+    return os.getenv("DASHBOARD_OWNER_PASSWORD") or getattr(config, "DASHBOARD_OWNER_PASSWORD", None) or ""
+
+
+def _client_key(*parts) -> str:
+    return "|".join([request.remote_addr or "?", *parts])
+
+
+def _start_session(role, user_id=None):
+    flask_session.clear()
+    flask_session["role"] = role
+    if user_id:
+        flask_session["uid"] = user_id
+    flask_session.permanent = True
+
+
+def _read_identity() -> dict:
+    """Return {'role', 'name', 'logged_in'} for the current request.
+
+    role is 'owner', 'viewer', 'investor', 'pending' or None (anonymous).
+    Non-owner roles are re-read from the users store on every request so that
+    Owner approvals, upgrades and removals take effect immediately.
+    """
+    anonymous = {"role": None, "name": None, "logged_in": False}
+    if flask_session.get("role") == "owner":
+        return {"role": "owner", "name": "Owner", "logged_in": True}
+    user_id = flask_session.get("uid")
+    if not user_id:
+        return anonymous
+    try:
+        user = users.get_user(user_id)
+    except Exception:
+        logger.exception("could not load user for session")
+        return anonymous
+    if not user:
+        return anonymous
+    return {"role": user.get("role"), "name": user.get("name"), "logged_in": True}
+
+
 @dashboard.route("/dashboard/login", methods=["GET"])
 def dashboard_login():
+    if _read_identity()["logged_in"]:
+        return redirect("/dashboard")
     return render_template("login.html", title="Dashboard Login")
 
 
 @dashboard.route("/dashboard/login", methods=["POST"])
 def dashboard_login_submit():
-    username = (request.form.get("username") or "owner").strip().lower()
+    username = (request.form.get("username") or "").strip().lower()
     password = request.form.get("password", "")
 
-    owner_password = os.getenv("DASHBOARD_OWNER_PASSWORD", getattr(config, "DASHBOARD_OWNER_PASSWORD", None) or "Angelika140282")
-    viewer_password = os.getenv("DASHBOARD_VIEWER_PASSWORD", getattr(config, "DASHBOARD_VIEWER_PASSWORD", None) or "Viewer123$")
-    investor_password = os.getenv("DASHBOARD_INVESTOR_PASSWORD", getattr(config, "DASHBOARD_INVESTOR_PASSWORD", None) or "Investor123$")
-    if owner_password == "Angelika140282":
-        logger.warning("Using default dashboard Owner password. Set DASHBOARD_OWNER_PASSWORD in environment to secure the dashboard.")
+    def _fail(status, message):
+        return render_template("login.html", title="Dashboard Login", error=message, username=username), status
 
-    if username == "owner" and password == owner_password:
-        role = "owner"
-    elif username == "viewer" and password == viewer_password:
-        role = "viewer"
-    elif username == "investor" and password == investor_password:
-        role = "investor"
-    else:
-        return render_template("login.html", title="Dashboard Login", error="Invalid username or password"), 401
+    throttle_key = _client_key(username)
+    if users.is_throttled(throttle_key):
+        return _fail(429, "Too many failed attempts. Please try again in 15 minutes.")
 
-    resp = redirect("/dashboard")
-    resp.set_cookie("dashboard_auth", "1", max_age=60 * 60 * 24 * 7)
-    resp.set_cookie("dashboard_role", role, max_age=60 * 60 * 24 * 7)
-    return resp
+    if username == "owner":
+        owner_password = _owner_password()
+        if not owner_password:
+            logger.error("DASHBOARD_OWNER_PASSWORD is not set; Owner login is disabled.")
+        elif hmac.compare_digest(password.encode("utf-8"), owner_password.encode("utf-8")):
+            users.clear_failures(throttle_key)
+            _start_session("owner")
+            return redirect("/dashboard")
+        users.record_failure(throttle_key)
+        return _fail(401, "Invalid email or password")
+
+    user = users.authenticate(username, password)
+    if not user:
+        users.record_failure(throttle_key)
+        return _fail(401, "Invalid email or password")
+
+    users.clear_failures(throttle_key)
+    _start_session(user["role"], user["id"])
+    return redirect("/dashboard")
+
+
+@dashboard.route("/dashboard/register", methods=["GET"])
+def dashboard_register():
+    if _read_identity()["logged_in"]:
+        return redirect("/dashboard")
+    return render_template("register.html", title="Create an account")
+
+
+@dashboard.route("/dashboard/register", methods=["POST"])
+def dashboard_register_submit():
+    name = request.form.get("name", "")
+    email = request.form.get("email", "")
+    password = request.form.get("password", "")
+    confirm = request.form.get("confirm_password", "")
+
+    def _fail(status, message):
+        return render_template(
+            "register.html", title="Create an account", error=message, name=name, email=email,
+        ), status
+
+    throttle_key = _client_key("register")
+    if users.is_throttled(throttle_key):
+        return _fail(429, "Too many attempts. Please try again later.")
+    users.record_failure(throttle_key)
+
+    if password != confirm:
+        return _fail(400, "Passwords do not match.")
+    if not request.form.get("accept_risk"):
+        return _fail(400, "Please confirm that you understand your capital is at risk.")
+    if users.normalize_email(email) == "owner":
+        return _fail(400, ERROR_MESSAGES["invalid_email"])
+
+    try:
+        ok, user, status = users.register(email, password, name)
+    except Exception:
+        logger.exception("registration failed")
+        return _fail(500, "Registration is temporarily unavailable. Please try again later.")
+    if not ok:
+        return _fail(400, ERROR_MESSAGES.get(status, "Registration failed."))
+
+    _start_session(user["role"], user["id"])
+    return redirect("/dashboard/pending")
+
+
+@dashboard.route("/dashboard/pending")
+def dashboard_pending():
+    ident = _read_identity()
+    if ident["role"] is None:
+        return redirect("/dashboard/login")
+    if ident["role"] in APPROVED_ROLES:
+        return redirect("/dashboard")
+    return render_template("pending.html", title=getattr(config, "DASHBOARD_TITLE", "Dashboard"), account={})
 
 
 @dashboard.route("/dashboard/logout")
 def dashboard_logout():
-    resp = redirect("/dashboard")
-    resp.delete_cookie("dashboard_auth")
-    resp.delete_cookie("dashboard_role")
-    return resp
+    flask_session.clear()
+    return redirect("/dashboard/login")
+
+
+# Pages reachable without an approved account (login flow and legal pages).
+PUBLIC_ENDPOINTS = frozenset({
+    "dashboard.dashboard_login",
+    "dashboard.dashboard_login_submit",
+    "dashboard.dashboard_register",
+    "dashboard.dashboard_register_submit",
+    "dashboard.dashboard_pending",
+    "dashboard.dashboard_logout",
+    "dashboard.dashboard_terms",
+    "dashboard.dashboard_contact",
+    "dashboard.dashboard_faq",
+})
+
+
+def _wants_json() -> bool:
+    return (
+        request.method != "GET"
+        or request.path.endswith("/data")
+        or request.is_json
+        or request.accept_mimetypes.best == "application/json"
+    )
+
+
+@dashboard.before_request
+def _require_approved_account():
+    if request.endpoint in PUBLIC_ENDPOINTS:
+        return None
+    role = _read_identity()["role"]
+    if role in APPROVED_ROLES:
+        return None
+    if role == "pending":
+        if _wants_json():
+            return jsonify({"status": "error", "message": "pending_approval"}), 403
+        return redirect("/dashboard/pending")
+    if _wants_json():
+        return jsonify({"status": "error", "message": "login_required"}), 401
+    return redirect("/dashboard/login")
 
 
 # -----------------------------
 # Auth decorators
 # -----------------------------
 def login_required(view):
-    """Dashboard pages are open to everyone: visitors without a login are
-    treated as the (restricted) Viewer role. Role-specific gating is done by
+    """Kept for readability on routes. Access is enforced for the whole
+    blueprint by _require_approved_account(); role-specific gating is done by
     the other decorators and by the templates."""
     @functools.wraps(view)
     def wrapper(*args, **kwargs):
@@ -104,22 +257,15 @@ def login_required(view):
 
 
 def current_role() -> str:
-    """Return the active role: 'owner', 'viewer', or 'investor'.
-
-    Visitors with no login cookie are the default 'viewer'. A login cookie
-    with a missing/unrecognized role (a session set before roles existed) is
-    treated as 'owner' to preserve the original single-password behavior.
-    """
-    if not request.cookies.get("dashboard_auth"):
-        return "viewer"
-    role = request.cookies.get("dashboard_role")
-    if role in ("owner", "viewer", "investor"):
-        return role
-    return "owner"
+    """Return the active role: 'owner', 'viewer', or 'investor'. Anyone who is
+    not approved is reduced to the restricted 'viewer' role (and is normally
+    stopped earlier by _require_approved_account)."""
+    role = _read_identity()["role"]
+    return role if role in APPROVED_ROLES else "viewer"
 
 
 def is_logged_in() -> bool:
-    return bool(request.cookies.get("dashboard_auth"))
+    return _read_identity()["logged_in"]
 
 
 def non_viewer_page_required(view):
@@ -184,9 +330,14 @@ def _inject_role():
     """Make the active role and login state available to every dashboard
     template without threading them through each render_template() call."""
     try:
-        return {"role": current_role(), "logged_in": is_logged_in()}
+        ident = _read_identity()
+        return {
+            "role": ident["role"] or "viewer",
+            "logged_in": ident["logged_in"],
+            "user_name": ident["name"],
+        }
     except Exception:
-        return {"role": "viewer", "logged_in": False}
+        return {"role": "viewer", "logged_in": False, "user_name": None}
 
 
 def roi_access_required(view):
@@ -1002,13 +1153,20 @@ def dashboard_trades_data():
         }), 500
 
 
+def _page_account():
+    """Account figures are only needed for the Owner header; the public legal
+    pages must not trigger broker calls for anonymous visitors."""
+    if current_role() == "owner" and is_logged_in():
+        return _build_request_context()["account"]
+    return {}
+
+
 def _render_static_page(template):
-    ctx = _build_request_context()
     return render_template(
         template,
         title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
         cache_bust=time.time(),
-        account=ctx["account"],
+        account=_page_account(),
     )
 
 
@@ -1051,12 +1209,11 @@ def _terms_last_updated() -> str:
 @dashboard.route("/dashboard/terms")
 @login_required
 def dashboard_terms():
-    ctx = _build_request_context()
     return render_template(
         "terms.html",
         title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
         cache_bust=time.time(),
-        account=ctx["account"],
+        account=_page_account(),
         terms_last_updated=_terms_last_updated(),
     )
 
@@ -1209,6 +1366,46 @@ def dashboard_investors_set_tier():
         return jsonify({"status": "error", "message": status}), code
 
     return redirect("/dashboard/investors")
+
+
+@dashboard.route("/dashboard/users")
+@owner_page_required
+def dashboard_users():
+    """Owner-only: approve registrations and upgrade accounts to investor."""
+    rows = users.list_users()
+    for u in rows:
+        u["created_at_human"] = format_human(u.get("created_at")) or u.get("created_at")
+    return render_template(
+        "users.html",
+        title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
+        cache_bust=time.time(),
+        account=_page_account(),
+        user_rows=rows,
+        pending_count=sum(1 for u in rows if u.get("role") == "pending"),
+    )
+
+
+@dashboard.route("/dashboard/users/<user_id>/role", methods=["POST"])
+@owner_required
+def dashboard_users_set_role(user_id: str):
+    role = (request.form.get("role") or (request.get_json(silent=True) or {}).get("role") or "").strip()
+    ok, status = users.set_role(user_id, role)
+    if request.is_json:
+        if ok:
+            return jsonify({"status": "success"}), 200
+        return jsonify({"status": "error", "message": status}), (404 if status == "not_found" else 400)
+    return redirect("/dashboard/users")
+
+
+@dashboard.route("/dashboard/users/<user_id>/delete", methods=["POST"])
+@owner_required
+def dashboard_users_delete(user_id: str):
+    ok, status = users.delete_user(user_id)
+    if request.is_json:
+        if ok:
+            return jsonify({"status": "success"}), 200
+        return jsonify({"status": "error", "message": status}), 404
+    return redirect("/dashboard/users")
 
 
 @dashboard.route("/dashboard/analytics")

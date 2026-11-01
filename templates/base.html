@@ -448,8 +448,9 @@
 
         <div class="nav">
             <span class="role-badge {% if role == 'owner' %}role-badge-owner{% elif role == 'investor' %}role-badge-investor{% else %}role-badge-viewer{% endif %}">
-                {{ {'owner': 'Owner', 'investor': 'Investor'}.get(role, 'Viewer') }}
+                {{ {'owner': 'Owner', 'investor': 'Investor', 'pending': 'Pending'}.get(role, 'Viewer') }}
             </span>
+            {% if role != 'pending' %}
             <a href="/dashboard">Dashboard</a>
             {% if role != 'viewer' %}
             <a href="/dashboard/trades">Trade Log</a>
@@ -461,6 +462,8 @@
             {% endif %}
             {% if role == 'owner' %}
             <a href="/dashboard/transactions">Transactions</a>
+            <a href="/dashboard/users">Users</a>
+            {% endif %}
             {% endif %}
             {% if logged_in %}
             <a href="/dashboard/logout" class="logout">Logout</a>
