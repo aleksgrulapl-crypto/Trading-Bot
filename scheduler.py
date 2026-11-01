@@ -226,6 +226,27 @@ def send_daily_pnl_email() -> None:
         logger.exception("send_daily_pnl_email failed")
 
 
+def check_overnight_fee_job() -> None:
+    """Record the 21:00-21:05 UK overnight adjustment fee as a Broker Fee."""
+    now = datetime.now(UK_TZ)
+    if now.hour != 21 or now.minute > 10:
+        return
+    try:
+        # Imported lazily: the dashboard module pulls in the web layer.
+        import dashboard
+        import deposits
+        from trade_log import load_raw_log
+        account = session.enrich_account(session.get_account()) or {}
+        trades = dashboard.normalize_trades(dashboard.dedupe_trades(load_raw_log()))
+        result = deposits.check_overnight_fee(
+            account.get("balance"), dashboard._trade_pnl_events(trades),
+        )
+        if result.get("action") in ("fee_recorded", "failed"):
+            logger.info("Overnight fee check: %s", result)
+    except Exception:
+        logger.exception("check_overnight_fee_job failed")
+
+
 # single scheduler instance
 scheduler = Scheduler()
 
@@ -255,6 +276,8 @@ def start_scheduler() -> None:
 
     # Open position sync (manual/trader opens that bypass the webhook)
     scheduler.add_interval_job(10, sync_open_positions)
+    # Overnight adjustment fee (taken 21:00-21:05 UK) recorded as a Broker Fee
+    scheduler.add_interval_job(15, check_overnight_fee_job)
     # Public landing-page snapshot (percentages for the last completed week/month)
     scheduler.add_interval_job(3600, refresh_public_snapshot)
     # Optional daily/hourly logging jobs (examples)

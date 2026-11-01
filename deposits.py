@@ -272,6 +272,30 @@ def delete_entry(entry_id: str, path: str = LOG_PATH) -> Tuple[bool, str]:
         return True, "deleted"
 
 
+def update_fee_amount(entry_id: str, amount: Any, path: str = LOG_PATH) -> Tuple[bool, str]:
+    """Correct the amount of a recorded broker fee (e.g. an auto-detected
+    overnight fee that was recorded wrong). Only fee entries are editable."""
+    target = str(entry_id or "").strip()
+    if not target:
+        return False, "invalid_id"
+    amt = _coerce_amount(amount)
+    if amt is None:
+        return False, "invalid_amount"
+
+    with _deposits_lock:
+        entries = load_entries(path)
+        for e in entries:
+            if str(e.get("id")) == target:
+                if e.get("type") != "fee":
+                    return False, "not_a_fee"
+                e["amount"] = amt
+                e["edited_at"] = _now_iso()
+                if not save_entries(entries, path):
+                    return False, "save_failed"
+                return True, "updated"
+        return False, "not_found"
+
+
 def summarize(entries: List[Dict[str, Any]]) -> Dict[str, float]:
     """Compute totals: total deposited, total withdrawn, total fees, and net contribution."""
     total_deposits = 0.0
@@ -1273,6 +1297,100 @@ def detect_and_record_balance_change(
         _save_balance_state(current_balance, now_iso)
         logger.info("deposits: balance auto-detection result: %s", result)
         return result
+
+
+# -----------------------------------------------------------------------
+# Overnight adjustment fees. The broker takes these out of the account
+# between 21:00 and 21:05 UK time. The scheduler snapshots the balance at
+# the start of that window and, once it closes, records any small drop not
+# explained by closed trades as a Broker Fee (editable on the Transactions
+# page if the recorded value is wrong).
+# -----------------------------------------------------------------------
+OVERNIGHT_FEE_STATE_PATH = os.environ.get("OVERNIGHT_FEE_STATE_PATH") or (getattr(config, "OVERNIGHT_FEE_STATE_PATH", None) if config else None) or "/data/overnight_fee_state.json"
+OVERNIGHT_FEE_START = (21, 0)
+OVERNIGHT_FEE_END = (21, 5)
+OVERNIGHT_FEE_GRACE_MINUTES = 5
+
+
+def check_overnight_fee(
+    current_balance: Optional[float],
+    trade_pnl_events: Optional[List[Dict[str, Any]]] = None,
+    now: Optional[datetime] = None,
+    state_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Snapshot the balance at 21:00 UK and, from 21:05, record the unexplained
+    small decrease as a Broker Fee. Safe to call frequently; each UK day is
+    recorded at most once."""
+    state_path = state_path or OVERNIGHT_FEE_STATE_PATH
+    if current_balance is None:
+        return {"action": "skipped", "reason": "no_balance"}
+    try:
+        current_balance = float(current_balance)
+    except (TypeError, ValueError):
+        return {"action": "skipped", "reason": "invalid_balance"}
+
+    now = now or _now_naive_uk()
+    start = now.replace(hour=OVERNIGHT_FEE_START[0], minute=OVERNIGHT_FEE_START[1], second=0, microsecond=0)
+    end = now.replace(hour=OVERNIGHT_FEE_END[0], minute=OVERNIGHT_FEE_END[1], second=0, microsecond=0)
+    if now < start or now >= end + timedelta(minutes=OVERNIGHT_FEE_GRACE_MINUTES):
+        return {"action": "skipped", "reason": "outside_window"}
+
+    today = now.date().isoformat()
+    with _balance_lock:
+        state = None
+        if os.path.exists(state_path):
+            try:
+                with open(state_path, "r", encoding="utf-8") as f:
+                    state = json.load(f)
+            except Exception:
+                state = None
+        if not isinstance(state, dict) or state.get("date") != today:
+            state = None
+
+        if state is None:
+            if now >= end:
+                return {"action": "skipped", "reason": "no_baseline"}
+            _atomic_write(state_path, {
+                "date": today, "baseline": round(current_balance, 2),
+                "started_at": now.isoformat(), "recorded": False,
+            })
+            return {"action": "baseline_set", "balance": current_balance}
+
+        if state.get("recorded") or now < end:
+            return {"action": "waiting"}
+
+        started_at = _parse_entry_datetime(state.get("started_at")) or start
+        pnl_since = sum(
+            ev.get("pnl", 0.0) for ev in (trade_pnl_events or [])
+            if isinstance(ev.get("ts"), datetime) and ev["ts"] >= started_at
+        )
+        delta = round(current_balance - float(state.get("baseline")) - pnl_since, 2)
+        state["recorded"] = True
+        _atomic_write(state_path, state)
+
+        max_fee = float(getattr(config, "OVERNIGHT_FEE_MAX", 25.0) or 25.0) if config else 25.0
+        if delta >= 0 or -delta > max_fee or -delta < 0.01:
+            return {"action": "no_fee", "delta": delta}
+
+    fee = round(-delta, 2)
+    ok, entry, status = add_entry(
+        "fee", fee, "", "Auto-detected overnight adjustment (21:00-21:05 UK) - edit if incorrect",
+        occurred_at=now.isoformat(), path=LOG_PATH,
+    )
+    if not ok:
+        return {"action": "failed", "status": status}
+
+    # The fee is now explained, so shift the balance baseline used by the
+    # deposit/withdrawal auto-detector to avoid it flagging the same drop.
+    with _balance_lock:
+        last = _load_balance_state()
+        if last is not None:
+            try:
+                _save_balance_state(float(last["balance"]) - fee, str(last.get("as_of") or _now_iso()))
+            except (TypeError, ValueError):
+                pass
+    logger.info("deposits: recorded overnight fee £%.2f", fee)
+    return {"action": "fee_recorded", "amount": fee, "entry_id": entry.get("id")}
 
 
 # -----------------------------------------------------------------------
