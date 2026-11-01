@@ -1,13 +1,18 @@
 import pytest
 
+import trail_settings
 import trail_sl
 
 
 @pytest.fixture(autouse=True)
-def _reset_trail_state():
+def _reset_trail_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(trail_sl.config, "TRAIL_SETTINGS_PATH", str(tmp_path / "trail.json"), raising=False)
+    trail_settings.set_trail("D1", enabled=True)
     trail_sl._sent_state.clear()
+    trail_sl._tp_fail_ts.clear()
     yield
     trail_sl._sent_state.clear()
+    trail_sl._tp_fail_ts.clear()
 
 
 def _mock_position(**overrides):
@@ -218,3 +223,62 @@ def test_trailing_sl_failure_cooldown(monkeypatch):
     trail_sl.run_trailing_sl()
     trail_sl.run_trailing_sl()
     assert len(calls) == 1
+
+
+def _run(monkeypatch, pos):
+    monkeypatch.setattr(trail_sl.session, "get_positions", lambda: [{}])
+    monkeypatch.setattr(trail_sl.session, "enrich_positions", lambda _: [pos])
+    sl_calls, tp_calls = [], []
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda d, sl: sl_calls.append((d, sl)) or True)
+    monkeypatch.setattr(trail_sl, "_remove_take_profit", lambda d: tp_calls.append(d) or trail_settings.mark_tp_trail(d))
+    trail_sl.run_trailing_sl()
+    return sl_calls, tp_calls
+
+
+def test_trail_is_off_by_default_for_unlisted_trades(monkeypatch):
+    pos = _mock_position(dealId="TV1", current_price=105.0, stopLevel=90.0, profit=50.0, currency="GBP")
+    sl_calls, tp_calls = _run(monkeypatch, pos)
+    assert sl_calls == [] and tp_calls == []
+
+
+def test_custom_gbp_activation_replaces_default(monkeypatch):
+    trail_settings.set_trail("D1", enabled=True, activation_gbp=40)
+    monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.60)
+    pos = _mock_position(current_price=102.0, stopLevel=90.0, profit=20.0, currency="GBP", profitLevel=130.0)
+    sl_calls, _ = _run(monkeypatch, pos)
+    assert sl_calls == []  # 20 < custom 40 even though default 15 would fire
+    pos["profit"] = 45.0
+    sl_calls, _ = _run(monkeypatch, pos)
+    assert len(sl_calls) == 1
+
+
+def test_tp_trail_triggers_at_90_percent_for_any_trade(monkeypatch):
+    pos = _mock_position(dealId="TV1", current_price=109.0, stopLevel=95.0, profitLevel=110.0)
+    sl_calls, tp_calls = _run(monkeypatch, pos)
+    assert sl_calls == [("TV1", 107.2)]  # 80% of 9.0 profit
+    assert tp_calls == ["TV1"]
+    assert trail_settings.get("TV1")["tp_trail"] is True
+
+
+def test_tp_trail_not_triggered_below_90_percent(monkeypatch):
+    pos = _mock_position(dealId="TV1", current_price=108.9, stopLevel=95.0, profitLevel=110.0)
+    sl_calls, tp_calls = _run(monkeypatch, pos)
+    assert sl_calls == [] and tp_calls == []
+
+
+def test_tp_trail_keeps_ratcheting_after_tp_removed(monkeypatch):
+    trail_settings.mark_tp_trail("TV1")
+    pos = _mock_position(dealId="TV1", current_price=115.0, stopLevel=107.2)
+    sl_calls, tp_calls = _run(monkeypatch, pos)
+    assert sl_calls == [("TV1", 112.0)] and tp_calls == []
+
+
+def test_tp_not_removed_if_sl_update_fails(monkeypatch):
+    pos = _mock_position(dealId="TV1", current_price=109.0, stopLevel=95.0, profitLevel=110.0)
+    monkeypatch.setattr(trail_sl.session, "get_positions", lambda: [{}])
+    monkeypatch.setattr(trail_sl.session, "enrich_positions", lambda _: [pos])
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda d, sl: False)
+    removed = []
+    monkeypatch.setattr(trail_sl, "_remove_take_profit", lambda d: removed.append(d))
+    trail_sl.run_trailing_sl()
+    assert removed == []

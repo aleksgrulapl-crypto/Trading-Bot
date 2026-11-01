@@ -550,11 +550,14 @@ function closePosition(dealId) {
 
 function toggleTrail(dealId, enabled) {
     const errorBanner = document.getElementById('error-banner');
+    const gbpInput = document.getElementById(`trail-gbp-${dealId}`);
+    const body = { enabled: enabled };
+    if (gbpInput) { body.activation_gbp = gbpInput.value; }
 
     fetch(`/dashboard/trail/${encodeURIComponent(dealId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: enabled })
+        body: JSON.stringify(body)
     })
         .then(r => r.json())
         .then(data => {

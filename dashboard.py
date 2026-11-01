@@ -1066,7 +1066,7 @@ def _build_request_context():
     try:
         if raw_positions:
             trail_settings.prune(p.get("dealId") or p.get("id") for p in positions if isinstance(p, dict))
-        trail_off = trail_settings.disabled_ids()
+        trail_all = trail_settings.all_settings()
         type_by_deal = {}
         for t in combined_raw:
             if t.get("status") == "OPEN" and t.get("dealId"):
@@ -1076,7 +1076,9 @@ def _build_request_context():
                 continue
             did = str(p.get("dealId") or p.get("id") or "")
             p["trade_type"] = type_by_deal.get(did, "Trader")
-            p["trail_enabled"] = did not in trail_off
+            rec = trail_all.get(did, {})
+            p["trail_enabled"] = bool(rec.get("enabled", False))
+            p["trail_activation_gbp"] = rec.get("activation_gbp")
     except Exception:
         logger.exception("dashboard: failed to annotate positions with trail state")
     combined_trades.sort(
@@ -1928,7 +1930,8 @@ def dashboard_toggle_email_notifications():
 @dashboard.route("/dashboard/trail/<position_id>", methods=["POST"])
 @owner_required
 def dashboard_toggle_trail(position_id: str):
-    """Owner-only: switch SL trailing on/off for one live position."""
+    """Owner-only: switch the SL trail on/off (OFF by default) for one live
+    Trader position and optionally set the GBP profit level it starts at."""
     position_id = str(position_id or "").strip()
     if not position_id:
         return jsonify({"status": "error", "message": "missing_position_id"}), 400
@@ -1936,16 +1939,30 @@ def dashboard_toggle_trail(position_id: str):
     payload = request.get_json(silent=True) or {}
     enabled = payload.get("enabled")
     if enabled is None:
-        enabled = trail_settings.is_trail_disabled(position_id)
+        enabled = not trail_settings.is_trail_enabled(position_id)
     else:
         enabled = str(enabled).strip().lower() in ("1", "true", "yes", "on")
 
-    if not trail_settings.set_trail_enabled(position_id, enabled):
+    raw_gbp = payload.get("activation_gbp")
+    activation = None
+    clear_activation = False
+    if raw_gbp is not None and str(raw_gbp).strip() != "":
+        try:
+            activation = float(raw_gbp)
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "message": "invalid_activation_gbp"}), 400
+        if activation <= 0:
+            return jsonify({"status": "error", "message": "invalid_activation_gbp"}), 400
+    elif "activation_gbp" in payload:
+        clear_activation = True
+
+    if not trail_settings.set_trail(position_id, enabled=enabled, activation_gbp=activation, clear_activation=clear_activation):
         return jsonify({"status": "error", "message": "save_failed"}), 500
+    level = f" (starts at £{activation:g})" if activation else ""
     return jsonify({
         "status": "success",
         "enabled": enabled,
-        "message": f"SL Trail {'ON' if enabled else 'OFF'} for {position_id}.",
+        "message": f"SL Trail {'ON' if enabled else 'OFF'} for {position_id}{level}.",
     }), 200
 
 

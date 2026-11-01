@@ -62,6 +62,9 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `TRAIL_SL_PERC` | Portion of unrealized profit locked by trailing SL as soon as it activates (default `0.70` = `70%`) | ⬜ |
 | `TRAIL_TIGHTEN_STEP_PERC` | How much the locked-in portion ramps up per activation-multiple of profit beyond 1x, so the SL follows more closely the deeper a trade goes in-profit (default `0.20` = `20%` per step) | ⬜ |
 | `TRAIL_MAX_PERC` | Ceiling on the locked-in portion as profit keeps extending (default `0.95` = `95%`) | ⬜ |
+| `TP_TRAIL_TRIGGER_FRACTION` | TP trail (all trades): once a trade is this far to its TP (default `0.90`) the TP is removed and the SL starts trailing | ⬜ |
+| `TP_TRAIL_LOCK_FRACTION` | Share of the profit locked by the SL once the TP trail is active, ratcheting as the trade runs (default `0.80`) | ⬜ |
+| `TRAIL_SETTINGS_PATH` | JSON file holding per-trade trail state (default `/data/trail_settings.json`). The SL trail is Trader-only, OFF by default, and the Trader can set the GBP profit level it starts at (blank = standard `TRAIL_ACTIVATION_*` rules). TradingView/Hedge trades only use the TP trail. | ⬜ |
 | `NOTIFY_EMAIL_ENABLED` | Default for the "Receive Notifications" toggle: `True` emails on position open and close, `False` emails on close only (default `False`) | ⬜ |
 | `NOTIFY_EMAIL_TO` | Comma-separated recipient email address(es) | ⬜ |
 | `NOTIFY_EMAIL_FROM` | "From" address on the email (default: `SMTP_USERNAME`) | ⬜ |

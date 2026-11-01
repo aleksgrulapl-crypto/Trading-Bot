@@ -282,7 +282,7 @@ SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "True").lower() in ("1", "true", "yes")
 # NOTIFY_EMAIL_TO above when this file doesn't exist yet.
 NOTIFY_SETTINGS_PATH = os.getenv("NOTIFY_SETTINGS_PATH", "/data/notify_settings.json")
 # Stores the hash/date used to auto-stamp "last updated" on the Terms of Service.
-TRAIL_DISABLED_PATH = os.getenv("TRAIL_DISABLED_PATH", "/data/trail_disabled.json")
+TRAIL_SETTINGS_PATH = os.getenv("TRAIL_SETTINGS_PATH", "/data/trail_settings.json")
 TERMS_VERSION_PATH = os.getenv("TERMS_VERSION_PATH", "/data/terms_version.json")
 
 # File paths and persistence
@@ -438,6 +438,12 @@ TRAIL_MAX_PERC = float(os.getenv("TRAIL_MAX_PERC", 0.95))
 TRAIL_MIN_STEP_PERC = float(os.getenv("TRAIL_MIN_STEP_PERC", 0.001))
 TRAIL_MIN_UPDATE_INTERVAL_SECONDS = float(os.getenv("TRAIL_MIN_UPDATE_INTERVAL_SECONDS", 60))
 TRAIL_FAILURE_COOLDOWN_SECONDS = float(os.getenv("TRAIL_FAILURE_COOLDOWN_SECONDS", 120))
+# TP trail (all trades): once a trade is TP_TRAIL_TRIGGER_FRACTION of the way
+# to its TP, the SL jumps to TP_TRAIL_LOCK_FRACTION of the profit at that
+# moment, the TP is removed, and the SL keeps ratcheting at that fraction of
+# the profit for as long as the trade keeps running.
+TP_TRAIL_TRIGGER_FRACTION = float(os.getenv("TP_TRAIL_TRIGGER_FRACTION", 0.90))
+TP_TRAIL_LOCK_FRACTION = float(os.getenv("TP_TRAIL_LOCK_FRACTION", 0.80))
 
 # Shared broker-positions cache / back-off (reduces timeouts under load).
 POSITIONS_CACHE_TTL_SECONDS = float(os.getenv("POSITIONS_CACHE_TTL_SECONDS", 3))

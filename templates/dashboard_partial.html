@@ -116,7 +116,9 @@
             <td>
               {% if is_owner %}
               {% if p.trade_type == 'Trader' %}
+              <input type="number" min="0" step="0.5" id="trail-gbp-{{ p.dealId or p.id }}" value="{{ p.trail_activation_gbp if p.trail_activation_gbp else '' }}" placeholder="£15" title="Profit in £ at which the SL Trail starts (blank = standard £15)" style="width:64px">
               <button onclick="toggleTrail('{{ p.dealId or p.id }}', {{ 'false' if p.trail_enabled else 'true' }})">SL Trail: {{ 'ON' if p.trail_enabled else 'OFF' }}</button>
+              {% if p.trail_enabled %}<button onclick="toggleTrail('{{ p.dealId or p.id }}', true)">Set £</button>{% endif %}
               {% endif %}
               <button onclick="closePosition('{{ p.dealId or p.id }}')">Close</button>
               {% else %}
