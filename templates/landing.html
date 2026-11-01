@@ -28,21 +28,6 @@
 </style>
 
 <div class="lp">
-  <section class="lp-hero">
-    <h1>{{ title }}</h1>
-    <p>A private algorithmic trading project built around rules-based strategies and risk management.</p>
-    <div class="lp-actions">
-      {% if identity.logged_in and identity.role == 'pending' %}
-        <a class="lp-btn lp-btn-primary" href="/dashboard/pending">View registration status</a>
-      {% elif identity.logged_in %}
-        <a class="lp-btn lp-btn-primary" href="/dashboard">Go to dashboard</a>
-      {% else %}
-        <a class="lp-btn lp-btn-primary" href="/dashboard/register">Register your interest</a>
-        <a class="lp-btn lp-btn-secondary" href="/dashboard/login">Log in</a>
-      {% endif %}
-    </div>
-  </section>
-
   <div class="lp-risk" role="note">
     <strong>Capital at risk.</strong> Trading involves risk and you may lose some or all of the money you contribute.
     Returns are not guaranteed, and past performance is not a reliable indicator of future results.
