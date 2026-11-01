@@ -439,7 +439,7 @@
         <span id="uk-clock-value">--:--:--</span>
     </div>
 
-    <div class="title">{{ title }}<span class="tagline">A private algorithmic trading project built around rules-based strategies and risk management.</span></div>
+    <div class="title"><a href="{{ '/dashboard' if role in ('owner', 'investor') else '/' }}" class="title-link" style="color: inherit; text-decoration: none;">{{ title }}</a><span class="tagline">A private algorithmic trading project built around rules-based strategies and risk management.</span></div>
 
     <div class="header-right">
         {% if role == 'owner' %}

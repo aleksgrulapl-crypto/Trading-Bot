@@ -3,6 +3,88 @@
 {% block content %}
 <div class="analytics-wrap">
 
+  {% if breakdown is none %}
+  {% if my_row %}
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">My ROI Overview</div>
+    </div>
+    <div class="metrics-row">
+      <div class="metric">
+        <div class="metric-label">My Net Contribution</div>
+        <div class="metric-value metric-neutral">£{{ "%.2f"|format(my_row.net_contribution) }}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">My Current Balance</div>
+        <div class="metric-value metric-neutral">£{{ "%.2f"|format(my_row.current_value) }}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">My Overall Gain / Loss</div>
+        <div class="metric-value {% if my_row.allocated_gain_loss >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+          £{{ "%.2f"|format(my_row.allocated_gain_loss) }}
+        </div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">My ROI</div>
+        <div class="metric-value {% if my_row.roi_pct is not none and my_row.roi_pct >= 0 %}metric-good{% else %}metric-bad{% endif %}">
+          {% if my_row.roi_pct is not none %}{{ "%.2f"|format(my_row.roi_pct) }}%{% else %}—{% endif %}
+        </div>
+      </div>
+    </div>
+    <p class="small" style="margin-top: 10px;">
+      Your balance is your share of the fund, calculated from your deposits
+      and withdrawals using NAV-per-unit accounting. You only share in
+      gains or losses from trades closed after your own deposit.
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">My Investor Breakdown</div>
+    </div>
+    <table class="table table-spaced">
+      <thead>
+        <tr>
+          <th>Investor</th>
+          <th>Deposited</th>
+          <th>Withdrawn</th>
+          <th>Net Contribution</th>
+          <th>Units Held</th>
+          <th>TradingView P&amp;L</th>
+          <th>Trader P&amp;L</th>
+          <th>Combined Gain / Loss</th>
+          <th>ROI</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{{ my_row.investor }}</td>
+          <td>£{{ "%.2f"|format(my_row.deposited) }}</td>
+          <td>£{{ "%.2f"|format(my_row.withdrawn) }}</td>
+          <td>£{{ "%.2f"|format(my_row.net_contribution) }}</td>
+          <td class="small">{{ "%.2f"|format(my_row.units_held) }}</td>
+          <td class="{% if my_row.tv_allocated_gain_loss >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">£{{ "%.2f"|format(my_row.tv_allocated_gain_loss) }}</td>
+          <td class="{% if my_row.trader_allocated_gain_loss is not none and my_row.trader_allocated_gain_loss >= 0 %}pnl-pos{% elif my_row.trader_allocated_gain_loss is not none %}pnl-neg{% endif %}">
+            {% if my_row.trader_allocated_gain_loss is not none %}£{{ "%.2f"|format(my_row.trader_allocated_gain_loss) }}{% else %}<span class="small">n/a</span>{% endif %}
+          </td>
+          <td class="{% if my_row.allocated_gain_loss >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">£{{ "%.2f"|format(my_row.allocated_gain_loss) }}</td>
+          <td class="{% if my_row.roi_pct is not none and my_row.roi_pct >= 0 %}pnl-pos{% elif my_row.roi_pct is not none %}pnl-neg{% endif %}">
+            {% if my_row.roi_pct is not none %}{{ "%.2f"|format(my_row.roi_pct) }}%{% else %}—{% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">My ROI Overview</div>
+    </div>
+    <p class="small">No contributions are recorded against your account yet.</p>
+  </div>
+  {% endif %}
+  {% else %}
+
   <div class="card">
     <div class="card-header">
       <div class="card-title">ROI Overview</div>
@@ -148,6 +230,7 @@
       in it. Tiers can only be changed by the Owner.
     </p>
   </div>
+  {% endif %}
 
 </div>
 {% endblock %}

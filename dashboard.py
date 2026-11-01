@@ -368,16 +368,12 @@ def non_viewer_page_required(view):
 
 def _viewer_safe_context(ctx):
     """Return a copy of the dashboard context for the Viewer role: account
-    figures are dropped and open positions are reduced to Ticker, Side and
-    Entry only."""
+    figures are dropped and open positions are reduced to the stock name
+    only."""
     safe = dict(ctx)
     safe["account"] = {}
     safe["positions"] = [
-        {
-            "ticker": p.get("ticker") or p.get("epic"),
-            "direction": p.get("direction") or p.get("side"),
-            "entry_price": p.get("entry_price") if p.get("entry_price") is not None else p.get("price"),
-        }
+        {"ticker": p.get("ticker") or p.get("epic")}
         for p in (ctx.get("positions") or [])
         if isinstance(p, dict)
     ]
@@ -1960,12 +1956,24 @@ def dashboard_roi():
     account = ctx["account"]
     breakdown = _build_roi_breakdown(entries, ctx["combined_trades"], (account or {}).get("balance"))
 
+    my_row = None
+    if current_role() == "investor":
+        # Investors only ever see their own figures: the fund-wide breakdown
+        # never reaches the template.
+        my_name = deposits.canonical_investor_name(_read_identity().get("name"), entries)
+        my_row = next(
+            (inv for inv in breakdown["investors"] if my_name and deposits._same_name(inv["investor"], my_name)),
+            None,
+        )
+        breakdown = None
+
     return render_template(
         "roi.html",
         title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
         cache_bust=time.time(),
         account=account,
         breakdown=breakdown,
+        my_row=my_row,
         is_owner=current_role() == "owner",
         role=current_role(),
     )
@@ -1992,6 +2000,18 @@ def dashboard_transactions_add():
 
     # Standard HTML form submission: redirect back to the page.
     return redirect("/dashboard/transactions")
+
+
+@dashboard.route("/dashboard/transactions/<entry_id>/edit", methods=["POST"])
+@owner_required
+def dashboard_transactions_edit(entry_id: str):
+    """Owner-only: correct the amount of a recorded broker fee."""
+    payload = request.get_json(silent=True) or request.form or {}
+    ok, status = deposits.update_fee_amount(entry_id, payload.get("amount"))
+    if ok:
+        return jsonify({"status": "success", "message": "Fee updated."}), 200
+    code = 404 if status == "not_found" else (500 if status == "save_failed" else 400)
+    return jsonify({"status": "error", "message": status}), code
 
 
 @dashboard.route("/dashboard/transactions/<entry_id>/delete", methods=["POST"])

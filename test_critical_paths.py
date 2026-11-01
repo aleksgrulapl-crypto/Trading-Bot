@@ -3735,7 +3735,7 @@ class TestDashboardRoles:
     def test_anonymous_visitor_is_viewer_with_limited_positions(self, monkeypatch):
         client = self._viewer_client(monkeypatch)
         html = client.get("/dashboard").get_data(as_text=True)
-        assert "AAPL" in html and "150.5" in html
+        assert "AAPL" in html and "150.5" not in html and ">Side<" not in html and ">Entry<" not in html
         assert "316.79" not in html and "1234" not in html and "987" not in html
         assert ">Size<" not in html and ">SL / TP<" not in html
         assert ">Trade Log<" not in html and ">Analytics<" not in html
@@ -3745,7 +3745,7 @@ class TestDashboardRoles:
         client = self._viewer_client(monkeypatch)
         data = client.get("/dashboard/data").get_json()
         assert data["account"] == {}
-        assert data["positions"] == [{"ticker": "AAPL", "direction": "Long", "entry_price": 150.5}]
+        assert data["positions"] == [{"ticker": "AAPL"}]
 
     def test_viewer_cannot_open_trade_log_or_analytics(self, monkeypatch):
         client = self._viewer_client(monkeypatch)
@@ -4859,3 +4859,82 @@ class TestWithdrawalRequests:
         dep.approve_withdrawal_request(rec["id"])
         assert dep.complete_withdrawal_request(rec["id"], "owner")[0] is True
         assert dep.complete_withdrawal_request(rec["id"], "owner")[2] == "invalid_transition"
+
+
+class TestOvernightFeeAndInvestorRoi:
+    @pytest.fixture
+    def dep(self, tmp_path, monkeypatch):
+        import deposits
+        monkeypatch.setattr(deposits, "LOG_PATH", str(tmp_path / "ledger.json"))
+        monkeypatch.setattr(deposits, "BALANCE_STATE_PATH", str(tmp_path / "bal.json"))
+        monkeypatch.setattr(deposits, "OVERNIGHT_FEE_STATE_PATH", str(tmp_path / "fee.json"))
+        return deposits
+
+    def _at(self, hh, mm, day=1):
+        import datetime
+        return datetime.datetime(2026, 1, day, hh, mm, 10)
+
+    def test_overnight_drop_is_recorded_as_editable_broker_fee(self, dep):
+        assert dep.check_overnight_fee(1000.0, now=self._at(21, 0))["action"] == "baseline_set"
+        assert dep.check_overnight_fee(999.1, now=self._at(21, 3))["action"] == "waiting"
+        res = dep.check_overnight_fee(998.4, now=self._at(21, 5))
+        assert res["action"] == "fee_recorded" and res["amount"] == pytest.approx(1.6)
+        assert dep.check_overnight_fee(997.0, now=self._at(21, 6))["action"] == "waiting"
+        fees = [e for e in dep.load_entries(dep.LOG_PATH) if e["type"] == "fee"]
+        assert len(fees) == 1 and fees[0]["investor"] == "Broker"
+
+        assert dep.update_fee_amount(fees[0]["id"], 2.25, path=dep.LOG_PATH) == (True, "updated")
+        assert dep.load_entries(dep.LOG_PATH)[0]["amount"] == 2.25
+
+    def test_overnight_check_ignores_trade_pnl_and_outside_window(self, dep):
+        import datetime
+        assert dep.check_overnight_fee(1000.0, now=self._at(20, 59))["reason"] == "outside_window"
+        dep.check_overnight_fee(1000.0, now=self._at(21, 0))
+        pnl = [{"ts": self._at(21, 2), "pnl": 10.0}]
+        assert dep.check_overnight_fee(1010.0, pnl, now=self._at(21, 5))["action"] == "no_fee"
+        assert not [e for e in dep.load_entries(dep.LOG_PATH) if e["type"] == "fee"]
+
+    def test_update_fee_amount_only_edits_fees(self, dep):
+        _ok, rec, _s = dep.add_entry("deposit", 100, "Jane", path=dep.LOG_PATH)
+        assert dep.update_fee_amount(rec["id"], 5, path=dep.LOG_PATH)[1] == "not_a_fee"
+
+    def test_investor_roi_page_shows_only_own_figures(self, monkeypatch, tmp_path):
+        from flask import Flask
+        import dashboard as dm
+
+        entries = [
+            {"id": "1", "type": "deposit", "amount": 100.0, "investor": "Jane", "occurred_at": "2026-01-01"},
+            {"id": "2", "type": "deposit", "amount": 900.0, "investor": "Aleks", "occurred_at": "2026-01-01"},
+        ]
+        monkeypatch.setattr(dm, "_build_request_context", lambda: {
+            "account": {"balance": 1100}, "combined_trades": [],
+        })
+        monkeypatch.setattr(dm.deposits, "list_entries_sorted", lambda: entries)
+        monkeypatch.setattr(dm.deposits, "load_tiers", lambda *a, **k: {})
+        monkeypatch.setattr(dm, "_read_identity", lambda: {"role": "investor", "name": "jane", "logged_in": True})
+
+        app = Flask(__name__, template_folder="templates")
+        app.register_blueprint(dm.dashboard)
+        body = app.test_client().get("/dashboard/roi").get_data(as_text=True)
+
+        assert "My ROI Overview" in body and "My Investor Breakdown" in body
+        assert "Jane" in body and "Aleks" not in body
+        assert "Ownership Share" not in body and "Per-Investor Breakdown" not in body
+
+    def test_title_links_by_role(self, monkeypatch):
+        from flask import Flask
+        import dashboard as dm
+
+        app = Flask(__name__, template_folder="templates")
+        app.register_blueprint(dm.dashboard)
+        client = app.test_client()
+        client.set_cookie("dashboard_auth", "1")
+        client.set_cookie("dashboard_role", "viewer")
+        monkeypatch.setattr(dm, "_build_request_context", lambda: {
+            "account": {}, "positions": [], "combined_trades": [],
+            "analytics": dm._safe_analytics({}), "weekly_analytics": dm._safe_analytics({}),
+            "monthly_analytics": dm._safe_analytics({}),
+        })
+        assert 'href="/" class="title-link"' in client.get("/dashboard").get_data(as_text=True)
+        client.set_cookie("dashboard_role", "investor")
+        assert 'href="/dashboard" class="title-link"' in client.get("/dashboard").get_data(as_text=True)

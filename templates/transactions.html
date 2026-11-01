@@ -115,7 +115,7 @@
           <td>{{ e.investor|default('Unassigned') }}</td>
           <td>
             <span class="pill {% if e.type == 'deposit' %}pill-long{% elif e.type == 'withdrawal' %}pill-short{% else %}pill-status{% endif %}">
-              {{ e.type|capitalize }}
+              {{ 'Broker Fee' if e.type == 'fee' else e.type|capitalize }}
             </span>
           </td>
           <td class="{% if e.type == 'deposit' %}pnl-pos{% else %}pnl-neg{% endif %}">
@@ -123,6 +123,7 @@
           </td>
           <td>{{ e.note or '—' }}</td>
           <td>
+            {% if e.type == 'fee' %}<button onclick="editFeeEntry('{{ e.id }}', {{ e.amount or 0 }})">Edit</button>{% endif %}
             <button class="button-danger" onclick="deleteTransactionEntry('{{ e.id }}')">Delete</button>
           </td>
         </tr>
@@ -152,6 +153,24 @@ function onTransactionTypeChange() {
         investorInput.value = investorInput.dataset.prev || "";
     }
     investorField.style.opacity = isFee ? "0.6" : "1";
+}
+
+function editFeeEntry(entryId, current) {
+    const raw = window.prompt('New broker fee amount (£):', Number(current).toFixed(2));
+    if (raw === null) {
+        return;
+    }
+    fetch(`/dashboard/transactions/${encodeURIComponent(entryId)}/edit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: raw })
+    })
+        .then(r => r.json())
+        .then(d => {
+            if (d.status !== "success") { window.alert("Could not update fee: " + (d.message || "error")); return; }
+            window.location.reload();
+        })
+        .catch(err => console.error("Edit fee error:", err));
 }
 
 function deleteTransactionEntry(entryId) {
