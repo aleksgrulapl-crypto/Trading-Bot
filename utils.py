@@ -28,7 +28,7 @@ def timestamp() -> str:
     YYYY-MM-DD HH.MM.SS
     Example: 2026-08-17 18.49.00
     """
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     return now.strftime("%Y-%m-%d %H.%M.%S")
 
 
@@ -45,7 +45,7 @@ def uk_timestamp() -> str:
             return datetime.datetime.now(_UK_TZ).isoformat()
         except Exception:
             pass
-    return datetime.datetime.utcnow().isoformat() + "Z"
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat() + "Z"
 
 
 # ---------------------------------------------------------

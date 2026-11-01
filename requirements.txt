@@ -1,6 +1,4 @@
-Flask
-requests
-pytz
-gunicorn
-pandas
-openpyxl
+Flask>=3.0,<4
+requests>=2.31,<3
+pytz>=2024.1
+gunicorn>=22,<27

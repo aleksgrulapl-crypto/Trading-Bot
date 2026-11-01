@@ -76,7 +76,7 @@ _trade_log_lock = threading.Lock()
 
 def _now_iso() -> str:
     """Return current time as ISO-8601 string."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     if UK_TZ:
         try:
             return datetime.now(UK_TZ).isoformat()
@@ -354,7 +354,7 @@ def save_raw_log(trades: List[Dict[str, Any]], path: str = LOG_PATH) -> bool:
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     old = f.read()
-                ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 stem, ext = os.path.splitext(BACKUP_PATH)
                 versioned_backup = f"{stem}_{ts}{ext}"
                 with open(versioned_backup, "w", encoding="utf-8") as bf:

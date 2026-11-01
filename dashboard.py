@@ -60,7 +60,6 @@ if not logger.handlers:
 # Login routes
 # -----------------------------
 APPROVED_ROLES = ("owner", "viewer", "investor")
-SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 7
 
 ERROR_MESSAGES = {
     "invalid_name": "Please enter your name (2-80 characters).",

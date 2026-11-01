@@ -91,7 +91,7 @@ def _trade_age_seconds(trade) -> Optional[float]:
     if entered is None:
         return None
     try:
-        return (datetime.utcnow() - entered).total_seconds()
+        return (datetime.now(timezone.utc).replace(tzinfo=None) - entered).total_seconds()
     except Exception:
         return None
 
@@ -119,7 +119,7 @@ def _parse_broker_timestamp(value) -> Optional[str]:
         return None
     if isinstance(value, (int, float)):
         try:
-            dt = datetime.utcfromtimestamp(value / 1000.0 if value > 1e12 else value)
+            dt = datetime.fromtimestamp(value / 1000.0 if value > 1e12 else value, timezone.utc).replace(tzinfo=None)
             return _to_uk_iso(dt)
         except Exception:
             return None

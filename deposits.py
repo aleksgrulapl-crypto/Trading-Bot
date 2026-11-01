@@ -13,7 +13,7 @@ import tempfile
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 
@@ -141,7 +141,7 @@ def _now_iso() -> str:
             return datetime.now(UK_TZ).isoformat()
         except Exception:
             pass
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
 
 
 def _atomic_write(path: str, data: Any) -> bool:
@@ -818,7 +818,7 @@ def _now_naive_uk() -> datetime:
             return datetime.now(UK_TZ).replace(tzinfo=None)
         except Exception:
             pass
-    return datetime.utcnow()
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _parse_entry_datetime(raw: Optional[str]) -> Optional[datetime]:
