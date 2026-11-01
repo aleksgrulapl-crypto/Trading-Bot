@@ -1330,6 +1330,14 @@ def landing():
 
 def refresh_public_snapshot() -> None:
     """Recompute and store the public landing-page figures (scheduled job)."""
+    # Record the daily balance and weekly close here too, so the public
+    # figures don't depend on the owner opening the dashboard.
+    try:
+        balance = (session.enrich_account(session.get_account() or {}) or {}).get("balance")
+        deposits.record_daily_balance_snapshot(balance)
+        deposits.record_weekly_close(balance)
+    except Exception:
+        logger.exception("dashboard: balance snapshot from scheduler failed")
     try:
         trades = normalize_trades(dedupe_trades(load_raw_log()))
         public_snapshot.write_snapshot(public_snapshot.build_snapshot(_trade_pnl_events(trades)))
