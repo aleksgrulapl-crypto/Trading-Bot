@@ -550,11 +550,14 @@ function closePosition(dealId) {
 
 function toggleTrail(dealId, enabled) {
     const errorBanner = document.getElementById('error-banner');
+    const gbpInput = document.getElementById(`trail-gbp-${dealId}`);
+    const body = { enabled: enabled };
+    if (gbpInput) { body.activation_gbp = gbpInput.value; }
 
     fetch(`/dashboard/trail/${encodeURIComponent(dealId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: enabled })
+        body: JSON.stringify(body)
     })
         .then(r => r.json())
         .then(data => {
@@ -563,6 +566,28 @@ function toggleTrail(dealId, enabled) {
             refreshDashboard();
         })
         .catch(err => console.error("Trail toggle error:", err));
+}
+
+function toggleTrading() {
+    const errorBanner = document.getElementById('error-banner');
+    const btn = document.getElementById('trading-switch-btn');
+    const currentlyOn = btn && btn.textContent.includes('ON');
+    if (currentlyOn && !window.confirm('Turn trading OFF? All new trades will be rejected until you switch it back on.')) {
+        return;
+    }
+
+    fetch('/dashboard/trading/toggle', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !currentlyOn })
+    })
+        .then(r => r.json())
+        .then(data => {
+            errorBanner.innerText = (data && data.message) || "Could not update trading switch.";
+            errorBanner.style.display = "block";
+            refreshDashboard();
+        })
+        .catch(err => console.error("Toggle trading error:", err));
 }
 
 function toggleEmailNotifications() {

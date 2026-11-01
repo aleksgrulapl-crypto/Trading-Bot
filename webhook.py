@@ -52,6 +52,7 @@ from trade_log import (
 from close_position import close_position as close_position_module
 import notifications
 import gating
+import trading_switch
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -768,6 +769,16 @@ def webhook():
     if alert.get("blocked"):
         logger.info("[cid=%s] Alert blocked: %s", cid, alert.get("reason"))
         return _ok_response({"status": "blocked", "reason": alert.get("reason"), "cid": cid})
+
+    if not trading_switch.is_enabled():
+        logger.info("[cid=%s] Trading switched OFF by owner; rejecting alert", cid)
+        gating.record_rejected({
+            "stock": alert.get("symbol"), "symbol": alert.get("symbol"),
+            "side": str(alert.get("action") or "").upper(), "timeframe": alert.get("timeframe"),
+            "tv_sl": alert.get("sl"), "tv_tp": alert.get("tp"),
+            "reason": "Trading switched OFF by owner",
+        })
+        return _ok_response({"status": "blocked", "reason": "trading_off", "cid": cid})
 
     if _is_trade_locked_now():
         logger.info("[cid=%s] New trade blocked by trade time lock (%s UK time)", cid, _trade_lock_windows_label())

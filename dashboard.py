@@ -30,6 +30,7 @@ import gating
 import notifications
 import public_snapshot
 import trail_settings
+import trading_switch
 from display_helpers import format_human
 from close_position import close_position as close_live_position
 from trade_log import (
@@ -1066,7 +1067,7 @@ def _build_request_context():
     try:
         if raw_positions:
             trail_settings.prune(p.get("dealId") or p.get("id") for p in positions if isinstance(p, dict))
-        trail_off = trail_settings.disabled_ids()
+        trail_all = trail_settings.all_settings()
         type_by_deal = {}
         for t in combined_raw:
             if t.get("status") == "OPEN" and t.get("dealId"):
@@ -1076,7 +1077,9 @@ def _build_request_context():
                 continue
             did = str(p.get("dealId") or p.get("id") or "")
             p["trade_type"] = type_by_deal.get(did, "Trader")
-            p["trail_enabled"] = did not in trail_off
+            rec = trail_all.get(did, {})
+            p["trail_enabled"] = bool(rec.get("enabled", False))
+            p["trail_activation_gbp"] = rec.get("activation_gbp")
     except Exception:
         logger.exception("dashboard: failed to annotate positions with trail state")
     combined_trades.sort(
@@ -1097,6 +1100,10 @@ def _build_request_context():
         )
     except Exception:
         logger.exception("dashboard: balance auto-detection failed")
+    try:
+        deposits.settle_stale_approved_withdrawals()
+    except Exception:
+        logger.exception("dashboard: stale withdrawal settlement failed")
 
     # Calendar-aligned Daily/Weekly/Monthly Return, based on the Balance
     # recorded at each period's start (00:00 today / this Monday / the 1st
@@ -1176,6 +1183,7 @@ def dashboard_home():
         is_owner=current_role() == "owner",
         email_notify_enabled=notifications.is_enabled(),
         email_notify_recipient=notifications.get_recipient(),
+        trading_enabled=trading_switch.is_enabled(),
     )
 
 
@@ -1203,6 +1211,7 @@ def dashboard_data():
             is_owner=current_role() == "owner",
             email_notify_enabled=notifications.is_enabled(),
             email_notify_recipient=notifications.get_recipient(),
+            trading_enabled=trading_switch.is_enabled(),
         )
         return jsonify({
             "html": html,
@@ -1441,6 +1450,10 @@ def refresh_public_snapshot() -> None:
     except Exception:
         logger.exception("dashboard: balance snapshot from scheduler failed")
     try:
+        deposits.settle_stale_approved_withdrawals()
+    except Exception:
+        logger.exception("dashboard: stale withdrawal settlement from scheduler failed")
+    try:
         trades = normalize_trades(dedupe_trades(load_raw_log()))
         public_snapshot.write_snapshot(public_snapshot.build_snapshot(_trade_pnl_events(trades)))
     except Exception:
@@ -1482,6 +1495,28 @@ def dashboard_investors():
         "crypto_eth_address": getattr(config, "INVESTOR_CRYPTO_ETH_ADDRESS", "") or "",
     }
 
+    role = current_role()
+    all_requests = deposits.list_withdrawal_requests_sorted()
+    my_name = _read_identity().get("name") if role == "investor" else None
+    if role == "owner":
+        visible_requests = all_requests
+    elif my_name:
+        visible_requests = [r for r in all_requests if deposits._same_name(r.get("investor"), my_name)]
+    else:
+        visible_requests = []
+    for r in visible_requests:
+        for key in ("created_at", "approved_at", "resolved_at"):
+            r[key + "_human"] = format_human(r.get(key)) or r.get(key)
+    open_withdrawals, closed_withdrawals = deposits.split_withdrawal_requests(visible_requests)
+
+    my_withdrawable = None
+    if my_name:
+        my_investor = deposits.canonical_investor_name(my_name, entries)
+        if my_investor:
+            my_withdrawable = deposits.withdrawable_summary(my_investor, entries, all_requests)
+            nxt = my_withdrawable.get("next_unlock")
+            my_withdrawable["next_unlock_human"] = nxt.strftime("%d %b %Y") if nxt else None
+
     return render_template(
         "investors.html",
         title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
@@ -1490,6 +1525,13 @@ def dashboard_investors():
         investor_rows=investor_rows,
         owner_name=owner_name,
         is_owner=is_owner_role,
+        is_investor_role=(role == "investor"),
+        open_withdrawals=open_withdrawals,
+        closed_withdrawals=closed_withdrawals,
+        withdrawal_investors=[n for n in investors if not (owner_name and deposits._same_name(n, owner_name))] if is_owner_role else [],
+        my_withdrawable=my_withdrawable,
+        lock_days=deposits.lock_days(),
+        auto_settle_days=float(getattr(config, "WITHDRAWAL_AUTO_SETTLE_DAYS", 3) or 0),
         pending_pledges=pending_pledges,
         completed_pledges=completed_pledges,
         payment_details=payment_details,
@@ -1564,6 +1606,70 @@ def dashboard_investors_delete_pledge(pledge_id: str):
         return jsonify({"status": "success"}), 200
     code = 404 if status == "not_found" else 400
     return jsonify({"status": "error", "message": status}), code
+
+
+_WITHDRAWAL_ERRORS = {"invalid_investor", "invalid_amount", "funds_locked", "amount_exceeds_unlocked",
+                      "invalid_transition", "invalid_method", "no_owner"}
+
+
+@dashboard.route("/dashboard/investors/withdrawal", methods=["POST"])
+@login_required
+def dashboard_investors_request_withdrawal():
+    """Request a withdrawal. Investors request their own capital (subject to
+    the lock period); the Owner can record a request on an investor's behalf."""
+    payload = request.form if request.form else (request.get_json(silent=True) or {})
+    role = current_role()
+    if role == "owner":
+        investor = payload.get("investor", "")
+        enforce_lock, requested_by = False, "owner"
+    elif role == "investor":
+        investor = _read_identity().get("name") or ""
+        enforce_lock, requested_by = True, "investor"
+    else:
+        return jsonify({"status": "error", "message": "forbidden_viewer_role"}), 403
+
+    ok, record, status = deposits.add_withdrawal_request(
+        investor, payload.get("amount"), payload.get("note", ""),
+        requested_by=requested_by, enforce_lock=enforce_lock,
+    )
+    if ok:
+        return jsonify({"status": "success", "request": record}), 200
+    return jsonify({"status": "error", "message": status}), (400 if status in _WITHDRAWAL_ERRORS else 500)
+
+
+def _withdrawal_action_response(ok, record, status):
+    if ok:
+        return jsonify({"status": "success", "request": record}), 200
+    code = 404 if status == "not_found" else (400 if status in _WITHDRAWAL_ERRORS else 500)
+    return jsonify({"status": "error", "message": status}), code
+
+
+@dashboard.route("/dashboard/investors/withdrawal/<request_id>/approve", methods=["POST"])
+@owner_required
+def dashboard_investors_approve_withdrawal(request_id: str):
+    return _withdrawal_action_response(*deposits.approve_withdrawal_request(request_id))
+
+
+@dashboard.route("/dashboard/investors/withdrawal/<request_id>/decline", methods=["POST"])
+@owner_required
+def dashboard_investors_decline_withdrawal(request_id: str):
+    return _withdrawal_action_response(*deposits.decline_withdrawal_request(request_id))
+
+
+@dashboard.route("/dashboard/investors/withdrawal/<request_id>/settle", methods=["POST"])
+@owner_required
+def dashboard_investors_settle_withdrawal(request_id: str):
+    """Owner paid the investor personally: transfer their units to the Owner."""
+    return _withdrawal_action_response(*deposits.complete_withdrawal_request(request_id, "owner"))
+
+
+@dashboard.route("/dashboard/investors/withdrawal/<request_id>/delete", methods=["POST"])
+@owner_required
+def dashboard_investors_delete_withdrawal(request_id: str):
+    ok, status = deposits.delete_withdrawal_request(request_id)
+    if ok:
+        return jsonify({"status": "success"}), 200
+    return jsonify({"status": "error", "message": status}), (404 if status == "not_found" else 500)
 
 
 @dashboard.route("/dashboard/investors/tier", methods=["POST"])
@@ -1901,6 +2007,27 @@ def dashboard_transactions_delete(entry_id: str):
     return jsonify({"status": "error", "message": status}), code
 
 
+@dashboard.route("/dashboard/trading/toggle", methods=["POST"])
+@owner_required
+def dashboard_toggle_trading():
+    """Owner-only master switch: OFF rejects every new trade until turned back ON."""
+    payload = request.get_json(silent=True) or request.form or {}
+    enabled = payload.get("enabled")
+    if enabled is None:
+        enabled = not trading_switch.is_enabled()
+    else:
+        enabled = str(enabled).strip().lower() in ("1", "true", "yes", "on")
+
+    if not trading_switch.set_enabled(enabled):
+        return jsonify({"status": "error", "message": "save_failed"}), 500
+    return jsonify({
+        "status": "success",
+        "enabled": enabled,
+        "message": f"Trading turned {'ON' if enabled else 'OFF'}."
+                   + ("" if enabled else " All new trades will be rejected."),
+    }), 200
+
+
 @dashboard.route("/dashboard/notifications/email/toggle", methods=["POST"])
 @owner_required
 def dashboard_toggle_email_notifications():
@@ -1928,7 +2055,8 @@ def dashboard_toggle_email_notifications():
 @dashboard.route("/dashboard/trail/<position_id>", methods=["POST"])
 @owner_required
 def dashboard_toggle_trail(position_id: str):
-    """Owner-only: switch SL trailing on/off for one live position."""
+    """Owner-only: switch the SL trail on/off (OFF by default) for one live
+    Trader position and optionally set the GBP profit level it starts at."""
     position_id = str(position_id or "").strip()
     if not position_id:
         return jsonify({"status": "error", "message": "missing_position_id"}), 400
@@ -1936,16 +2064,30 @@ def dashboard_toggle_trail(position_id: str):
     payload = request.get_json(silent=True) or {}
     enabled = payload.get("enabled")
     if enabled is None:
-        enabled = trail_settings.is_trail_disabled(position_id)
+        enabled = not trail_settings.is_trail_enabled(position_id)
     else:
         enabled = str(enabled).strip().lower() in ("1", "true", "yes", "on")
 
-    if not trail_settings.set_trail_enabled(position_id, enabled):
+    raw_gbp = payload.get("activation_gbp")
+    activation = None
+    clear_activation = False
+    if raw_gbp is not None and str(raw_gbp).strip() != "":
+        try:
+            activation = float(raw_gbp)
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "message": "invalid_activation_gbp"}), 400
+        if activation <= 0:
+            return jsonify({"status": "error", "message": "invalid_activation_gbp"}), 400
+    elif "activation_gbp" in payload:
+        clear_activation = True
+
+    if not trail_settings.set_trail(position_id, enabled=enabled, activation_gbp=activation, clear_activation=clear_activation):
         return jsonify({"status": "error", "message": "save_failed"}), 500
+    level = f" (starts at £{activation:g})" if activation else ""
     return jsonify({
         "status": "success",
         "enabled": enabled,
-        "message": f"SL Trail {'ON' if enabled else 'OFF'} for {position_id}.",
+        "message": f"SL Trail {'ON' if enabled else 'OFF'} for {position_id}{level}.",
     }), 200
 
 

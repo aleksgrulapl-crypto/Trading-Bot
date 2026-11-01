@@ -196,6 +196,31 @@ def _update_stop_level(deal_id: str, new_sl: float) -> bool:
 
 
 _sent_state: Dict[str, Dict[str, float]] = {}
+_tp_fail_ts: Dict[str, float] = {}
+
+
+def _remove_take_profit(deal_id: str) -> bool:
+    """Drop the TP on a position and remember that its SL now trails profit."""
+    cooldown = _cfg_float("TRAIL_FAILURE_COOLDOWN_SECONDS", 120.0)
+    last_fail = _tp_fail_ts.get(deal_id, 0.0)
+    if last_fail and time.monotonic() - last_fail < cooldown:
+        return False
+
+    resp = session.request("PUT", f"{API_POSITIONS}/{deal_id}", json={"profitLevel": None})
+    if not resp or getattr(resp, "status_code", 0) >= 400:
+        _tp_fail_ts[deal_id] = time.monotonic()
+        logger.warning(
+            "Failed to remove TP for %s → %s body=%s",
+            deal_id,
+            getattr(resp, "status_code", "no_response"),
+            (getattr(resp, "text", "") or "")[:300],
+        )
+        return False
+
+    _tp_fail_ts.pop(deal_id, None)
+    trail_settings.mark_tp_trail(deal_id)
+    logger.info("TP removed for %s; SL now trails profit", deal_id)
+    return True
 
 
 def _cfg_float(name: str, default: float) -> float:
@@ -262,10 +287,14 @@ def _throttle_allows(deal_id: str, side: str, new_sl: float,
 
 def run_trailing_sl() -> None:
     """
-    Continuous trailing stop:
-      - Activates when profit reaches >= TRAIL_ACTIVATION_PERC (e.g. 0.01 for 1%)
-        OR unrealized PnL reaches >= TRAIL_ACTIVATION_PNL_GBP, whichever
-        comes first.
+    Trailing stops:
+      - TP trail (every trade): at TP_TRAIL_TRIGGER_FRACTION of the way to the
+        TP, lock TP_TRAIL_LOCK_FRACTION of the profit in the SL, remove the TP,
+        then keep ratcheting the SL at that fraction of the profit.
+      - SL trail (only trades switched ON, i.e. Trader trades; OFF by default):
+        activates when profit reaches the Trader-chosen GBP level, or by
+        default >= TRAIL_ACTIVATION_PERC / TRAIL_ACTIVATION_PNL_GBP / the TP
+        fraction, whichever comes first.
       - Moves SL to entry + profit * TRAIL_SL_PERC (for longs)
         or entry - profit * TRAIL_SL_PERC (for shorts)
       - Re-evaluated on every scheduler tick so the SL keeps rising as price rises
@@ -277,7 +306,7 @@ def run_trailing_sl() -> None:
         logger.exception("Failed to fetch/enrich positions for trailing SL")
         return
 
-    disabled = trail_settings.disabled_ids()
+    settings = trail_settings.all_settings()
 
     for p in enriched:
         # deal id may be under 'dealId' or 'id'
@@ -285,10 +314,6 @@ def run_trailing_sl() -> None:
         if not deal_id:
             continue
         deal_id = str(deal_id)
-
-        if deal_id in disabled:
-            logger.debug("Skipping %s: SL trail switched off for this trade", deal_id)
-            continue
 
         direction = (p.get("direction") or "").strip()
         side = _normalize_side(direction)
@@ -320,28 +345,52 @@ def run_trailing_sl() -> None:
 
         profit_perc = profit / entry_price_f if entry_price_f != 0 else 0.0
 
-        # Activation threshold: trailing kicks in once EITHER the
-        # percentage-based threshold OR a flat GBP unrealized-PnL floor is
-        # reached, whichever happens first. The GBP floor lets lower-priced
-        # positions (where a given percentage move is a large dollar swing)
-        # start trailing without waiting on a big percentage move.
-        activation_perc = _activation_threshold_perc(p, side, entry_price_f)
-        pnl_gbp = _profit_in_gbp(p.get("profit", p.get("upl")), p)
-        pnl_floor_gbp = float(getattr(config, "TRAIL_ACTIVATION_PNL_GBP", 15.0) or 0.0)
-        meets_perc = profit_perc >= activation_perc
-        meets_pnl_floor = pnl_gbp is not None and pnl_floor_gbp > 0 and pnl_gbp >= pnl_floor_gbp
-        if not (meets_perc or meets_pnl_floor):
+        rec = settings.get(deal_id) or {}
+        tp_level = _extract_tp_level(p, side)
+        tp_active = bool(rec.get("tp_trail"))
+        tp_trigger = False
+        if not tp_active and tp_level is not None and entry_price_f > 0:
+            tp_move = abs(tp_level - entry_price_f)
+            trigger = _normalize_percent(getattr(config, "TP_TRAIL_TRIGGER_FRACTION", 0.90), 0.90)
+            tp_trigger = tp_move > 0 and trigger > 0 and (profit / tp_move) >= trigger
+        tp_mode = tp_active or tp_trigger
+        std_mode = bool(rec.get("enabled"))
+        if not (tp_mode or std_mode):
             continue
 
-        # Compute trail stop
-        trail_sl = None
+        candidates = []
         try:
-            trail_perc = _normalize_percent(getattr(config, "TRAIL_SL_PERC", TRAIL_SL_PERC), TRAIL_SL_PERC)
-            trail_perc = _effective_trail_percent(profit_perc, activation_perc, trail_perc)
-            if side == "long":
-                trail_sl = entry_price_f + profit * trail_perc
-            else:
-                trail_sl = entry_price_f - profit * trail_perc
+            if tp_mode:
+                lock = _normalize_percent(getattr(config, "TP_TRAIL_LOCK_FRACTION", 0.80), 0.80)
+                candidates.append(entry_price_f + profit * lock if side == "long" else entry_price_f - profit * lock)
+
+            if std_mode:
+                # Trader opt-in trail. A Trader-chosen GBP level replaces the
+                # default thresholds; otherwise EITHER the percentage OR the
+                # flat GBP floor activates it, whichever comes first.
+                pnl_gbp = _profit_in_gbp(p.get("profit", p.get("upl")), p)
+                custom_gbp = rec.get("activation_gbp")
+                try:
+                    custom_gbp = float(custom_gbp) if custom_gbp is not None else None
+                except (TypeError, ValueError):
+                    custom_gbp = None
+                if custom_gbp is not None and custom_gbp > 0:
+                    active = pnl_gbp is not None and pnl_gbp >= custom_gbp
+                    activation_perc = profit_perc * (custom_gbp / pnl_gbp) if active and pnl_gbp > 0 else 0.0
+                else:
+                    activation_perc = _activation_threshold_perc(p, side, entry_price_f)
+                    pnl_floor_gbp = float(getattr(config, "TRAIL_ACTIVATION_PNL_GBP", 15.0) or 0.0)
+                    meets_perc = profit_perc >= activation_perc
+                    meets_pnl_floor = pnl_gbp is not None and pnl_floor_gbp > 0 and pnl_gbp >= pnl_floor_gbp
+                    active = meets_perc or meets_pnl_floor
+                if active:
+                    trail_perc = _normalize_percent(getattr(config, "TRAIL_SL_PERC", TRAIL_SL_PERC), TRAIL_SL_PERC)
+                    trail_perc = _effective_trail_percent(profit_perc, activation_perc, trail_perc)
+                    candidates.append(entry_price_f + profit * trail_perc if side == "long" else entry_price_f - profit * trail_perc)
+
+            if not candidates:
+                continue
+            trail_sl = max(candidates) if side == "long" else min(candidates)
             trail_sl = _round_stop(float(trail_sl), p)
         except Exception:
             logger.exception("Failed to compute trail SL for %s", deal_id)
@@ -374,15 +423,18 @@ def run_trailing_sl() -> None:
 
         if not should_update:
             logger.debug("Trail SL not beneficial for %s: existing_sl=%s computed=%s", deal_id, existing_sl_f, trail_sl)
-            continue
-
-        if not _throttle_allows(deal_id, side, trail_sl, existing_sl_f, entry_price_f):
-            continue
-
-        # Apply the new stop level
-        if _update_stop_level(deal_id, trail_sl):
+            sl_secured = existing_sl_f is not None
+        elif not _throttle_allows(deal_id, side, trail_sl, existing_sl_f, entry_price_f):
+            sl_secured = False
+        elif _update_stop_level(deal_id, trail_sl):
             _record_sent(deal_id, trail_sl)
+            sl_secured = True
             logger.info("Trail SL updated → deal=%s dir=%s entry=%s current=%s newSL=%s", deal_id, direction, entry_price_f, current_price_f, trail_sl)
         else:
             _record_failure(deal_id)
+            sl_secured = False
             logger.warning("Failed to apply trail SL for deal %s", deal_id)
+
+        # TP trail: only drop the TP once the SL is already locking profit.
+        if tp_trigger and sl_secured:
+            _remove_take_profit(deal_id)

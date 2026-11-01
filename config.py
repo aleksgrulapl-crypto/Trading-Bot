@@ -165,15 +165,11 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/London")
 # Trade time lock: block opening new trades during a high-volatility window
 # (e.g. the US cash market open at 14:30 UK time), to reduce volatility
 # exposure and improve winrate. Hours are in 24h UK local time (TIMEZONE).
-#
-# TEMPORARY (2-month trial, started Oct 2026): the general daily lock windows
-# have been switched OFF while bot behaviour is monitored. Only the Monday
-# 08:30-09:30 UK window (weekend-reopen spikes/drops) and a daily 14:00-15:00
-# UK window (US market open volatility) remain active.
-# This is not a removal of the feature — to restore the previous behaviour,
-# set TRADE_LOCK_WINDOWS back to "08:00-09:30,13:00-15:00" (applies every day)
-# or set TRADE_LOCK_ENABLED=False to disable the lock entirely.
-TRADE_LOCK_ENABLED = os.getenv("TRADE_LOCK_ENABLED", "True").lower() in ("1", "true", "yes")
+# TEMPORARY: the trade time lock is switched OFF by default while the bot is
+# monitored (no windows block trading). To restore it, set
+# TRADE_LOCK_ENABLED=True (the windows below, e.g. "Mon:08:30-09:30,14:00-15:00",
+# then apply); nothing else needs to change.
+TRADE_LOCK_ENABLED = os.getenv("TRADE_LOCK_ENABLED", "False").lower() in ("1", "true", "yes")
 TRADE_LOCK_START_HOUR = int(os.getenv("TRADE_LOCK_START_HOUR", 14))
 TRADE_LOCK_END_HOUR = int(os.getenv("TRADE_LOCK_END_HOUR", 15))
 # Each window is "HH:MM-HH:MM" (applies every day) or "Day:HH:MM-HH:MM" (applies
@@ -282,7 +278,9 @@ SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "True").lower() in ("1", "true", "yes")
 # NOTIFY_EMAIL_TO above when this file doesn't exist yet.
 NOTIFY_SETTINGS_PATH = os.getenv("NOTIFY_SETTINGS_PATH", "/data/notify_settings.json")
 # Stores the hash/date used to auto-stamp "last updated" on the Terms of Service.
-TRAIL_DISABLED_PATH = os.getenv("TRAIL_DISABLED_PATH", "/data/trail_disabled.json")
+TRAIL_SETTINGS_PATH = os.getenv("TRAIL_SETTINGS_PATH", "/data/trail_settings.json")
+# Owner master switch for accepting new trades (see trading_switch.py).
+TRADING_SWITCH_PATH = os.getenv("TRADING_SWITCH_PATH", "/data/trading_switch.json")
 TERMS_VERSION_PATH = os.getenv("TERMS_VERSION_PATH", "/data/terms_version.json")
 
 # File paths and persistence
@@ -321,6 +319,18 @@ INVESTOR_PLEDGES_PATH = os.getenv("INVESTOR_PLEDGES_PATH", "/data/investor_pledg
 # range while the feature is new; raise/remove later as needed.
 PLEDGE_MIN_AMOUNT = float(os.getenv("PLEDGE_MIN_AMOUNT", 50.0))
 PLEDGE_MAX_AMOUNT = float(os.getenv("PLEDGE_MAX_AMOUNT", 500.0))
+
+# Investor withdrawal requests. A withdrawal is requested, then approved by
+# the Owner. Once approved, a matching drop in the live trading balance is
+# auto-detected and recorded. If no balance change shows up within
+# WITHDRAWAL_AUTO_SETTLE_DAYS (the Owner paid the investor personally), the
+# investor's units are transferred to the Owner at the current NAV instead
+# (0 disables the automatic fallback; the Owner can still settle manually).
+WITHDRAWAL_REQUESTS_PATH = os.getenv("WITHDRAWAL_REQUESTS_PATH", "/data/withdrawal_requests.json")
+WITHDRAWAL_AUTO_SETTLE_DAYS = float(os.getenv("WITHDRAWAL_AUTO_SETTLE_DAYS", 3))
+# Deposited capital is locked for this many days before it can be requested
+# back (applies to self-service requests, not to requests the Owner records).
+INVESTOR_LOCK_DAYS = int(os.getenv("INVESTOR_LOCK_DAYS", 30))
 
 # Automatic balance-change detection: on each dashboard refresh, the live
 # broker balance is compared against what trading PnL alone would explain
@@ -438,6 +448,12 @@ TRAIL_MAX_PERC = float(os.getenv("TRAIL_MAX_PERC", 0.95))
 TRAIL_MIN_STEP_PERC = float(os.getenv("TRAIL_MIN_STEP_PERC", 0.001))
 TRAIL_MIN_UPDATE_INTERVAL_SECONDS = float(os.getenv("TRAIL_MIN_UPDATE_INTERVAL_SECONDS", 60))
 TRAIL_FAILURE_COOLDOWN_SECONDS = float(os.getenv("TRAIL_FAILURE_COOLDOWN_SECONDS", 120))
+# TP trail (all trades): once a trade is TP_TRAIL_TRIGGER_FRACTION of the way
+# to its TP, the SL jumps to TP_TRAIL_LOCK_FRACTION of the profit at that
+# moment, the TP is removed, and the SL keeps ratcheting at that fraction of
+# the profit for as long as the trade keeps running.
+TP_TRAIL_TRIGGER_FRACTION = float(os.getenv("TP_TRAIL_TRIGGER_FRACTION", 0.90))
+TP_TRAIL_LOCK_FRACTION = float(os.getenv("TP_TRAIL_LOCK_FRACTION", 0.80))
 
 # Shared broker-positions cache / back-off (reduces timeouts under load).
 POSITIONS_CACHE_TTL_SECONDS = float(os.getenv("POSITIONS_CACHE_TTL_SECONDS", 3))

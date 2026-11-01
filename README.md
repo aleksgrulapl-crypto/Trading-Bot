@@ -62,6 +62,14 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `TRAIL_SL_PERC` | Portion of unrealized profit locked by trailing SL as soon as it activates (default `0.70` = `70%`) | ⬜ |
 | `TRAIL_TIGHTEN_STEP_PERC` | How much the locked-in portion ramps up per activation-multiple of profit beyond 1x, so the SL follows more closely the deeper a trade goes in-profit (default `0.20` = `20%` per step) | ⬜ |
 | `TRAIL_MAX_PERC` | Ceiling on the locked-in portion as profit keeps extending (default `0.95` = `95%`) | ⬜ |
+| `TP_TRAIL_TRIGGER_FRACTION` | TP trail (all trades): once a trade is this far to its TP (default `0.90`) the TP is removed and the SL starts trailing | ⬜ |
+| `TP_TRAIL_LOCK_FRACTION` | Share of the profit locked by the SL once the TP trail is active, ratcheting as the trade runs (default `0.80`) | ⬜ |
+| `TRAIL_SETTINGS_PATH` | JSON file holding per-trade trail state (default `/data/trail_settings.json`). The SL trail is Trader-only, OFF by default, and the Trader can set the GBP profit level it starts at (blank = standard `TRAIL_ACTIVATION_*` rules). TradingView/Hedge trades only use the TP trail. | ⬜ |
+| `TRADING_SWITCH_PATH` | JSON file for the Owner-only "Trading: ON/OFF" dashboard switch (default `/data/trading_switch.json`). OFF rejects every new trade (logged in the Owner-only Rejected list) until switched back ON. | ⬜ |
+| `WITHDRAWAL_REQUESTS_PATH` | Withdrawal requests (default `/data/withdrawal_requests.json`). Requested, then Owner-approved; a matching balance drop completes it automatically. | ⬜ |
+| `WITHDRAWAL_AUTO_SETTLE_DAYS` | Days after approval with no balance change before the investor's units are transferred to the Owner (Owner paid personally). Default `3`; `0` disables (use the "Paid by me" button). | ⬜ |
+| `INVESTOR_LOCK_DAYS` | Days a deposit is locked before it can be requested back (default `30`). Owner-recorded requests bypass the lock. | ⬜ |
+| `TRADE_LOCK_ENABLED` | Time-of-day trade lock. Temporarily OFF by default; set `True` to restore the windows in `TRADE_LOCK_WINDOWS` (default `Mon:08:30-09:30,14:00-15:00`). | ⬜ |
 | `NOTIFY_EMAIL_ENABLED` | Default for the "Receive Notifications" toggle: `True` emails on position open and close, `False` emails on close only (default `False`) | ⬜ |
 | `NOTIFY_EMAIL_TO` | Comma-separated recipient email address(es) | ⬜ |
 | `NOTIFY_EMAIL_FROM` | "From" address on the email (default: `SMTP_USERNAME`) | ⬜ |
