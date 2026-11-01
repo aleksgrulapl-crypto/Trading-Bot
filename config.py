@@ -28,6 +28,18 @@ CAPITAL_PASSWORD = os.getenv("CAPITAL_PASSWORD")
 # Debugging / logging control
 DEBUG_LOGS = os.getenv("DEBUG_LOGS", "False").lower() in ("1", "true", "yes")
 
+# The /debug/* and /raw* routes (which can place orders / close positions) are
+# disabled (404) unless DEBUG_ROUTES is truthy.
+DEBUG_ROUTES = os.getenv("DEBUG_ROUTES", "False").lower() in ("1", "true", "yes")
+
+# Shared secret required on every POST /webhook. Send it in the alert JSON as
+# "secret", as ?secret=... on the webhook URL, or in an X-Webhook-Secret
+# header. Empty = no check (a warning is logged at startup).
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
+
+# Dashboard login expires after this many minutes of inactivity.
+SESSION_TIMEOUT_MINUTES = int(os.getenv("SESSION_TIMEOUT_MINUTES", "30"))
+
 # Trading parameters
 # MAX_POSITIONS_PER_TICKER is an overall safety-net cap on concurrently open
 # trades for one ticker across all timeframes (3, matching the 3 timeframes

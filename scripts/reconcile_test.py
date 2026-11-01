@@ -16,6 +16,9 @@ import argparse
 import json
 import os
 import shutil
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from typing import Any, Dict, List, Optional
 
 DEFAULT_LOG_PATH = "/data/trade_log.json"

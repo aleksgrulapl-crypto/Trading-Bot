@@ -46,6 +46,9 @@ Copy the table below and export the values in your environment or a `.env` file:
 | `FX_USD_GBP` | USD→GBP conversion rate (default `0.78`) | ⬜ |
 | `TRADE_LOG_PATH` | Path for the trade-log JSON file (default `/data/trade_log.json`) | ⬜ |
 | `DEBUG_LOGS` | Set to `true` to enable verbose logging | ⬜ |
+| `DEBUG_ROUTES` | Set to `true` to enable the `/debug/*` and `/raw*` routes (they 404 otherwise). Keep off in production | ⬜ |
+| `WEBHOOK_SECRET` | Shared secret required on `POST /webhook`. Put it in the alert JSON as `"secret"`, on the URL as `?secret=...`, or in an `X-Webhook-Secret` header. Wrong/missing = 401. Unset = no check (warning logged). Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"` | ✅ |
+| `SESSION_TIMEOUT_MINUTES` | Dashboard login expires after this many minutes with no requests (default `30`) | ⬜ |
 | `PORT` | HTTP port (default `5000`) | ⬜ |
 | `RISK_PER_TRADE` | Fraction of equity risked per trade (default `0.50`) | ⬜ |
 | `LEVERAGE` | Leverage multiplier (default `5`) | ⬜ |
@@ -207,6 +210,10 @@ Each entry in `/data/trade_log.json` is a JSON object:
 
 ## Architecture
 
+**Trade flow:** TradingView alert → `POST /webhook` (secret check, parse, trading-switch and weekly-gate checks) → `sizing.py` (position size) → `order.py` (broker order) → `trade_log.py` (record). The scheduler then keeps the log honest: trailing stops, closed-trade sync, reconciliation with live positions, daily report and public snapshot.
+
+**Roles:** *Owner* (full control, trading switch, debug routes), *Viewer* (read-only) and *Investor* (own ROI/withdrawals); new sign-ups are *pending* until the Owner approves them.
+
 ```
 webhook.py          Flask app + webhook route + auth bootstrap
 ├── dashboard.py    Blueprint: /dashboard, /dashboard/data, /dashboard/close/<id>
@@ -217,7 +224,12 @@ webhook.py          Flask app + webhook route + auth bootstrap
 ├── session.py      Broker HTTP client + position enrichment
 ├── auth.py         Token auth + refresh
 ├── scheduler.py    Background jobs (daily report, trailing stops)
+├── deposits.py     Investor deposits, units, withdrawals, balance history
+├── gating.py       Weekly-return gate and Rejected log
+├── trading_switch.py  Owner Trading ON/OFF switch
 └── config.py       All configuration constants + env overrides
+tests/              pytest suite (one file per area)
+scripts/            Optional maintenance tools (dry-run by default): merge/compare duplicates, reconcile, import from Capital
 ```
 
 ---
@@ -226,21 +238,24 @@ webhook.py          Flask app + webhook route + auth bootstrap
 
 ```bash
 pip install pytest
-pytest reconcile_test.py -v
+python -m pytest -q
 ```
+
+The same command runs in CI on every push and pull request.
 
 ---
 
-## Deployment (Heroku / Render / Railway)
+## Deployment (Heroku / Render / Railway / Docker)
 
 1. Set all required environment variables in your platform's dashboard.
 2. Ensure the `/data` volume is mounted as a persistent disk so `trade_log.json` survives restarts.
-3. The `Procfile` already contains the correct worker command.
+3. The `Procfile` and `Dockerfile` run the same single-worker gunicorn command (one worker so the scheduler runs once).
 
 ---
 
 ## Security Notes
 
-- Set `DASHBOARD_OWNER_PASSWORD` and `SECRET_KEY` before deploying (there are no default passwords).
+- Set `DASHBOARD_OWNER_PASSWORD`, `SECRET_KEY` and `WEBHOOK_SECRET` before deploying (there are no default passwords).
 - Never commit credentials to the repository.
-- The `/debug/*` endpoints should be restricted or disabled in production.
+- `DEBUG_ROUTES` must stay off in production.
+- Dashboard logins expire after `SESSION_TIMEOUT_MINUTES` (default 30) of inactivity.

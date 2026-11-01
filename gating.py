@@ -9,7 +9,7 @@ import logging
 import math
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import config
@@ -163,7 +163,7 @@ def record_rejected(entry: Dict[str, Any], path: Optional[str] = None) -> bool:
     Owner-only rejected log."""
     path = path or _path()
     entry = dict(entry)
-    entry.setdefault("time_rejected", datetime.utcnow().isoformat(timespec="seconds") + "Z")
+    entry.setdefault("time_rejected", datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds") + "Z")
     with _rejected_lock:
         rows = load_rejected(path)
         rows.append(entry)

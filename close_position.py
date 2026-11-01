@@ -67,7 +67,7 @@ def _parse_entry_dt(value):
     from datetime import datetime, timezone
     if isinstance(value, (int, float)):
         try:
-            return datetime.utcfromtimestamp(value / 1000.0 if value > 1e12 else value)
+            return datetime.fromtimestamp(value / 1000.0 if value > 1e12 else value, timezone.utc).replace(tzinfo=None)
         except Exception:
             return None
     s = str(value)

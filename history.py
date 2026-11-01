@@ -4,7 +4,7 @@
 
 import session
 from trade_log import save_log, load_raw_log
-from datetime import datetime
+from datetime import datetime, timezone
 from config import API_HISTORY_TRANSACTIONS
 
 
@@ -28,9 +28,9 @@ def _parse_capital_timestamp(value):
         try:
             # Milliseconds
             if value > 1e12:
-                dt = datetime.utcfromtimestamp(value / 1000.0)
+                dt = datetime.fromtimestamp(value / 1000.0, timezone.utc).replace(tzinfo=None)
             else:
-                dt = datetime.utcfromtimestamp(value)
+                dt = datetime.fromtimestamp(value, timezone.utc).replace(tzinfo=None)
             return dt.strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             return None

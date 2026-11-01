@@ -16,6 +16,7 @@ import uuid
 import json
 import logging
 import functools
+import hmac
 import threading
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -312,8 +313,14 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=bool(os.getenv("RENDER")),
-    PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 7,
+    # Sliding window: the cookie is re-issued on each request, so the login
+    # lapses after this long without any request.
+    PERMANENT_SESSION_LIFETIME=60 * config.SESSION_TIMEOUT_MINUTES,
 )
+if not config.WEBHOOK_SECRET:
+    logging.getLogger("webhook").warning(
+        "WEBHOOK_SECRET is not set; POST /webhook accepts unauthenticated alerts."
+    )
 if os.getenv("RENDER"):
     # Render terminates TLS in front of the app; trust one proxy hop so the
     # client IP (used for login throttling) and scheme are correct.
@@ -386,6 +393,18 @@ def _safe_get_json(raw_text: str) -> Any:
         return json.loads(raw_text)
     except Exception:
         return raw_text
+
+
+def _webhook_secret_ok(parsed_input: Any) -> bool:
+    expected = config.WEBHOOK_SECRET
+    if not expected:
+        return True
+    supplied = request.headers.get("X-Webhook-Secret") or request.args.get("secret")
+    if not supplied and isinstance(parsed_input, dict):
+        supplied = parsed_input.get("secret")
+    if not supplied:
+        return False
+    return hmac.compare_digest(str(supplied).encode(), expected.encode())
 
 
 def _ok_response(payload: Dict[str, Any], code: int = 200):
@@ -747,6 +766,11 @@ def webhook():
         return _ok_response({"status": "error", "message": "Empty body received", "cid": cid})
 
     parsed_input = _safe_get_json(raw)
+    if not _webhook_secret_ok(parsed_input):
+        logger.warning("[cid=%s] Webhook rejected: missing or invalid secret", cid)
+        return jsonify({"status": "error", "message": "unauthorized", "cid": cid}), 401
+    if isinstance(parsed_input, dict):
+        parsed_input.pop("secret", None)
     try:
         alert = parse_tradingview_alert(parsed_input)
     except Exception:
@@ -937,6 +961,14 @@ def webhook():
 # ---------------------------------------------------------------------------
 # Debug and utility routes
 # ---------------------------------------------------------------------------
+@app.before_request
+def _gate_debug_routes():
+    path = request.path
+    if (path.startswith("/debug/") or path == "/raw" or path.startswith("/raw/")) and not config.DEBUG_ROUTES:
+        return jsonify({"status": "error", "message": "not_found"}), 404
+    return None
+
+
 @app.route("/debug/tokens")
 @_dashboard_login_required
 def debug_tokens():

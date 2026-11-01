@@ -106,5 +106,16 @@
     </div>
   </section>
   {% endif %}
+  {% if identity.logged_in %}
+  <section class="card lp-cta">
+    <div class="lp-actions">
+      {% if identity.role == 'pending' %}
+      <a class="lp-btn lp-btn-primary" href="/dashboard/pending">View registration status</a>
+      {% else %}
+      <a class="lp-btn lp-btn-primary" href="/dashboard">Go to dashboard</a>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
 </div>
 {% endblock %}
