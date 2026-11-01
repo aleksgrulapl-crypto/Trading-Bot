@@ -4,8 +4,14 @@
 <div class="grid-full">
   <div class="card">
     <div class="card-header">
-      <div class="card-title">Become an Investor</div>
+      <div class="card-title">{{ 'Make a deposit' if is_existing_investor else 'Become an Investor' }}</div>
     </div>
+    {% if is_existing_investor %}
+    <p class="small" style="margin-bottom: 10px;">
+      Add to your existing investment: enter the amount, pledge it, then send payment using the
+      details below. Each deposit is <strong>locked for {{ lock_days }} days</strong>.
+    </p>
+    {% else %}
     <p class="small" style="margin-bottom: 10px;">
       Support this project in exchange for a share of trading profits, allocated pro-rata to
       your contributed capital (see the tier legend below). This is <strong>not</strong> a
@@ -16,6 +22,52 @@
       Deposited funds are <strong>locked for {{ lock_days }} days</strong>; after that you can
       request a withdrawal, which the Owner must approve.
     </p>
+    {% endif %}
+
+    <p class="small" style="margin: 0 0 10px;">
+      Pledges must be between £{{ "%.0f"|format(pledge_min_amount) }} and £{{ "%.0f"|format(pledge_max_amount) }}.
+    </p>
+    <form id="pledge-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 6px;">
+      {% if is_existing_investor %}
+      <input type="hidden" id="pledge-name" value="{{ prefill_name }}">
+      {% else %}
+      <div>
+        <label class="small" for="pledge-name">Your name</label><br>
+        <input type="text" id="pledge-name" maxlength="100" required placeholder="e.g. Jane Smith"
+               value="{{ prefill_name or '' }}" {% if prefill_name %}readonly{% endif %}
+               style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 160px;">
+      </div>
+      <div>
+        <label class="small" for="pledge-tier">Investor type</label><br>
+        <select id="pledge-tier"
+                style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border);">
+          <option value="tradingview" selected>TradingView only</option>
+          <option value="full">Full Investor (+ Trader)</option>
+        </select>
+      </div>
+      {% endif %}
+      <div>
+        <label class="small" for="pledge-amount">Amount (£)</label><br>
+        <input type="number" step="0.01" min="{{ pledge_min_amount }}" max="{{ pledge_max_amount }}" id="pledge-amount" required placeholder="{{ "%.0f"|format(pledge_min_amount) }}-{{ "%.0f"|format(pledge_max_amount) }}"
+               style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 120px;">
+      </div>
+      <div style="flex: 1; min-width: 160px;">
+        <label class="small" for="pledge-note">Note (optional)</label><br>
+        <input type="text" id="pledge-note" maxlength="500" placeholder="Optional note"
+               style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 100%;">
+      </div>
+      <div>
+        <button type="submit">Pledge</button>
+      </div>
+    </form>
+    {% if not is_existing_investor %}
+    <p class="small" style="margin: 0 0 6px;">
+      <strong>TradingView only:</strong> your share follows the automated TradingView/Hedge trades.
+      <strong>Full Investor:</strong> also shares in the Owner's discretionary Trader trades.
+      Your NAV and ROI breakdown are based on this choice.
+    </p>
+    {% endif %}
+    <div class="small" id="pledge-status" style="margin-bottom: 14px; min-height: 1em;"></div>
 
     <div style="display: flex; flex-wrap: wrap; gap: 24px; margin-bottom: 14px;">
       {% if payment_details.bank_beneficiary or payment_details.bank_account_number %}
@@ -41,30 +93,6 @@
       {% endif %}
     </div>
 
-    <p class="small" style="margin: 0 0 10px;">
-      Pledges must be between £{{ "%.0f"|format(pledge_min_amount) }} and £{{ "%.0f"|format(pledge_max_amount) }}.
-    </p>
-    <form id="pledge-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;">
-      <div>
-        <label class="small" for="pledge-name">Your name</label><br>
-        <input type="text" id="pledge-name" maxlength="100" required placeholder="e.g. Jane Smith"
-               style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 160px;">
-      </div>
-      <div>
-        <label class="small" for="pledge-amount">Amount (£)</label><br>
-        <input type="number" step="0.01" min="{{ pledge_min_amount }}" max="{{ pledge_max_amount }}" id="pledge-amount" required placeholder="{{ "%.0f"|format(pledge_min_amount) }}-{{ "%.0f"|format(pledge_max_amount) }}"
-               style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 120px;">
-      </div>
-      <div style="flex: 1; min-width: 160px;">
-        <label class="small" for="pledge-note">Note (optional)</label><br>
-        <input type="text" id="pledge-note" maxlength="500" placeholder="Optional note"
-               style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 100%;">
-      </div>
-      <div>
-        <button type="submit">Pledge</button>
-      </div>
-    </form>
-    <div class="small" id="pledge-status" style="margin-top: 8px;"></div>
   </div>
 
   {% if is_owner %}
@@ -315,6 +343,8 @@ document.getElementById('pledge-form').addEventListener('submit', function (evt)
     const name = document.getElementById('pledge-name').value.trim();
     const amount = document.getElementById('pledge-amount').value;
     const note = document.getElementById('pledge-note').value.trim();
+    const tierEl = document.getElementById('pledge-tier');
+    const tier = tierEl ? tierEl.value : '';
     const pledgeErrorMessages = {
         invalid_investor: "Please enter your name.",
         invalid_amount: "Please enter a valid amount.",
@@ -324,7 +354,7 @@ document.getElementById('pledge-form').addEventListener('submit', function (evt)
     fetch('/dashboard/investors/pledge', {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ investor: name, amount: amount, note: note })
+        body: JSON.stringify({ investor: name, amount: amount, note: note, tier: tier })
     })
         .then(r => r.json())
         .then(data => {
@@ -336,7 +366,8 @@ document.getElementById('pledge-form').addEventListener('submit', function (evt)
             }
             statusEl.innerText = "Thanks — your pledge has been recorded. Send payment using the details above.";
             statusEl.style.color = "var(--good, #4caf50)";
-            document.getElementById('pledge-form').reset();
+            document.getElementById('pledge-amount').value = '';
+            document.getElementById('pledge-note').value = '';
         })
         .catch(err => {
             statusEl.innerText = "Pledge error: " + err.message;

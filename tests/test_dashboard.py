@@ -319,7 +319,7 @@ class TestDashboardRoles:
     def test_anonymous_visitor_is_viewer_with_limited_positions(self, monkeypatch):
         client = self._viewer_client(monkeypatch)
         html = client.get("/dashboard").get_data(as_text=True)
-        assert "AAPL" in html and "150.5" not in html and ">Side<" not in html and ">Entry<" not in html
+        assert "AAPL" in html and "150.5" not in html and ">Entry<" not in html and ">Size<" not in html
         assert "316.79" not in html and "1234" not in html and "987" not in html
         assert ">Size<" not in html and ">SL / TP<" not in html
         assert ">Trade Log<" not in html and ">Analytics<" not in html
@@ -329,7 +329,7 @@ class TestDashboardRoles:
         client = self._viewer_client(monkeypatch)
         data = client.get("/dashboard/data").get_json()
         assert data["account"] == {}
-        assert data["positions"] == [{"ticker": "AAPL"}]
+        assert data["positions"] == [{"ticker": "AAPL", "direction": "Long"}]
 
     def test_viewer_cannot_open_trade_log_or_analytics(self, monkeypatch):
         client = self._viewer_client(monkeypatch)

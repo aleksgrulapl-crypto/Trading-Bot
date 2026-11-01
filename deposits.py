@@ -421,8 +421,11 @@ def save_pledges(pledges: List[Dict[str, Any]], path: str = PLEDGES_PATH) -> boo
     return ok
 
 
-def add_pledge(name: str, amount: Any, note: str = "", path: str = PLEDGES_PATH) -> Tuple[bool, Optional[Dict[str, Any]], str]:
-    """Record a new "intent to invest" pledge. Returns (ok, record, status)."""
+def add_pledge(name: str, amount: Any, note: str = "", path: str = PLEDGES_PATH, tier: Optional[str] = None) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """Record a new "intent to invest" pledge. Returns (ok, record, status).
+
+    *tier* ("tradingview" or "full") is the investor type chosen by a new
+    investor; it is applied once the pledge is confirmed. Ignored if invalid."""
     investor_name = str(name or "").strip()
     if not investor_name or is_backend_investor(investor_name):
         return False, None, "invalid_investor"
@@ -445,6 +448,9 @@ def add_pledge(name: str, amount: Any, note: str = "", path: str = PLEDGES_PATH)
         "status": "pending",
         "created_at": _now_iso(),
     }
+    chosen_tier = str(tier or "").strip().lower()
+    if chosen_tier in VALID_TIERS:
+        record["tier"] = chosen_tier
 
     with _pledges_lock:
         pledges = load_pledges(path)
@@ -500,6 +506,9 @@ def set_pledge_status(
                     pledge.pop("resolved_by", None)
                 if not save_pledges(pledges, path):
                     return False, None, "save_failed"
+                pledge_tier = str(pledge.get("tier") or "")
+                if normalized_status == "confirmed" and pledge_tier in VALID_TIERS and pledge.get("investor"):
+                    set_investor_tier(pledge["investor"], pledge_tier)
                 return True, pledge, "updated"
         return False, None, "not_found"
 
