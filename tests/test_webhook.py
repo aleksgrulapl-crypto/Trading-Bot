@@ -466,8 +466,11 @@ class TestWebhookProcessing:
         assert body.get("status") == "ok"
         assert called["args"] == ("INTC", "buy", 1.0, "tradingview")
 
-    def test_same_ticker_signal_is_blocked_when_sizing_capacity_is_exhausted(self, monkeypatch):
+    def test_same_ticker_signal_is_blocked_when_sizing_capacity_is_exhausted(self, monkeypatch, tmp_path):
         import webhook
+        import gating
+
+        monkeypatch.setattr(gating.config, "REJECTED_TRADES_PATH", str(tmp_path / "rej.json"), raising=False)
 
         monkeypatch.setattr(
             webhook,
