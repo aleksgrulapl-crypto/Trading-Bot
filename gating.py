@@ -171,4 +171,8 @@ def record_rejected(entry: Dict[str, Any], path: Optional[str] = None) -> bool:
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         except Exception:
             pass
-        return _atomic_write(path, rows)
+        try:
+            return _atomic_write(path, rows)
+        except Exception:
+            logger.exception("gating: failed to write rejected trades log")
+            return False
