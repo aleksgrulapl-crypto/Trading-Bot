@@ -941,6 +941,12 @@ def webhook():
         )
         if size_info.get("blocked"):
             logger.info("[cid=%s] Sizing blocked: %s", cid, size_info.get("reason"))
+            gating.record_rejected({
+                "stock": epic, "symbol": symbol, "side": str(action).upper(), "timeframe": timeframe,
+                "entry_price": entry_price, "tv_sl": alert_sl, "tv_tp": alert_tp,
+                "applied_sl": sl_price, "applied_tp": tp_price,
+                "reason": f"Sizing blocked: {size_info.get('reason')}",
+            })
             return _ok_response({"status": "blocked", "reason": size_info.get("reason"), "sl": sl_price, "tp": tp_price, "entry": entry_price, "cid": cid})
 
         size = size_info.get("size")
