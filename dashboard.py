@@ -1025,18 +1025,24 @@ def _build_request_context():
     Returns:
         dict with keys: account, positions, combined_trades, analytics
     """
-    # Force fresh account cache for this request
+    # Force fresh account + positions for this request, fetched concurrently so
+    # the header balance and the live positions come from the same instant.
     try:
         session._cache["account"]["ts"] = 0
+        session._positions_cache["ts"] = 0.0
     except Exception:
         logger.debug("session cache not initialized")
 
-    raw_positions = session.get_positions()
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        positions_future = pool.submit(session.get_positions)
+        account_future = pool.submit(session.get_account)
+        raw_positions = positions_future.result()
+        raw_account = account_future.result() or {}
     if raw_positions is None:
         # Broker call timed out/failed: show the last known positions rather
         # than an empty list that makes live trades look closed.
         raw_positions = session.last_known_positions()
-    raw_account = session.get_account() or {}
 
     positions = session.enrich_positions(raw_positions or [])
     account = session.enrich_account(raw_account)
@@ -1222,24 +1228,6 @@ def dashboard_data():
             "message": "Failed to render dashboard partial",
             "details": str(exc),
         }), 500
-
-
-@dashboard.route("/dashboard/account")
-@login_required
-def dashboard_account():
-    """Lightweight owner-only account snapshot for fast header balance updates.
-
-    Uses session.get_account()'s short TTL cache, so frequent polling does not
-    add broker load beyond one account call per cache window.
-    """
-    if current_role() != "owner":
-        return jsonify({"error": "forbidden"}), 403
-    try:
-        account = session.enrich_account(session.get_account() or {}) or {}
-        return jsonify({"account": account})
-    except Exception as exc:
-        logger.exception("dashboard/account failed: %s", exc)
-        return jsonify({"error": "account_failed"}), 500
 
 
 TRADES_PER_PAGE = 20
