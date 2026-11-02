@@ -1224,6 +1224,24 @@ def dashboard_data():
         }), 500
 
 
+@dashboard.route("/dashboard/account")
+@login_required
+def dashboard_account():
+    """Lightweight owner-only account snapshot for fast header balance updates.
+
+    Uses session.get_account()'s short TTL cache, so frequent polling does not
+    add broker load beyond one account call per cache window.
+    """
+    if current_role() != "owner":
+        return jsonify({"error": "forbidden"}), 403
+    try:
+        account = session.enrich_account(session.get_account() or {}) or {}
+        return jsonify({"account": account})
+    except Exception as exc:
+        logger.exception("dashboard/account failed: %s", exc)
+        return jsonify({"error": "account_failed"}), 500
+
+
 TRADES_PER_PAGE = 20
 
 _CLOSED_SORT_KEYS = {

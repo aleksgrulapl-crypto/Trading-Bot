@@ -666,6 +666,33 @@ function updateExitPrice(tradeIndex, newExitPrice) {
         .catch(err => console.error("Update exit price error:", err));
 }
 
+function renderHeaderAccount(account) {
+    const header = document.getElementById('header-account');
+    if (!header || !account) return;
+    const pnl = account.pnl;
+    const pnlColor = (pnl !== null && pnl !== undefined && pnl >= 0) ? 'var(--success)' : 'var(--danger)';
+    header.innerHTML =
+        `Equity: ${account.equity ?? '—'} · ` +
+        `Balance: ${account.balance ?? '—'} · ` +
+        `PnL: <span style="font-weight:700; color:${pnlColor}">` +
+        `${pnl ?? '—'}</span> · ` +
+        `Available: ${account.available ?? '—'}`;
+}
+
+{% if role == 'owner' %}
+let accountPollBusy = false;
+function refreshAccountHeader() {
+    if (accountPollBusy || document.hidden) return;
+    accountPollBusy = true;
+    fetch('/dashboard/account?_=' + Date.now())
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data && data.account) renderHeaderAccount(data.account); })
+        .catch(() => {})
+        .finally(() => { accountPollBusy = false; });
+}
+setInterval(refreshAccountHeader, 3000);
+{% endif %}
+
 function refreshDashboard() {
     const errorBanner = document.getElementById('error-banner');
 
@@ -719,13 +746,13 @@ function refreshDashboard() {
 updateUkClock();
 setInterval(updateUkClock, 1000);
 
-// Start refreshing after 8 seconds on first load, then every 5 seconds
+// Start refreshing shortly after first load, then every 5 seconds
 if (isFirstLoad) {
     setTimeout(() => {
         refreshDashboard();
         isFirstLoad = false;
         setInterval(refreshDashboard, 5000);
-    }, 8000);
+    }, 1500);
 }
 </script>
 
