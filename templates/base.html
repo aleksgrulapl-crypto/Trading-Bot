@@ -519,6 +519,7 @@
 </script>
 <script>
 let isFirstLoad = true;
+let dashboardBusy = false;
 
 function updateUkClock() {
     const clock = document.getElementById('uk-clock-value');
@@ -679,21 +680,9 @@ function renderHeaderAccount(account) {
         `Available: ${account.available ?? '—'}`;
 }
 
-{% if role == 'owner' %}
-let accountPollBusy = false;
-function refreshAccountHeader() {
-    if (accountPollBusy || document.hidden) return;
-    accountPollBusy = true;
-    fetch('/dashboard/account?_=' + Date.now())
-        .then(r => r.ok ? r.json() : null)
-        .then(data => { if (data && data.account) renderHeaderAccount(data.account); })
-        .catch(() => {})
-        .finally(() => { accountPollBusy = false; });
-}
-setInterval(refreshAccountHeader, 3000);
-{% endif %}
-
 function refreshDashboard() {
+    if (dashboardBusy) return;
+    dashboardBusy = true;
     const errorBanner = document.getElementById('error-banner');
 
     const targets = [
@@ -701,11 +690,11 @@ function refreshDashboard() {
         { container: 'trade-log-inner', endpoint: '/dashboard/trades/data' },
     ].filter(t => document.getElementById(t.container));
 
-    if (!targets.length) return;
+    if (!targets.length) { dashboardBusy = false; return; }
 
-    targets.forEach(target => {
+    Promise.all(targets.map(target => {
         const qs = target.container === 'trade-log-inner' ? window.location.search.replace(/^\?/, '') + '&' : '';
-        fetch(`${target.endpoint}?${qs}_=` + Date.now())
+        return fetch(`${target.endpoint}?${qs}_=` + Date.now())
             .then(r => {
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 return r.json();
@@ -716,16 +705,8 @@ function refreshDashboard() {
                     if (container) {
                         container.innerHTML = data.html;
                     }
-                    const header = document.getElementById('header-account');
-                    if (header && data.account && {{ 'true' if role == 'owner' else 'false' }}) {
-                        const pnl = data.account.pnl;
-                        const pnlColor = (pnl !== null && pnl !== undefined && pnl >= 0) ? 'var(--success)' : 'var(--danger)';
-                        header.innerHTML =
-                            `Equity: ${data.account.equity ?? '—'} · ` +
-                            `Balance: ${data.account.balance ?? '—'} · ` +
-                            `PnL: <span style="font-weight:700; color:${pnlColor}">` +
-                            `${pnl ?? '—'}</span> · ` +
-                            `Available: ${data.account.available ?? '—'}`;
+                    if (data.account && {{ 'true' if role == 'owner' else 'false' }}) {
+                        renderHeaderAccount(data.account);
                     }
                     errorBanner.style.display = "none";
                 } else if (data && data.error) {
@@ -740,18 +721,18 @@ function refreshDashboard() {
                 errorBanner.innerText = "Dashboard refresh error: " + err.message;
                 errorBanner.style.display = "block";
             });
-    });
+    })).finally(() => { dashboardBusy = false; });
 }
 
 updateUkClock();
 setInterval(updateUkClock, 1000);
 
-// Start refreshing shortly after first load, then every 5 seconds
+// Start refreshing shortly after first load, then every 3 seconds
 if (isFirstLoad) {
     setTimeout(() => {
         refreshDashboard();
         isFirstLoad = false;
-        setInterval(refreshDashboard, 5000);
+        setInterval(refreshDashboard, 3000);
     }, 1500);
 }
 </script>
