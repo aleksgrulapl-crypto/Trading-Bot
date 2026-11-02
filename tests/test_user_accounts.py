@@ -1,4 +1,4 @@
-"""Tests for registered user accounts and the signed-session login flow."""
+﻿"""Tests for registered user accounts and the signed-session login flow."""
 import pytest
 from flask import Flask
 
@@ -230,6 +230,22 @@ def test_password_reset_flow_is_single_use(env, sent):
     assert client.get(path).status_code == 400
     assert env().post("/dashboard/login", data={"username": "jane@example.com", "password": "brand-new-pass1"}).status_code == 302
 
+
+def test_owner_can_send_reset_link_to_user(env, sent):
+    _register(env())
+    jane = users.list_users()[0]
+    sent.clear()
+    assert env().post(f"/dashboard/users/{jane['id']}/send-reset").status_code in (401, 403)
+    assert sent == []
+
+    owner = env()
+    owner.post("/dashboard/login", data={"username": "owner", "password": "owner-pw-123"})
+    resp = owner.post(f"/dashboard/users/{jane['id']}/send-reset")
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("reset_sent=1")
+    path = _reset_link(sent)
+    assert sent[-1][0] == "jane@example.com"
+    assert env().get(path).status_code == 200
+    assert owner.post("/dashboard/users/missing/send-reset").headers["Location"].endswith("reset_sent=0")
 
 def test_forgot_does_not_reveal_unknown_accounts(env, sent):
     client = env()

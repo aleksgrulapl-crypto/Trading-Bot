@@ -1713,6 +1713,7 @@ def dashboard_users():
         account=_page_account(),
         user_rows=rows,
         pending_count=sum(1 for u in rows if u.get("role") == "pending"),
+        reset_sent=request.args.get("reset_sent"),
     )
 
 
@@ -1729,6 +1730,24 @@ def dashboard_users_set_role(user_id: str):
             return jsonify({"status": "success"}), 200
         return jsonify({"status": "error", "message": status}), (404 if status == "not_found" else 400)
     return redirect("/dashboard/users")
+
+
+@dashboard.route("/dashboard/users/<user_id>/send-reset", methods=["POST"])
+@owner_required
+def dashboard_users_send_reset(user_id: str):
+    """Owner-only: email a password reset link directly to a user."""
+    user = users.get_user(user_id)
+    if not user:
+        if request.is_json:
+            return jsonify({"status": "error", "message": "not_found"}), 404
+        return redirect("/dashboard/users?reset_sent=0")
+    link = f"{_public_base_url()}/dashboard/reset/{_make_reset_token(user['id'])}"
+    ok = account_emails.send_password_reset(
+        user["name"], user["email"], link, RESET_TOKEN_MAX_AGE_SECONDS // 60,
+    )
+    if request.is_json:
+        return jsonify({"status": "success" if ok else "error"}), (200 if ok else 502)
+    return redirect(f"/dashboard/users?reset_sent={1 if ok else 0}")
 
 
 @dashboard.route("/dashboard/users/<user_id>/delete", methods=["POST"])

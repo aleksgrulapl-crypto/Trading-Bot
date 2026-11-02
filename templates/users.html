@@ -6,6 +6,8 @@
     <div class="card-header">
       <div class="card-title">Users{% if pending_count %} · {{ pending_count }} awaiting approval{% endif %}</div>
     </div>
+    {% if reset_sent == '1' %}<div class="small" style="margin-bottom:8px;">Password reset link sent.</div>
+    {% elif reset_sent == '0' %}<div class="small" style="margin-bottom:8px;">Could not send the reset link. Check the email settings.</div>{% endif %}
     {% if user_rows %}
     <table style="width:100%; border-collapse:collapse;">
       <thead>
@@ -34,6 +36,10 @@
               <input type="hidden" name="role" value="viewer"><button type="submit">Downgrade to viewer</button>
             </form>
             {% endif %}
+            <form method="POST" action="/dashboard/users/{{ u.id }}/send-reset" style="display:inline;"
+                  onsubmit="return confirm('Email a password reset link to {{ u.email }}?');">
+              <button type="submit">Send reset link</button>
+            </form>
             <form method="POST" action="/dashboard/users/{{ u.id }}/delete" style="display:inline;"
                   onsubmit="return confirm('Delete this user?');">
               <button type="submit">{{ 'Reject' if u.role == 'pending' else 'Delete' }}</button>

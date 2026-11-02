@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block content %}
 <div class="analytics-wrap">
@@ -6,7 +6,28 @@
     <div class="card-header">
       <div class="card-title">FAQ</div>
     </div>
-    <div class="small">Frequently asked questions coming soon.</div>
+    {% set faqs = [
+      ("What is AGC Trader?", "AGC Trader is a private, pre-commercial automated trading project. It places trades through a broker based on signals from the Owner's strategy and shows the results on this dashboard."),
+      ("Is this regulated, and is my capital guaranteed?", "No. It is not a regulated investment service and nothing is guaranteed. Your share rises and falls with real trading results, and you can lose some or all of the money you put in. Only invest what you can afford to lose. See the Terms for details."),
+      ("How do I become an investor?", "Register an account, then open the Investors page and follow the payment instructions. Your deposit is credited once the Owner confirms it has been received."),
+      ("Is there a minimum or maximum deposit?", "Yes. The minimum is &pound;50 and the maximum is &pound;500 per deposit."),
+      ("How are profits and losses shared?", "Only realised profits and losses from completed trades are shared. Once your deposit is confirmed you are allocated NAV credits, and your share of results depends on your credits and how long your money has been invested. Returns are not fixed."),
+      ("Are there any fees?", "Fees vary with the trades made and the stocks held, so they cannot be predicted in advance. Any fee terms are set out in the Terms, and you can email the Owner with questions."),
+      ("Can I withdraw my money?", "Yes. Each deposit is locked for 30 days. After that you can request a withdrawal of those funds on the Investors page, and the Owner must approve it."),
+      ("How long do withdrawals take?", "The Owner will respond to your request within 5 business days. Once approved, the payment is sent to you."),
+      ("What does the Trade Log show?", "It lists open and closed trades. Open trades show live results, and closed trades are used for the performance figures."),
+      ("Why was a trade rejected or not placed?", "A trade can be blocked for several reasons, such as trading being switched off, the weekly performance gate, a trade time lock, or insufficient available margin. The Owner can see the reason in the Rejected Trades list."),
+      ("How is my data protected?", "Your account is protected by a password and a signed login session. Only the details needed to run your account are stored."),
+      ("I forgot my password or have a problem. What do I do?", "Use the 'Forgot password' option on the login page to get a reset link by email. If that does not work, email the Owner via the Contact Us page and the Owner can send you a reset link directly."),
+      ("How do I make a complaint?", "Email the Owner via the Contact Us page. We aim to acknowledge within 5 business days and respond within 8 weeks."),
+    ] %}
+    {% for q, a in faqs %}
+    <details style="margin-bottom:10px;">
+      <summary style="cursor:pointer;font-weight:600;">{{ q }}</summary>
+      <p class="small" style="margin:6px 0 0 16px;">{{ a }}</p>
+    </details>
+    {% endfor %}
+    <div class="small" style="margin-top:12px;">Still have a question? <a href="/dashboard/contact" style="color:#58a6ff;">Contact us</a>.</div>
   </div>
 </div>
 {% endblock %}
