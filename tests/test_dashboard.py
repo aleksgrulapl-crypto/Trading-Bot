@@ -102,7 +102,7 @@ class TestDashboardDedupe:
     def test_request_context_keeps_open_trades_in_trade_log(self, monkeypatch):
         import dashboard
 
-        monkeypatch.setattr(dashboard.session, "get_positions", lambda: [])
+        monkeypatch.setattr(dashboard.session, "get_positions", lambda fresh=False: [])
         monkeypatch.setattr(dashboard.session, "get_account", lambda: {})
         monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: [])
         monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
@@ -741,7 +741,7 @@ class TestDashboardDeleteTradeEndpoint:
             "limitLevel": None,
             "profit": 1.0,
         }]
-        monkeypatch.setattr(dashboard.session, "get_positions", lambda: live_positions)
+        monkeypatch.setattr(dashboard.session, "get_positions", lambda fresh=False: live_positions)
         monkeypatch.setattr(dashboard.session, "get_account", lambda: {})
         monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: live_positions)
         monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
@@ -770,7 +770,7 @@ class TestDashboardDeleteTradeEndpoint:
         from flask import Flask
         import dashboard
 
-        monkeypatch.setattr(dashboard.session, "get_positions", lambda: None)
+        monkeypatch.setattr(dashboard.session, "get_positions", lambda fresh=False: None)
         monkeypatch.setattr(dashboard.session, "get_account", lambda: {})
         monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: [])
         monkeypatch.setattr(dashboard.session, "enrich_account", lambda raw: {})
@@ -795,7 +795,7 @@ class TestDashboardDeleteTradeEndpoint:
         from flask import Flask
         import dashboard
 
-        monkeypatch.setattr(dashboard.session, "get_positions", lambda: [{"market": {"symbol": "MSFT"}}])
+        monkeypatch.setattr(dashboard.session, "get_positions", lambda fresh=False: [{"market": {"symbol": "MSFT"}}])
         monkeypatch.setattr(dashboard.session, "get_account", lambda: {})
         monkeypatch.setattr(dashboard.session, "enrich_positions", lambda raw: [{
             "ticker": "MSFT",

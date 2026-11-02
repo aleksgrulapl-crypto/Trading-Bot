@@ -1029,16 +1029,16 @@ def _build_request_context():
     # the header balance and the live positions come from the same instant.
     try:
         session._cache["account"]["ts"] = 0
-        session._positions_cache["ts"] = 0.0
     except Exception:
         logger.debug("session cache not initialized")
 
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=2) as pool:
-        positions_future = pool.submit(session.get_positions)
+        positions_future = pool.submit(lambda: session.get_positions(fresh=True))
         account_future = pool.submit(session.get_account)
         raw_positions = positions_future.result()
         raw_account = account_future.result() or {}
+    live_positions_ok = raw_positions is not None
     if raw_positions is None:
         # Broker call timed out/failed: show the last known positions rather
         # than an empty list that makes live trades look closed.
@@ -1046,6 +1046,13 @@ def _build_request_context():
 
     positions = session.enrich_positions(raw_positions or [])
     account = session.enrich_account(raw_account)
+    if live_positions_ok and account:
+        # The broker's account profitLoss and per-position upl are separate
+        # feeds that drift; derive the header PnL/equity from the same
+        # positions shown in the table so the two always agree.
+        pos_pnl = round(sum(float(p.get("profit") or 0) for p in positions), 2)
+        account["pnl"] = pos_pnl
+        account["equity"] = round(account.get("balance", 0) + pos_pnl, 2)
 
     # Display Open Positions sorted alphabetically by ticker for easier scanning.
     positions.sort(key=lambda p: str((p or {}).get("ticker") or "").strip().lower())
