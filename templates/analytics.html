@@ -6,6 +6,7 @@
   <a href="/dashboard/analytics?group=all{% if month != 'all' %}&month={{ month }}{% endif %}" class="{% if group == 'all' %}active{% endif %}">General (All Trades)</a>
   <a href="/dashboard/analytics?group=tradingview{% if month != 'all' %}&month={{ month }}{% endif %}" class="{% if group == 'tradingview' %}active{% endif %}">TradingView</a>
   <a href="/dashboard/analytics?group=trader{% if month != 'all' %}&month={{ month }}{% endif %}" class="{% if group == 'trader' %}active{% endif %}">Trader</a>
+  {% if is_owner %}<a href="/dashboard/analytics?group=rejected" class="{% if group == 'rejected' %}active{% endif %}">Rejected</a>{% endif %}
 </div>
 {% if available_months %}
 <div class="analytics-month-filter" style="margin:10px 0; display:flex; align-items:center; gap:8px;">
@@ -18,6 +19,39 @@
   </select>
 </div>
 {% endif %}
+{% if group == 'rejected' %}
+<div class="card">
+  <div class="card-header"><div class="card-title">Rejected Trades Overview</div></div>
+  <div class="metrics-grid">
+    <div class="metric"><div class="metric-label">Rejected</div><div class="metric-value metric-neutral">{{ rejected.total }}</div></div>
+    <div class="metric"><div class="metric-label">Would-be Wins</div><div class="metric-value pnl-pos">{{ rejected.wins }}</div></div>
+    <div class="metric"><div class="metric-label">Would-be Losses</div><div class="metric-value pnl-neg">{{ rejected.losses }}</div></div>
+    <div class="metric"><div class="metric-label">Win Rate</div><div class="metric-value metric-neutral">{{ rejected.win_rate if rejected.win_rate is not none else 'n/a' }}{% if rejected.win_rate is not none %}%{% endif %}</div></div>
+    <div class="metric"><div class="metric-label">Trading In Progress</div><div class="metric-value metric-neutral">{{ rejected.tip }}</div></div>
+    <div class="metric"><div class="metric-label">Not Yet Reviewed</div><div class="metric-value metric-neutral">{{ rejected.unmarked }}</div></div>
+  </div>
+</div>
+{% for title, rows in [('Rejected by Stock', rejected.per_stock), ('Rejected by Timeframe', rejected.per_timeframe), ('Rejected by Side', rejected.per_side)] %}
+<div class="card">
+  <div class="card-header"><div class="card-title">{{ title }}</div></div>
+  {% if rows %}
+  <div class="ticker-grid">
+    {% for r in rows %}
+    <div class="ticker-card {% if r.wins > r.losses %}ticker-pos{% elif r.losses > r.wins %}ticker-neg{% endif %}">
+      <div class="ticker-name">{{ r.name }}</div>
+      <div class="ticker-row"><span>Rejected</span><span>{{ r.total }}</span></div>
+      <div class="ticker-row"><span>Wins / Losses</span><span>{{ r.wins }} / {{ r.losses }}</span></div>
+      <div class="ticker-row"><span>TIP</span><span>{{ r.tip }}</span></div>
+      <div class="ticker-row"><span>Win Rate</span><span>{{ r.win_rate if r.win_rate is not none else 'n/a' }}{% if r.win_rate is not none %}%{% endif %}</span></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="small">No rejected trades yet.</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
 <div class="analytics-top-grid">
   <div class="card {% if analytics.total_pl is not none and analytics.total_pl >= 0 %}card-pos{% elif analytics.total_pl is not none %}card-neg{% endif %}">
     <div class="card-header">
@@ -185,6 +219,7 @@
     <div class="small">No closed trades yet.</div>
     {% endif %}
 </div>
+{% endif %}
 </div>
 
 <script>

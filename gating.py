@@ -19,6 +19,7 @@ logger = logging.getLogger("gating")
 
 _AUTOMATED_SOURCES = frozenset(("tradingview", "hedge"))
 _rejected_lock = threading.Lock()
+OUTCOMES = ("win", "loss", "tip")
 
 
 def _norm(value) -> Optional[str]:
@@ -159,16 +160,18 @@ def load_rejected(path: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 def count_unreviewed(path: Optional[str] = None) -> int:
-    """Rejected trades the Owner has not yet marked as a would-be win/loss."""
-    return sum(1 for r in load_rejected(path) if isinstance(r, dict) and r.get("outcome") not in ("win", "loss"))
+    """Rejected trades the Owner has not yet marked (win/loss, or TIP while
+    the trade would still be running)."""
+    return sum(1 for r in load_rejected(path) if isinstance(r, dict) and r.get("outcome") not in OUTCOMES)
 
 
 def set_rejected_outcome(index: int, outcome: Optional[str], path: Optional[str] = None) -> str:
     """Mark a rejected trade (by position in the stored list) as a would-be
-    'win' or 'loss'; None/'' clears the mark. Returns a status string."""
+    'win', 'loss' or 'tip' (trading in progress); None/'' clears the mark.
+    Returns a status string."""
     if outcome in ("", None):
         outcome = None
-    elif outcome not in ("win", "loss"):
+    elif outcome not in OUTCOMES:
         return "invalid_outcome"
     path = path or _path()
     with _rejected_lock:
@@ -180,6 +183,49 @@ def set_rejected_outcome(index: int, outcome: Optional[str], path: Optional[str]
         else:
             rows[index]["outcome"] = outcome
         return "ok" if _atomic_write(path, rows) else "write_failed"
+
+
+def _bucket_stats(rows: List[Dict[str, Any]], key_fn) -> List[Dict[str, Any]]:
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        key = key_fn(r) or "N/A"
+        b = buckets.setdefault(key, {"name": key, "total": 0, "wins": 0, "losses": 0, "tip": 0})
+        b["total"] += 1
+        outcome = r.get("outcome")
+        if outcome == "win":
+            b["wins"] += 1
+        elif outcome == "loss":
+            b["losses"] += 1
+        elif outcome == "tip":
+            b["tip"] += 1
+    out = []
+    for b in buckets.values():
+        decided = b["wins"] + b["losses"]
+        b["win_rate"] = round(b["wins"] / decided * 100, 2) if decided else None
+        out.append(b)
+    out.sort(key=lambda b: (-b["total"], b["name"]))
+    return out
+
+
+def rejected_analytics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Would-be win/loss analytics for rejected trades. TIP (trading in
+    progress) and unmarked rows are counted but excluded from the win rate."""
+    rows = [r for r in rows or [] if isinstance(r, dict)]
+    wins = sum(1 for r in rows if r.get("outcome") == "win")
+    losses = sum(1 for r in rows if r.get("outcome") == "loss")
+    tip = sum(1 for r in rows if r.get("outcome") == "tip")
+    decided = wins + losses
+    return {
+        "total": len(rows),
+        "wins": wins,
+        "losses": losses,
+        "tip": tip,
+        "unmarked": len(rows) - decided - tip,
+        "win_rate": round(wins / decided * 100, 2) if decided else None,
+        "per_stock": _bucket_stats(rows, lambda r: r.get("stock") or r.get("symbol")),
+        "per_timeframe": _bucket_stats(rows, lambda r: r.get("timeframe")),
+        "per_side": _bucket_stats(rows, lambda r: str(r.get("side") or "").upper()),
+    }
 
 
 def record_rejected(entry: Dict[str, Any], path: Optional[str] = None) -> bool:

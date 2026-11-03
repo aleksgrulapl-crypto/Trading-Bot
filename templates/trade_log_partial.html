@@ -156,7 +156,8 @@
             <td class="small">{{ r.time_rejected_human or r.time_rejected }}</td>
             <td>
               <select class="outcome-select outcome-{{ r.outcome or 'none' }}" onchange="setRejectedOutcome({{ r._rejected_index }}, this.value)" title="Would this trade have won or lost?">
-                <option value="" {% if not r.outcome %}selected{% endif %}>{{ r.stock or r.symbol or '-' }} ?</option>
+                <option value="" {% if not r.outcome %}selected{% endif %}>{{ r.stock or r.symbol or '-' }}</option>
+                <option value="tip" {% if r.outcome == 'tip' %}selected{% endif %}>{{ r.stock or r.symbol or '-' }} - Trading In Progress (TIP)</option>
                 <option value="win" {% if r.outcome == 'win' %}selected{% endif %}>{{ r.stock or r.symbol or '-' }} - Win</option>
                 <option value="loss" {% if r.outcome == 'loss' %}selected{% endif %}>{{ r.stock or r.symbol or '-' }} - Loss</option>
               </select>
