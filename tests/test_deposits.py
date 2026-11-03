@@ -495,11 +495,11 @@ class TestOvernightFeeAndInvestorRoi:
         return datetime.datetime(2026, 1, day, hh, mm, 10)
 
     def test_overnight_drop_is_recorded_as_editable_broker_fee(self, dep):
-        assert dep.check_overnight_fee(1000.0, now=self._at(21, 0))["action"] == "baseline_set"
-        assert dep.check_overnight_fee(999.1, now=self._at(21, 3))["action"] == "waiting"
-        res = dep.check_overnight_fee(998.4, now=self._at(21, 5))
+        assert dep.check_overnight_fee(1000.0, now=self._at(20, 30))["action"] == "baseline_set"
+        assert dep.check_overnight_fee(999.1, now=self._at(22, 0))["action"] == "waiting"
+        res = dep.check_overnight_fee(998.4, now=self._at(22, 30))
         assert res["action"] == "fee_recorded" and res["amount"] == pytest.approx(1.6)
-        assert dep.check_overnight_fee(997.0, now=self._at(21, 6))["action"] == "waiting"
+        assert dep.check_overnight_fee(997.0, now=self._at(22, 31))["action"] == "waiting"
         fees = [e for e in dep.load_entries(dep.LOG_PATH) if e["type"] == "fee"]
         assert len(fees) == 1 and fees[0]["investor"] == "Broker"
 
@@ -508,10 +508,10 @@ class TestOvernightFeeAndInvestorRoi:
 
     def test_overnight_check_ignores_trade_pnl_and_outside_window(self, dep):
         import datetime
-        assert dep.check_overnight_fee(1000.0, now=self._at(20, 59))["reason"] == "outside_window"
-        dep.check_overnight_fee(1000.0, now=self._at(21, 0))
+        assert dep.check_overnight_fee(1000.0, now=self._at(20, 29))["reason"] == "outside_window"
+        dep.check_overnight_fee(1000.0, now=self._at(20, 30))
         pnl = [{"ts": self._at(21, 2), "pnl": 10.0}]
-        assert dep.check_overnight_fee(1010.0, pnl, now=self._at(21, 5))["action"] == "no_fee"
+        assert dep.check_overnight_fee(1010.0, pnl, now=self._at(22, 30))["action"] == "no_fee"
         assert not [e for e in dep.load_entries(dep.LOG_PATH) if e["type"] == "fee"]
 
     def test_update_fee_amount_only_edits_fees(self, dep):

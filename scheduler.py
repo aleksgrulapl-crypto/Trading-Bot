@@ -227,9 +227,9 @@ def send_daily_pnl_email() -> None:
 
 
 def check_overnight_fee_job() -> None:
-    """Record the 21:00-21:05 UK overnight adjustment fee as a Broker Fee."""
+    """Record the 20:30-22:30 UK overnight adjustment fee as a Broker Fee."""
     now = datetime.now(UK_TZ)
-    if now.hour != 21 or now.minute > 10:
+    if now.hour < 20 or now.hour > 22:
         return
     try:
         # Imported lazily: the dashboard module pulls in the web layer.
@@ -276,7 +276,7 @@ def start_scheduler() -> None:
 
     # Open position sync (manual/trader opens that bypass the webhook)
     scheduler.add_interval_job(10, sync_open_positions)
-    # Overnight adjustment fee (taken 21:00-21:05 UK) recorded as a Broker Fee
+    # Overnight adjustment fee (taken ~21:00 or ~22:00 UK) recorded as a Broker Fee
     scheduler.add_interval_job(15, check_overnight_fee_job)
     # Public landing-page snapshot (percentages for the last completed week/month)
     scheduler.add_interval_job(3600, refresh_public_snapshot)

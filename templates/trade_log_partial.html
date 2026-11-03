@@ -131,7 +131,7 @@
     {% if is_owner %}
     <div class="card" style="margin-top:16px;">
       <div class="card-header">
-        <div class="card-title">Rejected ({{ rejected_trades|length }})</div>
+        <div class="card-title">Rejected ({{ rejected_trades|length }}){% if pending_rejected %} <span class="flash-badge">{{ pending_rejected }} to review</span>{% endif %}</div>
       </div>
       {% if rejected_trades %}
       <table class="table">
@@ -153,8 +153,14 @@
         <tbody>
           {% for r in rejected_trades %}
           <tr>
-            <td class="small">{{ r.time_rejected }}</td>
-            <td>{{ r.stock or r.symbol or '-' }}</td>
+            <td class="small">{{ r.time_rejected_human or r.time_rejected }}</td>
+            <td>
+              <select class="outcome-select outcome-{{ r.outcome or 'none' }}" onchange="setRejectedOutcome({{ r._rejected_index }}, this.value)" title="Would this trade have won or lost?">
+                <option value="" {% if not r.outcome %}selected{% endif %}>{{ r.stock or r.symbol or '-' }} ?</option>
+                <option value="win" {% if r.outcome == 'win' %}selected{% endif %}>{{ r.stock or r.symbol or '-' }} - Win</option>
+                <option value="loss" {% if r.outcome == 'loss' %}selected{% endif %}>{{ r.stock or r.symbol or '-' }} - Loss</option>
+              </select>
+            </td>
             <td class="small">{{ r.timeframe or 'N/A' }}</td>
             <td>{{ r.side or '-' }}</td>
             <td>{{ r.entry_price if r.entry_price is not none else '-' }}</td>
