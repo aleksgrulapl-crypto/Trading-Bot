@@ -130,6 +130,7 @@
               {% if p.trail_enabled %}<button onclick="toggleTrail('{{ p.dealId or p.id }}', true)">Set £</button>{% endif %}
               {% endif %}
               <button onclick="closePosition('{{ p.dealId or p.id }}')">Close</button>
+              <button onclick="hedgePosition('{{ p.dealId or p.id }}')" title="Open the opposite position, same size, no SL, TP at +£15">Hedge</button>
               {% else %}
               <span class="small">—</span>
               {% endif %}

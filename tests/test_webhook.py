@@ -940,3 +940,25 @@ class TestTradingSwitch:
     def test_time_lock_off_by_default(self):
         import config
         assert config.TRADE_LOCK_ENABLED is False
+
+
+class TestRejectedOutcomeAndHedge:
+    def test_tip_is_not_pending_and_analytics(self, tmp_path):
+        import gating
+        p = str(tmp_path / "rej.json")
+        for s in ("AAA", "BBB", "CCC", "DDD"):
+            gating.record_rejected({"stock": s, "timeframe": "1H", "side": "BUY"}, path=p)
+        assert gating.count_unreviewed(p) == 4
+        assert gating.set_rejected_outcome(0, "tip", path=p) == "ok"
+        assert gating.set_rejected_outcome(1, "win", path=p) == "ok"
+        assert gating.set_rejected_outcome(2, "loss", path=p) == "ok"
+        assert gating.set_rejected_outcome(3, "bad", path=p) == "invalid_outcome"
+        assert gating.count_unreviewed(p) == 1
+        a = gating.rejected_analytics(gating.load_rejected(p))
+        assert (a["wins"], a["losses"], a["tip"], a["unmarked"], a["win_rate"]) == (1, 1, 1, 1, 50.0)
+
+    def test_hedge_tp_level_gives_15_gbp(self):
+        import hedge
+        tp = hedge._tp_level(100.0, 10.0, True, "GBP")
+        assert tp == 101.5
+        assert hedge._tp_level(100.0, 10.0, False, "GBP") == 98.5

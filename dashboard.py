@@ -27,6 +27,7 @@ import users
 import account_emails
 import deposits
 import gating
+import hedge
 import notifications
 import public_snapshot
 import trail_settings
@@ -964,12 +965,18 @@ def compute_detailed_analytics(trades):
         closed_with_pnl,
         key=lambda t: t.get("time_exited") or t.get("time_entered") or "",
     )
+    # One point per day (dd-mm-YYYY): the cumulative PnL at the end of that day.
     equity_curve = []
     running = 0.0
     for t in ordered:
         running += t["pnl_gbp_display"]
         label = t.get("time_exited_human") or t.get("time_exited") or t.get("time_entered_human") or ""
-        equity_curve.append({"label": label, "balance": round(running, 2)})
+        label = str(label)[:10]
+        point = {"label": label, "balance": round(running, 2)}
+        if equity_curve and equity_curve[-1]["label"] == label:
+            equity_curve[-1] = point
+        else:
+            equity_curve.append(point)
 
     # Average hold time across closed trades with resolvable entry/exit timestamps
     hold_seconds = [s for s in (_trade_hold_seconds(t) for t in closed) if s is not None]
@@ -1824,9 +1831,36 @@ def dashboard_analytics():
     full history (current behaviour)."""
     ctx = _build_request_context()
     group = str(request.args.get("group") or "all").strip().lower()
-    if group not in ("all", "tradingview", "trader"):
+    if group not in ("all", "tradingview", "trader", "rejected"):
         group = "all"
 
+    if group == "rejected":
+        # Owner-only: rejected trades have no PnL, only a marked would-be outcome.
+        if current_role() != "owner":
+            return redirect("/dashboard/analytics")
+        rejected_rows = gating.load_rejected()
+        available_months = sorted({
+            str(r.get("time_rejected"))[:7] for r in rejected_rows
+            if isinstance(r, dict) and r.get("time_rejected")
+        }, reverse=True)
+        month = str(request.args.get("month") or "all").strip().lower()
+        if month != "all" and month not in available_months:
+            month = "all"
+        if month != "all":
+            rejected_rows = [r for r in rejected_rows if str(r.get("time_rejected"))[:7] == month]
+        return render_template(
+            "analytics.html",
+            title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
+            cache_bust=time.time(),
+            account=ctx["account"],
+            analytics={},
+            detailed=compute_detailed_analytics([]),
+            rejected=gating.rejected_analytics(rejected_rows),
+            group=group,
+            month=month,
+            available_months=available_months,
+            is_owner=True,
+        )
     if group == "all":
         group_trades = ctx["combined_trades"]
     else:
@@ -2226,6 +2260,25 @@ def dashboard_close_position(position_id: str):
         "status": "error",
         "message": "invalid_close_response",
     }), 502
+
+
+@dashboard.route("/dashboard/hedge/<position_id>", methods=["POST"])
+@owner_required
+def dashboard_hedge_position(position_id: str):
+    """Open the opposite-direction position (same size, no SL, fixed GBP TP)."""
+    position_id = str(position_id or "").strip()
+    if not position_id:
+        return jsonify({"status": "error", "message": "missing_position_id"}), 400
+    try:
+        result = hedge.hedge_position(position_id)
+    except Exception:
+        logger.exception("dashboard: hedge action failed for %s", position_id)
+        return jsonify({"status": "error", "message": "hedge_failed_internal"}), 500
+    if result.get("status") == "success":
+        return jsonify(result), 200
+    code = {"position_not_found": 404, "already_hedged": 409, "hedging_disabled": 409,
+            "invalid_position": 400}.get(result.get("message"), 502)
+    return jsonify(result), code
 
 
 @dashboard.route("/dashboard/trade/<int:trade_index>/delete", methods=["POST"])

@@ -357,6 +357,7 @@
         header .nav a.flash-alert, .flash-badge { animation: flash-alert 1s infinite; color: var(--warning); font-weight: 700; }
         .flash-badge { font-size: 11px; border: 1px solid var(--warning); border-radius: 999px; padding: 1px 8px; }
         header .nav a.flash-alert::after { content: " \26A0"; }
+        .outcome-select.outcome-tip { background: rgba(250, 204, 21, 0.2); color: var(--warning); font-weight: 700; }
         .outcome-select.outcome-win { background: rgba(74, 222, 128, 0.2); color: var(--success); font-weight: 700; }
         .outcome-select.outcome-loss { background: rgba(248, 113, 113, 0.2); color: var(--danger); font-weight: 700; }
         .metrics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 8px; height: 100%; align-content: center; }
@@ -553,6 +554,22 @@ function closePosition(dealId) {
             refreshDashboard();
         })
         .catch(err => console.error("Close error:", err));
+}
+
+function hedgePosition(dealId) {
+    const errorBanner = document.getElementById('error-banner');
+    if (!window.confirm('Hedge this position? This opens the opposite trade with the same size, no SL and a 15 GBP TP.')) {
+        return;
+    }
+
+    fetch(`/dashboard/hedge/${encodeURIComponent(dealId)}`, { method: "POST" })
+        .then(r => r.json())
+        .then(data => {
+            errorBanner.innerText = (data && data.message) || "Hedge action failed.";
+            errorBanner.style.display = "block";
+            refreshDashboard();
+        })
+        .catch(err => console.error("Hedge error:", err));
 }
 
 function toggleTrail(dealId, enabled) {
