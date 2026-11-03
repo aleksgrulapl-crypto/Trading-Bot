@@ -353,6 +353,12 @@
         .pnl-pos { color: var(--success); font-weight: 600; }
         .pnl-neg { color: var(--danger); font-weight: 600; }
         .small { font-size: 11px; color: var(--text-muted); }
+        @keyframes flash-alert { 0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(250, 204, 21, 0.9); } 50% { opacity: 0.35; box-shadow: none; } }
+        header .nav a.flash-alert, .flash-badge { animation: flash-alert 1s infinite; color: var(--warning); font-weight: 700; }
+        .flash-badge { font-size: 11px; border: 1px solid var(--warning); border-radius: 999px; padding: 1px 8px; }
+        header .nav a.flash-alert::after { content: " \26A0"; }
+        .outcome-select.outcome-win { background: rgba(74, 222, 128, 0.2); color: var(--success); font-weight: 700; }
+        .outcome-select.outcome-loss { background: rgba(248, 113, 113, 0.2); color: var(--danger); font-weight: 700; }
         .metrics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 8px; height: 100%; align-content: center; }
         .metrics-grid .metric { text-align: center; padding: 12px 8px; }
         .metrics-grid .metric-value { font-size: 17px; }
@@ -468,7 +474,7 @@
             {% if role != 'pending' %}
             <a href="/dashboard">Dashboard</a>
             {% if role != 'viewer' %}
-            <a href="/dashboard/trades">Trade Log</a>
+            <a href="/dashboard/trades" id="nav-trade-log" class="{% if pending_rejected %}flash-alert{% endif %}" title="{% if pending_rejected %}{{ pending_rejected }} rejected trade(s) to review{% endif %}">Trade Log</a>
             <a href="/dashboard/analytics">Analytics</a>
             {% endif %}
             <a href="/dashboard/investors">Investors</a>
@@ -647,6 +653,24 @@ function updateTradeType(tradeIndex, newType) {
         .catch(err => console.error("Update trade type error:", err));
 }
 
+function setRejectedOutcome(index, outcome) {
+    const errorBanner = document.getElementById('error-banner');
+    fetch(`/dashboard/rejected/${encodeURIComponent(index)}/outcome`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outcome: outcome })
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (!data || data.status !== 'success') {
+                errorBanner.innerText = (data && data.message) || "Update failed.";
+                errorBanner.style.display = "block";
+            }
+            refreshDashboard();
+        })
+        .catch(err => console.error("Rejected outcome error:", err));
+}
+
 function updateExitPrice(tradeIndex, newExitPrice) {
     const errorBanner = document.getElementById('error-banner');
     if (newExitPrice === null || newExitPrice === undefined || String(newExitPrice).trim() === '') {
@@ -707,6 +731,12 @@ function refreshDashboard() {
                     }
                     if (data.account && {{ 'true' if role == 'owner' else 'false' }}) {
                         renderHeaderAccount(data.account);
+                    }
+                    if (data.pending_rejected !== undefined) {
+                        const nav = document.getElementById('nav-trade-log');
+                        if (nav) {
+                            nav.classList.toggle('flash-alert', data.pending_rejected > 0);
+                        }
                     }
                     errorBanner.style.display = "none";
                 } else if (data && data.error) {

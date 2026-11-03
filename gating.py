@@ -158,6 +158,30 @@ def load_rejected(path: Optional[str] = None) -> List[Dict[str, Any]]:
         return []
 
 
+def count_unreviewed(path: Optional[str] = None) -> int:
+    """Rejected trades the Owner has not yet marked as a would-be win/loss."""
+    return sum(1 for r in load_rejected(path) if isinstance(r, dict) and r.get("outcome") not in ("win", "loss"))
+
+
+def set_rejected_outcome(index: int, outcome: Optional[str], path: Optional[str] = None) -> str:
+    """Mark a rejected trade (by position in the stored list) as a would-be
+    'win' or 'loss'; None/'' clears the mark. Returns a status string."""
+    if outcome in ("", None):
+        outcome = None
+    elif outcome not in ("win", "loss"):
+        return "invalid_outcome"
+    path = path or _path()
+    with _rejected_lock:
+        rows = load_rejected(path)
+        if not isinstance(index, int) or index < 0 or index >= len(rows) or not isinstance(rows[index], dict):
+            return "not_found"
+        if outcome is None:
+            rows[index].pop("outcome", None)
+        else:
+            rows[index]["outcome"] = outcome
+        return "ok" if _atomic_write(path, rows) else "write_failed"
+
+
 def record_rejected(entry: Dict[str, Any], path: Optional[str] = None) -> bool:
     """Append a rejected trade (with TradingView's suggested SL/TP) to the
     Owner-only rejected log."""

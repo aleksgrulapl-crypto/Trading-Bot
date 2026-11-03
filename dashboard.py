@@ -42,7 +42,7 @@ from trade_log import (
     load_raw_log,
     reconcile_with_positions,
     _parse_iso_like,
-    time_sort_ts,
+    _humanize,    time_sort_ts,
 )
 
 dashboard = Blueprint("dashboard", __name__, template_folder="templates")
@@ -416,9 +416,10 @@ def _inject_role():
             "role": ident["role"] or "viewer",
             "logged_in": ident["logged_in"],
             "user_name": ident["name"],
+            "pending_rejected": _pending_rejected_count(),
         }
     except Exception:
-        return {"role": "viewer", "logged_in": False, "user_name": None}
+        return {"role": "viewer", "logged_in": False, "user_name": None, "pending_rejected": 0}
 
 
 def roi_access_required(view):
@@ -1307,7 +1308,35 @@ def _rejected_for_role():
     """Rejected-trade log rows (newest first), visible to the Owner only."""
     if current_role() != "owner":
         return []
-    return list(reversed(gating.load_rejected()))
+    rows = gating.load_rejected()
+    out = []
+    for idx in range(len(rows) - 1, -1, -1):
+        r = dict(rows[idx]) if isinstance(rows[idx], dict) else {}
+        r["_rejected_index"] = idx
+        r["time_rejected_human"] = _humanize(r.get("time_rejected"))
+        out.append(r)
+    return out
+
+
+def _pending_rejected_count():
+    if current_role() != "owner":
+        return 0
+    try:
+        return gating.count_unreviewed()
+    except Exception:
+        return 0
+
+
+@dashboard.route("/dashboard/rejected/<int:index>/outcome", methods=["POST"])
+@owner_required
+def dashboard_rejected_outcome(index: int):
+    """Owner marks a rejected trade as a would-be win/loss for analysis."""
+    payload = request.get_json(silent=True) or {}
+    status = gating.set_rejected_outcome(index, payload.get("outcome"))
+    if status == "ok":
+        return jsonify({"status": "success", "message": "Rejected trade updated."}), 200
+    code = {"invalid_outcome": 400, "not_found": 404}.get(status, 500)
+    return jsonify({"status": "error", "message": status}), code
 
 
 @dashboard.route("/dashboard/trades")
@@ -1340,12 +1369,14 @@ def dashboard_trades_data():
             cache_bust=time.time(),
             is_owner=current_role() == "owner",
             rejected_trades=_rejected_for_role(),
+            pending_rejected=_pending_rejected_count(),
             **build_trade_log_view(ctx["combined_trades"], request.args),
         )
         return jsonify({
             "html": html,
             "account": ctx["account"],
             "trades": ctx["combined_trades"],
+            "pending_rejected": _pending_rejected_count(),
         })
     except Exception as exc:
         logger.exception("dashboard/trades/data render failed: %s", exc)

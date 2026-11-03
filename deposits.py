@@ -1314,14 +1314,15 @@ def detect_and_record_balance_change(
 
 # -----------------------------------------------------------------------
 # Overnight adjustment fees. The broker takes these out of the account
-# between 21:00 and 21:05 UK time. The scheduler snapshots the balance at
+# between 21:00 and 21:05 UK time (occasionally 22:00-22:05, so the catchment
+# is widened to 20:30-22:30). The scheduler snapshots the balance at
 # the start of that window and, once it closes, records any small drop not
 # explained by closed trades as a Broker Fee (editable on the Transactions
 # page if the recorded value is wrong).
 # -----------------------------------------------------------------------
 OVERNIGHT_FEE_STATE_PATH = os.environ.get("OVERNIGHT_FEE_STATE_PATH") or (getattr(config, "OVERNIGHT_FEE_STATE_PATH", None) if config else None) or "/data/overnight_fee_state.json"
-OVERNIGHT_FEE_START = (21, 0)
-OVERNIGHT_FEE_END = (21, 5)
+OVERNIGHT_FEE_START = (20, 30)
+OVERNIGHT_FEE_END = (22, 30)
 OVERNIGHT_FEE_GRACE_MINUTES = 5
 
 
@@ -1331,7 +1332,7 @@ def check_overnight_fee(
     now: Optional[datetime] = None,
     state_path: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Snapshot the balance at 21:00 UK and, from 21:05, record the unexplained
+    """Snapshot the balance at 20:30 UK and, from 22:30, record the unexplained
     small decrease as a Broker Fee. Safe to call frequently; each UK day is
     recorded at most once."""
     state_path = state_path or OVERNIGHT_FEE_STATE_PATH
@@ -1387,7 +1388,7 @@ def check_overnight_fee(
 
     fee = round(-delta, 2)
     ok, entry, status = add_entry(
-        "fee", fee, "", "Auto-detected overnight adjustment (21:00-21:05 UK) - edit if incorrect",
+        "fee", fee, "", "Auto-detected overnight adjustment (20:30-22:30 UK) - edit if incorrect",
         occurred_at=now.isoformat(), path=LOG_PATH,
     )
     if not ok:
