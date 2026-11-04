@@ -201,6 +201,12 @@
         {% if my_withdrawable.next_unlock_human %}(next release {{ my_withdrawable.next_unlock_human }}){% endif %}
         {% endif %}
       </p>
+      <p class="small">
+        <label>
+          <input type="checkbox" id="my-email-toggle" {% if my_email_notifications %}checked{% endif %}>
+          Email me at my registered address when a trade affecting my investment closes
+        </label>
+      </p>
       {% else %}
       <p class="small">No invested capital is recorded against your account yet.</p>
       {% endif %}
@@ -308,6 +314,24 @@
 </div>
 
 <script>
+(function () {
+    const toggle = document.getElementById('my-email-toggle');
+    if (!toggle) return;
+    toggle.addEventListener('change', function () {
+        const wanted = toggle.checked;
+        fetch('/dashboard/notifications/my-email', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled: wanted })
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (!data || data.status !== 'success') { toggle.checked = !wanted; }
+            })
+            .catch(() => { toggle.checked = !wanted; });
+    });
+})();
+
 function updateInvestorTier(select) {
     const errorBanner = document.getElementById('error-banner');
     const investor = select.getAttribute('data-investor');

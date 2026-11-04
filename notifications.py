@@ -290,4 +290,60 @@ def notify_position_closed(trade: Dict[str, Any], balance: Optional[float] = Non
         f"Closed at: {_fmt_datetime(trade.get('time_exited'))}\n"
         f"Account balance: {_fmt_money(balance_after)}\n"
     )
-    return _send_email(subject, body)
+    sent = _send_email(subject, body)
+    try:
+        notify_investors_position_closed(trade)
+    except Exception:
+        logger.exception("notify_position_closed: investor notifications failed")
+    return sent
+
+
+def notify_investors_position_closed(trade: Dict[str, Any]) -> int:
+    """Email opted-in, approved investors with active capital who are affected
+    by this closed trade: everyone for TradingView/Hedge trades, only full-tier
+    investors (and the owner) for Trader trades. Returns the number emailed."""
+    if not trade:
+        return 0
+    import deposits
+    import users
+
+    subscribers = users.list_email_subscribers()
+    if not subscribers:
+        return 0
+
+    source = str(trade.get("trade_source") or trade.get("origin") or "").strip().lower()
+    trader_only = source == "trader"
+    owner_name = str(getattr(config, "OWNER_INVESTOR_NAME", "Aleks") or "").strip()
+    entries = deposits.list_entries_sorted()
+    tiers = deposits.load_tiers()
+
+    ticker = trade.get("ticker") or "?"
+    side = str(trade.get("side") or "?").upper()
+    pnl = trade.get("pnl_gbp") if trade.get("pnl_gbp") is not None else trade.get("pnl")
+    try:
+        result = "WIN" if float(pnl) > 0 else ("LOSS" if float(pnl) < 0 else "FLAT")
+    except (TypeError, ValueError):
+        result = "UNKNOWN"
+
+    count = 0
+    for user in subscribers:
+        name = user.get("name")
+        if not deposits.has_active_capital(name, entries):
+            continue
+        is_owner = bool(owner_name) and deposits._same_name(name, owner_name)
+        if trader_only and not is_owner and deposits.get_investor_tier(name, tiers) != "full":
+            continue
+        body = (
+            f"Hello {name},\n\n"
+            "A trade that affects your investment has closed.\n\n"
+            f"Stock: {ticker}\n"
+            f"Side: {side}\n"
+            f"Result: {result}\n"
+            f"Closed at: {_fmt_datetime(trade.get('time_exited'))}\n\n"
+            "Log in to the dashboard to see your up-to-date figures. You can turn these emails off "
+            "on the Investors page.\n\n"
+            "Capital at risk: you may lose some or all of the money you contribute."
+        )
+        if send_user_email(user.get("email"), f"Trade closed: {ticker} {side} ({result})", body):
+            count += 1
+    return count
