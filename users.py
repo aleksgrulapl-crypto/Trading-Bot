@@ -215,6 +215,28 @@ def set_role(user_id, role):
     return False, "not_found"
 
 
+def set_email_notifications(user_id, enabled):
+    """Opt a user in/out of trade emails sent to their registered address.
+    Returns (ok, status)."""
+    with _lock:
+        users = _load()
+        for u in users:
+            if u.get("id") == user_id:
+                u["email_notifications"] = bool(enabled)
+                _save(users)
+                return True, "ok"
+    return False, "not_found"
+
+
+def list_email_subscribers():
+    """Approved investor accounts that opted in to email notifications."""
+    with _lock:
+        return [
+            _public(u) for u in _load()
+            if u.get("role") == "investor" and u.get("email_notifications")
+        ]
+
+
 def delete_user(user_id):
     with _lock:
         users = _load()

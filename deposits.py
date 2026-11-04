@@ -382,6 +382,25 @@ def list_investors(entries: List[Dict[str, Any]]) -> List[str]:
     return sorted((n for n in names if not is_backend_investor(n)), key=str.lower)
 
 
+def has_active_capital(name: Any, entries: List[Dict[str, Any]]) -> bool:
+    """True when *name* has deposited and still has net capital in the fund."""
+    net = 0.0
+    deposited = False
+    for e in entries or []:
+        if not isinstance(e, dict) or not _same_name(e.get("investor"), name):
+            continue
+        try:
+            amt = float(e.get("amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        if e.get("type") == "deposit":
+            deposited = True
+            net += amt
+        elif e.get("type") == "withdrawal":
+            net -= amt
+    return deposited and net > 0.005
+
+
 # -----------------------------------------------------------------------
 # "Become an Investor" pledges.
 #

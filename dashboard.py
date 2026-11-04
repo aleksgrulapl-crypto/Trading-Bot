@@ -1559,9 +1559,13 @@ def dashboard_investors():
     open_withdrawals, closed_withdrawals = deposits.split_withdrawal_requests(visible_requests)
 
     my_withdrawable = None
+    my_email_notifications = False
     if my_name:
         my_investor = deposits.canonical_investor_name(my_name, entries)
         if my_investor:
+            uid = flask_session.get("uid")
+            my_user = users.get_user(uid) if uid else None
+            my_email_notifications = bool(my_user and my_user.get("email_notifications"))
             my_withdrawable = deposits.withdrawable_summary(my_investor, entries, all_requests)
             nxt = my_withdrawable.get("next_unlock")
             my_withdrawable["next_unlock_human"] = nxt.strftime("%d %b %Y") if nxt else None
@@ -1579,6 +1583,7 @@ def dashboard_investors():
         closed_withdrawals=closed_withdrawals,
         withdrawal_investors=[n for n in investors if not (owner_name and deposits._same_name(n, owner_name))] if is_owner_role else [],
         my_withdrawable=my_withdrawable,
+        my_email_notifications=my_email_notifications,
         prefill_name=prefill_name,
         is_existing_investor=is_existing_investor,
         lock_days=deposits.lock_days(),
@@ -2179,6 +2184,21 @@ def dashboard_toggle_email_notifications():
         "enabled": bool(settings.get("enabled")),
         "recipient": settings.get("to") or notifications.get_recipient(),
     }), 200
+
+
+@dashboard.route("/dashboard/notifications/my-email", methods=["POST"])
+@login_required
+def dashboard_toggle_my_email_notifications():
+    """Investor: opt in/out of trade emails to their registered address."""
+    user_id = flask_session.get("uid")
+    if _read_identity()["role"] != "investor" or not user_id:
+        return jsonify({"status": "error", "message": "forbidden_viewer_role"}), 403
+    payload = request.get_json(silent=True) or request.form or {}
+    enabled = str(payload.get("enabled")).strip().lower() in ("1", "true", "yes", "on")
+    ok, _status = users.set_email_notifications(user_id, enabled)
+    if not ok:
+        return jsonify({"status": "error", "message": "save_failed"}), 500
+    return jsonify({"status": "success", "enabled": enabled}), 200
 
 
 @dashboard.route("/dashboard/trail/<position_id>", methods=["POST"])
