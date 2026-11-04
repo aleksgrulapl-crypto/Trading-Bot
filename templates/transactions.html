@@ -115,15 +115,22 @@
           <td>{{ e.investor|default('Unassigned') }}</td>
           <td>
             <span class="pill {% if e.type == 'deposit' %}pill-long{% elif e.type == 'withdrawal' %}pill-short{% else %}pill-status{% endif %}">
-              {{ 'Broker Fee' if e.type == 'fee' else e.type|capitalize }}
+              {{ 'Overnight Funding Adjustment' if e.category == 'overnight_funding_adjustment' else ('Broker Fee' if e.type == 'fee' else e.type|capitalize) }}
             </span>
           </td>
+          {% if e.category == 'overnight_funding_adjustment' %}
+          {% set adj = -(e.amount or 0) %}
+          <td class="{% if adj >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+            {{ '+' if adj >= 0 else '-' }}£{{ "%.2f"|format(adj|abs) }}
+          </td>
+          {% else %}
           <td class="{% if e.type == 'deposit' %}pnl-pos{% else %}pnl-neg{% endif %}">
             £{{ "%.2f"|format(e.amount or 0) }}
           </td>
+          {% endif %}
           <td>{{ e.note or '—' }}</td>
           <td>
-            {% if e.type == 'fee' %}<button onclick="editFeeEntry('{{ e.id }}', {{ e.amount or 0 }})">Edit</button>{% endif %}
+            {% if e.type == 'fee' %}<button onclick="editFeeEntry('{{ e.id }}', {{ e.amount or 0 }}, {{ 'true' if e.category == 'overnight_funding_adjustment' else 'false' }})">Edit</button>{% endif %}
             <button class="button-danger" onclick="deleteTransactionEntry('{{ e.id }}')">Delete</button>
           </td>
         </tr>
@@ -155,15 +162,21 @@ function onTransactionTypeChange() {
     investorField.style.opacity = isFee ? "0.6" : "1";
 }
 
-function editFeeEntry(entryId, current) {
-    const raw = window.prompt('New broker fee amount (£):', Number(current).toFixed(2));
+function editFeeEntry(entryId, current, isAdjustment) {
+    // Adjustments are shown/entered as signed credits (+) / charges (-);
+    // the ledger stores them as a fee amount (charge positive).
+    const shown = isAdjustment ? -Number(current) : Number(current);
+    const raw = window.prompt(
+        isAdjustment ? 'New overnight funding adjustment (£, + credit / - charge):' : 'New broker fee amount (£):',
+        shown.toFixed(2));
     if (raw === null) {
         return;
     }
+    const amount = isAdjustment ? String(-Number(raw)) : raw;
     fetch(`/dashboard/transactions/${encodeURIComponent(entryId)}/edit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: raw })
+        body: JSON.stringify({ amount: amount })
     })
         .then(r => r.json())
         .then(d => {

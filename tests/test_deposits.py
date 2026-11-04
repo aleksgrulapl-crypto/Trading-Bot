@@ -514,6 +514,19 @@ class TestOvernightFeeAndInvestorRoi:
         assert dep.check_overnight_fee(1010.0, pnl, now=self._at(22, 30))["action"] == "no_fee"
         assert not [e for e in dep.load_entries(dep.LOG_PATH) if e["type"] == "fee"]
 
+    def test_overnight_fee_uses_fallback_baseline_when_snapshot_missed(self, dep):
+        dep._save_balance_state(1000.0, self._at(19, 0).isoformat(), path=str(dep.BALANCE_STATE_PATH))
+        res = dep.check_overnight_fee(995.5, now=self._at(22, 31))
+        assert res["action"] == "fee_recorded" and res["amount"] == pytest.approx(4.5)
+
+    def test_overnight_credit_is_recorded_as_funding_adjustment(self, dep):
+        dep._save_balance_state(1000.0, self._at(19, 0).isoformat(), path=str(dep.BALANCE_STATE_PATH))
+        res = dep.check_overnight_fee(1004.39, now=self._at(22, 31))
+        assert res["action"] == "fee_recorded" and res["amount"] == pytest.approx(-4.39)
+        e = dep.load_entries(dep.LOG_PATH)[0]
+        assert e["category"] == "overnight_funding_adjustment" and e["amount"] == -4.39
+        assert dep.summarize([e])["total_fees"] == -4.39
+
     def test_update_fee_amount_only_edits_fees(self, dep):
         _ok, rec, _s = dep.add_entry("deposit", 100, "Jane", path=dep.LOG_PATH)
         assert dep.update_fee_amount(rec["id"], 5, path=dep.LOG_PATH)[1] == "not_a_fee"
