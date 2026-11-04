@@ -36,7 +36,7 @@ def test_trailing_sl_updates_long_position(monkeypatch):
     monkeypatch.setattr(trail_sl.config, "TRAIL_TIGHTEN_STEP_PERC", 0.15)
 
     calls = []
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl: calls.append((deal_id, sl)) or True)
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl, tp=None: calls.append((deal_id, sl)) or True)
 
     trail_sl.run_trailing_sl()
 
@@ -55,7 +55,7 @@ def test_trailing_sl_supports_whole_percent_inputs(monkeypatch):
     monkeypatch.setattr(trail_sl.config, "TRAIL_TIGHTEN_STEP_PERC", 0.15)
 
     calls = []
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl: calls.append((deal_id, sl)) or True)
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl, tp=None: calls.append((deal_id, sl)) or True)
 
     trail_sl.run_trailing_sl()
 
@@ -72,7 +72,7 @@ def test_trailing_sl_tightens_further_as_profit_grows(monkeypatch):
     monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.60)
 
     calls = []
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl: calls.append((deal_id, sl)) or True)
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl, tp=None: calls.append((deal_id, sl)) or True)
 
     trail_sl.run_trailing_sl()
 
@@ -91,7 +91,7 @@ def test_trailing_sl_caps_at_trail_max_perc_deep_in_profit(monkeypatch):
     monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.65)
 
     calls = []
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl: calls.append((deal_id, sl)) or True)
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl, tp=None: calls.append((deal_id, sl)) or True)
 
     trail_sl.run_trailing_sl()
 
@@ -106,7 +106,7 @@ def test_trailing_sl_skips_unknown_direction(monkeypatch):
     monkeypatch.setattr(trail_sl.session, "enrich_positions", lambda _: [pos])
 
     calls = []
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl: calls.append((deal_id, sl)) or True)
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl, tp=None: calls.append((deal_id, sl)) or True)
 
     trail_sl.run_trailing_sl()
 
@@ -122,7 +122,7 @@ def test_trailing_sl_activates_at_half_of_tp_move(monkeypatch):
     monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.50)
 
     calls = []
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl: calls.append((deal_id, sl)) or True)
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl, tp=None: calls.append((deal_id, sl)) or True)
 
     trail_sl.run_trailing_sl()
     assert calls == []
@@ -144,7 +144,7 @@ def test_trailing_sl_reads_enriched_limit_level_as_tp(monkeypatch):
     monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.50)
 
     calls = []
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl: calls.append((deal_id, sl)) or True)
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl, tp=None: calls.append((deal_id, sl)) or True)
 
     trail_sl.run_trailing_sl()
     assert len(calls) == 1 and calls[0][1] > 221.0
@@ -163,7 +163,7 @@ def test_trailing_sl_activates_via_pnl_gbp_floor_before_perc_threshold(monkeypat
     monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.70)
 
     calls = []
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl: calls.append((deal_id, sl)) or True)
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl, tp=None: calls.append((deal_id, sl)) or True)
 
     trail_sl.run_trailing_sl()
 
@@ -182,7 +182,7 @@ def test_trailing_sl_pnl_floor_does_not_activate_below_threshold(monkeypatch):
     monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.70)
 
     calls = []
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl: calls.append((deal_id, sl)) or True)
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda deal_id, sl, tp=None: calls.append((deal_id, sl)) or True)
 
     trail_sl.run_trailing_sl()
 
@@ -197,7 +197,7 @@ def _setup_throttle(monkeypatch, positions):
     monkeypatch.setattr(trail_sl.config, "TRAIL_SL_PERC", 0.30)
     monkeypatch.setattr(trail_sl.config, "TRAIL_TIGHTEN_STEP_PERC", 0.15)
     calls = []
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda d, sl: calls.append(sl) or True)
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda d, sl, tp=None: calls.append(sl) or True)
     return calls
 
 
@@ -219,7 +219,7 @@ def test_trailing_sl_ignores_tiny_moves_after_first_lock(monkeypatch):
 
 def test_trailing_sl_failure_cooldown(monkeypatch):
     calls = _setup_throttle(monkeypatch, [_mock_position()])
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda d, sl: calls.append(sl) or False)
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda d, sl, tp=None: calls.append(sl) or False)
     trail_sl.run_trailing_sl()
     trail_sl.run_trailing_sl()
     assert len(calls) == 1
@@ -229,8 +229,8 @@ def _run(monkeypatch, pos):
     monkeypatch.setattr(trail_sl.session, "get_positions", lambda: [{}])
     monkeypatch.setattr(trail_sl.session, "enrich_positions", lambda _: [pos])
     sl_calls, tp_calls = [], []
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda d, sl: sl_calls.append((d, sl)) or True)
-    monkeypatch.setattr(trail_sl, "_remove_take_profit", lambda d: tp_calls.append(d) or trail_settings.mark_tp_trail(d))
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda d, sl, tp=None: sl_calls.append((d, sl)) or True)
+    monkeypatch.setattr(trail_sl, "_remove_take_profit", lambda d, s=None: tp_calls.append(d) or trail_settings.mark_tp_trail(d))
     trail_sl.run_trailing_sl()
     return sl_calls, tp_calls
 
@@ -277,8 +277,8 @@ def test_tp_not_removed_if_sl_update_fails(monkeypatch):
     pos = _mock_position(dealId="TV1", current_price=109.0, stopLevel=95.0, profitLevel=110.0)
     monkeypatch.setattr(trail_sl.session, "get_positions", lambda: [{}])
     monkeypatch.setattr(trail_sl.session, "enrich_positions", lambda _: [pos])
-    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda d, sl: False)
+    monkeypatch.setattr(trail_sl, "_update_stop_level", lambda d, sl, tp=None: False)
     removed = []
-    monkeypatch.setattr(trail_sl, "_remove_take_profit", lambda d: removed.append(d))
+    monkeypatch.setattr(trail_sl, "_remove_take_profit", lambda d, s=None: removed.append(d))
     trail_sl.run_trailing_sl()
     assert removed == []

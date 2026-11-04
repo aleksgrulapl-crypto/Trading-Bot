@@ -170,16 +170,19 @@ def _activation_threshold_perc(position: dict, side: str, entry_price: float) ->
     return min(default_activation, tp_activation)
 
 
-def _update_stop_level(deal_id: str, new_sl: float) -> bool:
+def _update_stop_level(deal_id: str, new_sl: float, tp_level: Optional[float] = None) -> bool:
     """
     Update stopLevel for a single position on Capital.com.
-    Uses session.request which applies authentication and retry logic.
+    Capital.com's PUT replaces both levels, so the existing TP is resent to
+    avoid silently clearing it.
     """
     if not deal_id:
         return False
 
     url = f"{API_POSITIONS}/{deal_id}"
     payload = {"stopLevel": float(new_sl)}
+    if tp_level is not None:
+        payload["profitLevel"] = float(tp_level)
 
     resp = session.request("PUT", url, json=payload)
     if not resp or getattr(resp, "status_code", 0) >= 400:
@@ -199,14 +202,20 @@ _sent_state: Dict[str, Dict[str, float]] = {}
 _tp_fail_ts: Dict[str, float] = {}
 
 
-def _remove_take_profit(deal_id: str) -> bool:
-    """Drop the TP on a position and remember that its SL now trails profit."""
+def _remove_take_profit(deal_id: str, stop_level: Optional[float] = None) -> bool:
+    """Drop the TP on a position and remember that its SL now trails profit.
+
+    stop_level must be resent, otherwise the broker clears the SL too.
+    """
+    if stop_level is None:
+        logger.warning("Not removing TP for %s: no SL known to preserve", deal_id)
+        return False
     cooldown = _cfg_float("TRAIL_FAILURE_COOLDOWN_SECONDS", 120.0)
     last_fail = _tp_fail_ts.get(deal_id, 0.0)
     if last_fail and time.monotonic() - last_fail < cooldown:
         return False
 
-    resp = session.request("PUT", f"{API_POSITIONS}/{deal_id}", json={"profitLevel": None})
+    resp = session.request("PUT", f"{API_POSITIONS}/{deal_id}", json={"stopLevel": float(stop_level), "profitLevel": None})
     if not resp or getattr(resp, "status_code", 0) >= 400:
         _tp_fail_ts[deal_id] = time.monotonic()
         logger.warning(
@@ -412,6 +421,7 @@ def run_trailing_sl() -> None:
 
         # For longs: only move if trail_sl is greater than existing SL (i.e., tighten upwards)
         # For shorts: only move if trail_sl is less than existing SL (i.e., tighten downwards)
+        current_sl = existing_sl_f
         should_update = False
         if existing_sl_f is None:
             should_update = True
@@ -426,8 +436,9 @@ def run_trailing_sl() -> None:
             sl_secured = existing_sl_f is not None
         elif not _throttle_allows(deal_id, side, trail_sl, existing_sl_f, entry_price_f):
             sl_secured = False
-        elif _update_stop_level(deal_id, trail_sl):
+        elif _update_stop_level(deal_id, trail_sl, None if tp_active else tp_level):
             _record_sent(deal_id, trail_sl)
+            current_sl = trail_sl
             sl_secured = True
             logger.info("Trail SL updated → deal=%s dir=%s entry=%s current=%s newSL=%s", deal_id, direction, entry_price_f, current_price_f, trail_sl)
         else:
@@ -437,4 +448,4 @@ def run_trailing_sl() -> None:
 
         # TP trail: only drop the TP once the SL is already locking profit.
         if tp_trigger and sl_secured:
-            _remove_take_profit(deal_id)
+            _remove_take_profit(deal_id, current_sl)
