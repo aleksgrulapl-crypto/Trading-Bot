@@ -192,12 +192,12 @@ def save_entries(entries: List[Dict[str, Any]], path: str = LOG_PATH) -> bool:
     return ok
 
 
-def _coerce_amount(raw: Any) -> Optional[float]:
+def _coerce_amount(raw: Any, allow_negative: bool = False) -> Optional[float]:
     try:
         amount = round(float(raw), 2)
     except (TypeError, ValueError):
         return None
-    if amount <= 0:
+    if amount == 0 or (amount < 0 and not allow_negative):
         return None
     return amount
 
@@ -209,11 +209,14 @@ def add_entry(
     note: str = "",
     occurred_at: Optional[str] = None,
     path: str = LOG_PATH,
+    category: Optional[str] = None,
 ) -> Tuple[bool, Optional[Dict[str, Any]], str]:
     """Append a new deposit/withdrawal/fee row to the ledger.
 
     *amount* must be a positive number; direction is carried by *entry_type*
     ("deposit", "withdrawal", or "fee"), not by the sign of the amount.
+    The one exception is a "fee" entry, where a negative amount is a credit
+    (e.g. a positive Capital.com overnight funding adjustment).
     *investor* identifies whose capital this entry belongs to, so
     ROI/ownership share can be calculated per-person. Fee entries are a
     broker-level cost (e.g. Capital.com commission/financing charges)
@@ -224,7 +227,7 @@ def add_entry(
     if normalized_type not in VALID_TYPES:
         return False, None, "invalid_type"
 
-    amt = _coerce_amount(amount)
+    amt = _coerce_amount(amount, allow_negative=normalized_type == "fee")
     if amt is None:
         return False, None, "invalid_amount"
 
@@ -249,6 +252,8 @@ def add_entry(
         "occurred_at": when,
         "created_at": _now_iso(),
     }
+    if category:
+        record["category"] = str(category)[:50]
 
     with _deposits_lock:
         entries = load_entries(path)
@@ -280,7 +285,7 @@ def update_fee_amount(entry_id: str, amount: Any, path: str = LOG_PATH) -> Tuple
     target = str(entry_id or "").strip()
     if not target:
         return False, "invalid_id"
-    amt = _coerce_amount(amount)
+    amt = _coerce_amount(amount, allow_negative=True)
     if amt is None:
         return False, "invalid_amount"
 
@@ -1343,6 +1348,31 @@ OVERNIGHT_FEE_STATE_PATH = os.environ.get("OVERNIGHT_FEE_STATE_PATH") or (getatt
 OVERNIGHT_FEE_START = (20, 30)
 OVERNIGHT_FEE_END = (22, 30)
 OVERNIGHT_FEE_GRACE_MINUTES = 5
+OVERNIGHT_ADJUSTMENT_CATEGORY = "overnight_funding_adjustment"
+
+
+def _fallback_overnight_baseline(window_start: datetime) -> Optional[Tuple[float, datetime]]:
+    """Best available pre-window balance when the 20:30 snapshot is missing:
+    the last auto-detector balance, else today's first daily snapshot, but only
+    if observed before the window opened."""
+    state = _load_balance_state(BALANCE_STATE_PATH)
+    if state is not None:
+        as_of = _parse_entry_datetime(state.get("as_of"))
+        try:
+            if as_of is not None and as_of < window_start:
+                return round(float(state["balance"]), 2), as_of
+        except (TypeError, ValueError):
+            pass
+    today = window_start.date().isoformat()
+    for r in _load_balance_history(BALANCE_HISTORY_PATH):
+        if r.get("date") == today:
+            rec = _parse_entry_datetime(r.get("recorded_at"))
+            try:
+                if rec is not None and rec < window_start:
+                    return round(float(r["balance"]), 2), rec
+            except (TypeError, ValueError):
+                pass
+    return None
 
 
 def check_overnight_fee(
@@ -1382,12 +1412,22 @@ def check_overnight_fee(
 
         if state is None:
             if now >= end:
-                return {"action": "skipped", "reason": "no_baseline"}
-            _atomic_write(state_path, {
-                "date": today, "baseline": round(current_balance, 2),
-                "started_at": now.isoformat(), "recorded": False,
-            })
-            return {"action": "baseline_set", "balance": current_balance}
+                # The 20:30 balance was never captured (e.g. app was down).
+                # Fall back to the last balance observed before the window
+                # so the fee is still derived from the unexplained change.
+                fallback = _fallback_overnight_baseline(start)
+                if fallback is None:
+                    return {"action": "skipped", "reason": "no_baseline"}
+                state = {
+                    "date": today, "baseline": fallback[0],
+                    "started_at": fallback[1].isoformat(), "recorded": False,
+                }
+            else:
+                _atomic_write(state_path, {
+                    "date": today, "baseline": round(current_balance, 2),
+                    "started_at": now.isoformat(), "recorded": False,
+                })
+                return {"action": "baseline_set", "balance": current_balance}
 
         if state.get("recorded") or now < end:
             return {"action": "waiting"}
@@ -1402,13 +1442,14 @@ def check_overnight_fee(
         _atomic_write(state_path, state)
 
         max_fee = float(getattr(config, "OVERNIGHT_FEE_MAX", 25.0) or 25.0) if config else 25.0
-        if delta >= 0 or -delta > max_fee or -delta < 0.01:
+        if abs(delta) > max_fee or abs(delta) < 0.01:
             return {"action": "no_fee", "delta": delta}
 
+    # Net overnight funding adjustment: charge when the balance fell, credit when it rose.
     fee = round(-delta, 2)
     ok, entry, status = add_entry(
-        "fee", fee, "", "Auto-detected overnight adjustment (20:30-22:30 UK) - edit if incorrect",
-        occurred_at=now.isoformat(), path=LOG_PATH,
+        "fee", fee, "", "Auto-detected overnight funding adjustment (20:30-22:30 UK) - edit if incorrect",
+        occurred_at=now.isoformat(), path=LOG_PATH, category=OVERNIGHT_ADJUSTMENT_CATEGORY,
     )
     if not ok:
         return {"action": "failed", "status": status}
