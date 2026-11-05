@@ -894,6 +894,24 @@ def webhook():
                 logger.exception("[cid=%s] Failed to apply SL cap to alert levels", cid)
                 return _ok_response({"status": "error", "message": "sl_tp_calculation_failed", "entry": entry_price, "cid": cid})
             logger.info("[cid=%s] TradingView SL/TP applied → sl=%s tp=%s (alert sl=%s tp=%s)", cid, sl_price, tp_price, alert_sl, alert_tp)
+
+            # The live price can have moved past the alert's levels (or the
+            # alert's levels can be on the wrong side), which sizing would
+            # block as invalid. Replace only the offending leg(s) with the
+            # fixed-percentage-of-equity level instead of dropping the trade.
+            is_buy = str(action).strip().lower() == "buy"
+            sl_ok = (sl_price < entry_price) if is_buy else (sl_price > entry_price)
+            tp_ok = (tp_price > entry_price) if is_buy else (tp_price < entry_price)
+            if not (sl_ok and tp_ok):
+                fb_sl, fb_tp = FixedSLTP.long_levels(entry_price) if is_buy else FixedSLTP.short_levels(entry_price)
+                if fb_sl is not None and fb_tp is not None:
+                    new_sl = sl_price if sl_ok else fb_sl
+                    new_tp = tp_price if tp_ok else fb_tp
+                    logger.warning(
+                        "[cid=%s] Invalid TradingView SL/TP vs entry %s (sl %s→%s, tp %s→%s) — fixed fallback applied",
+                        cid, entry_price, sl_price, new_sl, tp_price, new_tp,
+                    )
+                    sl_price, tp_price = new_sl, new_tp
         else:
             logger.warning("[cid=%s] Alert missing sl/tp (sl=%s tp=%s) — falling back to fixed SL/TP", cid, alert_sl, alert_tp)
             if str(action).strip().lower() == "buy":
