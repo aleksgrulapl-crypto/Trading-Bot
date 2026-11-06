@@ -387,6 +387,22 @@ class TestBackendEntries:
         assert s["total_withdrawals"] == 0 and s["backend_net_cost"] == 10.0
         assert deposits.add_pledge("BACKEND", 100)[0] is False
 
+    def test_owner_paid_backend_moves_units_to_owner(self):
+        import deposits
+        owner = deposits.config.OWNER_INVESTOR_NAME
+        entries = [
+            self._e("deposit", 500.0, owner, "2026-01-01T00:00:00"),
+            self._e("deposit", 500.0, "A", "2026-01-01T00:00:00"),
+            self._e("withdrawal", 100.0, "Backend (Owner paid)", "2026-01-02T00:00:00"),
+        ]
+        r = deposits.investor_breakdown(entries, [], owner_override_pct_override=0)
+        by = {i["investor"]: i for i in r["investors"]}
+        assert set(by) == {owner, "A"}
+        assert by["A"]["current_value"] == 450.0
+        assert by[owner]["current_value"] == 550.0
+        assert deposits.list_investors(entries) == sorted([owner, "A"], key=str.lower)
+        assert deposits.summarize(entries)["backend_net_cost"] == 100.0
+
     def test_period_returns_ignore_withdrawals(self, tmp_path):
         import deposits
         from datetime import datetime

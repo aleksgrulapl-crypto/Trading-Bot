@@ -55,9 +55,20 @@ FEE_ENTRY_LABEL = "Broker"
 # cost). The operator itself never holds units.
 BACKEND_ENTRY_LABEL = "Backend"
 
+# A backend cost the owner paid from their own pocket (the fund balance did
+# not change). Every non-owner unit holder gives up units pro-rata to the
+# cost and those units are credited to the owner; total units, fund value and
+# NAV-per-unit are unchanged. A deposit reverses this.
+BACKEND_OWNER_PAID_LABEL = "Backend (Owner paid)"
+
+
+def is_owner_paid_backend(name: Any) -> bool:
+    return str(name or "").strip().lower() == BACKEND_OWNER_PAID_LABEL.lower()
+
 
 def is_backend_investor(name: Any) -> bool:
-    return str(name or "").strip().lower() == BACKEND_ENTRY_LABEL.lower()
+    n = str(name or "").strip().lower()
+    return n == BACKEND_ENTRY_LABEL.lower() or n == BACKEND_OWNER_PAID_LABEL.lower()
 
 # Module-level lock protecting all read-modify-write operations on the deposits log file.
 _deposits_lock = threading.Lock()
@@ -237,7 +248,9 @@ def add_entry(
     elif not investor_name:
         return False, None, "invalid_investor"
     investor_name = investor_name[:100]
-    if is_backend_investor(investor_name):
+    if is_owner_paid_backend(investor_name):
+        investor_name = BACKEND_OWNER_PAID_LABEL
+    elif is_backend_investor(investor_name):
         investor_name = BACKEND_ENTRY_LABEL
 
     # Accept a caller-supplied date (YYYY-MM-DD or ISO datetime); fall back to now.
@@ -955,6 +968,7 @@ def investor_breakdown(
         capital_events.append({
             "ts": occurred or as_of, "kind": "capital", "ctype": etype,
             "investor": name, "amount": amt, "backend": backend,
+            "owner_paid": is_owner_paid_backend(name),
         })
 
         if backend:
@@ -1030,6 +1044,22 @@ def investor_breakdown(
                     nav_per_unit = fund_value / total_units if total_units > 0 else nav_per_unit
             high_water_mark = max(high_water_mark, nav_per_unit)
         else:  # capital event
+            if ev["backend"] and ev.get("owner_paid"):
+                # Owner covered the cost personally: shift units from every
+                # other holder to the owner; fund value and NAV are unchanged.
+                if total_units <= 0 or fund_value <= 0 or not owner_key:
+                    continue
+                signed = -ev["amount"] if ev["ctype"] == "withdrawal" else ev["amount"]
+                moved = 0.0
+                for holder in list(investor_units):
+                    if holder == owner_key:
+                        continue
+                    delta = investor_units[holder] * signed / fund_value
+                    delta = max(delta, -investor_units[holder]) if signed < 0 else delta
+                    investor_units[holder] += delta
+                    moved += delta
+                investor_units[owner_key] = investor_units.get(owner_key, 0.0) - moved
+                continue
             if ev["backend"]:
                 # Backend cost: scale every holder's units by the same factor
                 # (NAV-per-unit is unchanged), so each investor bears or
