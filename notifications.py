@@ -21,6 +21,7 @@ import smtplib
 import ssl
 import tempfile
 import threading
+import time
 from email.message import EmailMessage
 from typing import Any, Dict, Optional
 
@@ -157,22 +158,29 @@ def _smtp_send(to_addrs, subject: str, body: str) -> bool:
     msg["To"] = ", ".join(to_addrs)
     msg.set_content(body)
 
-    try:
-        if config.SMTP_USE_TLS:
-            context = ssl.create_default_context()
-            with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=10) as server:
-                server.starttls(context=context)
-                server.login(config.SMTP_USERNAME, config.SMTP_PASSWORD)
-                server.send_message(msg)
-        else:
-            with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, timeout=10) as server:
-                server.login(config.SMTP_USERNAME, config.SMTP_PASSWORD)
-                server.send_message(msg)
-        logger.info("_smtp_send: sent '%s' to %s", subject, ", ".join(to_addrs))
-        return True
-    except Exception:
-        logger.exception("_smtp_send: failed to send '%s'", subject)
-        return False
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            if config.SMTP_USE_TLS:
+                context = ssl.create_default_context()
+                with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=30) as server:
+                    server.starttls(context=context)
+                    server.login(config.SMTP_USERNAME, config.SMTP_PASSWORD)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, timeout=30) as server:
+                    server.login(config.SMTP_USERNAME, config.SMTP_PASSWORD)
+                    server.send_message(msg)
+            logger.info("_smtp_send: sent '%s' to %s", subject, ", ".join(to_addrs))
+            return True
+        except Exception:
+            if attempt < attempts:
+                logger.warning("_smtp_send: attempt %d/%d failed for '%s'; retrying",
+                               attempt, attempts, subject, exc_info=True)
+                time.sleep(2 * attempt)
+            else:
+                logger.exception("_smtp_send: failed to send '%s'", subject)
+    return False
 
 
 def _send_email_sync(subject: str, body: str) -> bool:
