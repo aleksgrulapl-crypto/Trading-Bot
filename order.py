@@ -11,7 +11,7 @@ from auth import auth
 import config
 from config import API_POSITIONS, API_MARKET, API_BASE
 from utils import uk_timestamp
-from trade_log import append_open_trade, set_dealId_for_dealReference
+from trade_log import append_open_trade, set_dealId_for_dealReference, remove_pending_trade_by_dealReference
 
 logger = logging.getLogger("order")
 if not logger.handlers:
@@ -157,6 +157,7 @@ def place_order(
     if deal_ref:
         confirms_url = f"{API_BASE}/api/v1/confirms/{deal_ref}"
         backoff = 0.2
+        rejected = False
         for attempt in range(10):
             time.sleep(backoff)
             try:
@@ -172,6 +173,7 @@ def place_order(
                     deal_status = str(body.get("dealStatus") or "").upper()
                     if deal_status in ("REJECTED", "DECLINED"):
                         logger.warning("Broker rejected order for dealReference=%s: %s", deal_ref, body.get("reason"))
+                        rejected = True
                         break
                     real_deal_id = body.get("dealId") or body.get("deal_id")
                     if real_deal_id:
@@ -181,6 +183,13 @@ def place_order(
             except Exception as e:
                 logger.debug("Confirm attempt exception: %s", e)
             backoff = min(backoff * 1.5, 2.0)
+
+        if rejected:
+            try:
+                remove_pending_trade_by_dealReference(deal_ref)
+            except Exception:
+                logger.exception("Failed to remove rejected pending trade for dealReference=%s", deal_ref)
+            return {"status": "error", "message": "order_rejected_by_broker", "dealReference": deal_ref}
 
         if real_deal_id:
             logger.info("Mapped dealReference -> dealId: %s", real_deal_id)

@@ -1810,6 +1810,26 @@ def set_dealId_for_dealReference(dealReference: Any, dealId: Any, path: str = LO
         return updated
 
 
+def remove_pending_trade_by_dealReference(dealReference: Any, path: str = LOG_PATH) -> bool:
+    """Drop OPEN rows with no dealId for a broker-rejected *dealReference*."""
+    if not dealReference:
+        return False
+    with _trade_log_lock:
+        trades = load_raw_log(path)
+        kept = [
+            t for t in trades
+            if not (
+                t.get("dealReference") == dealReference
+                and str(t.get("status", "OPEN")).upper() == "OPEN"
+                and (not t.get("dealId") or _dealid_is_placeholder(t.get("dealId"), t.get("dealReference")))
+            )
+        ]
+        if len(kept) == len(trades):
+            return False
+        save_raw_log(kept, path)
+        return True
+
+
 def reconcile_with_positions(live_positions: List[Dict[str, Any]], path: str = LOG_PATH) -> Dict[str, List[Dict[str, Any]]]:
     """Reconcile local trade log against live broker positions."""
     canonicalize_trade_log(path)

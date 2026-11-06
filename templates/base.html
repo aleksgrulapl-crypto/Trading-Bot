@@ -744,7 +744,24 @@ function refreshDashboard() {
                 if (data && data.html) {
                     const container = document.getElementById(target.container);
                     if (container) {
+                        // Preserve unsaved input edits across refreshes
+                        const dirty = {};
+                        container.querySelectorAll('input[id], select[id], textarea[id]').forEach(el => {
+                            const edited = el.type === 'checkbox'
+                                ? el.checked !== el.defaultChecked
+                                : el.value !== el.defaultValue;
+                            if (edited || el === document.activeElement) {
+                                dirty[el.id] = { value: el.value, checked: el.checked, focus: el === document.activeElement };
+                            }
+                        });
                         container.innerHTML = data.html;
+                        Object.keys(dirty).forEach(id => {
+                            const el = document.getElementById(id);
+                            if (!el) return;
+                            if (el.type === 'checkbox') el.checked = dirty[id].checked;
+                            else el.value = dirty[id].value;
+                            if (dirty[id].focus) el.focus();
+                        });
                     }
                     if (data.account && {{ 'true' if role == 'owner' else 'false' }}) {
                         renderHeaderAccount(data.account);
