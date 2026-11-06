@@ -39,7 +39,9 @@
       <a href="/dashboard/roi">ROI page</a>, deducted from the Overall P&amp;L.
       A Withdrawal with operator <strong>Backend</strong> covers backend costs: the same
       percentage of units is taken from every investor. A Backend Deposit adds units back
-      the same way (to balance an over-estimated cost). Deposits/withdrawals never affect
+      the same way (to balance an over-estimated cost). If the cost did not come out of the
+      fund balance (you paid it personally), use <strong>Backend (Owner paid)</strong>: investors
+      lose units pro-rata and those units are credited to the owner. Deposits/withdrawals never affect
       the Daily/Weekly/Monthly returns, which reflect trade profitability only.
       {% if totals.backend_net_cost %}Net backend cost so far: £{{ "%.2f"|format(totals.backend_net_cost) }}.{% endif %}
     </p>
@@ -69,7 +71,7 @@
                style="padding: 6px 8px; border-radius: 6px; background: var(--card); color: var(--text); border: 1px solid var(--border); width: 140px;">
         <datalist id="investor-list">
           <option value="Backend">
-          {% for inv in investors %}
+          <option value="Backend (Owner paid)">          {% for inv in investors %}
           <option value="{{ inv }}">
           {% endfor %}
         </datalist>
