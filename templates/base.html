@@ -536,11 +536,46 @@
             header .header-right { align-items: center; }
             header .nav { flex-wrap: wrap; justify-content: center; }
         }
+        .m-nav { display: none; }
+        @media (max-width: 720px) {
+            body { overflow-x: hidden; }
+            header {
+                grid-template-columns: auto minmax(0, 1fr);
+                grid-template-areas: "menu clock" "title title" "right right";
+                gap: 10px 12px;
+                padding: 12px 14px;
+            }
+            header .m-nav { display: block; grid-area: menu; justify-self: start; }
+            header .uk-clock { grid-area: clock; grid-column: auto; grid-row: auto; text-align: right; font-size: 14px; }
+            header .title { grid-area: title; font-size: 20px; }
+            header .header-right { grid-area: right; align-items: center; }
+            header .nav { display: none; }
+            .m-nav select {
+                background: rgba(56, 189, 248, 0.12);
+                color: var(--accent);
+                border: 1px solid rgba(56, 189, 248, 0.45);
+                border-radius: 8px;
+                padding: 8px 10px;
+                font-size: 14px;
+                font-weight: 600;
+                max-width: 150px;
+            }
+            #dashboard-content { padding-left: 10px; padding-right: 10px; }
+            .grid > *, .grid-two > *, .grid-full > * { min-width: 0; }
+            .card { padding: 12px 10px; max-width: 100%; box-sizing: border-box; }
+            .card-header { flex-direction: column; gap: 8px; }
+            .card-title { white-space: normal; text-align: center; }
+            .card-header .email-notify-toggle { position: static !important; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+            .table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+            .table th, .table td { padding: 6px; }
+            .table-spaced th, .table-spaced td { padding: 8px 10px; }
+        }
     </style>
 </head>
 <body>
 
 <header>
+    <div class="m-nav"><select id="m-nav-select" aria-label="Menu"></select></div>
     <div id="uk-clock" class="uk-clock" aria-live="off">
         <span class="uk-clock-label">UK Time</span>
         <span id="uk-clock-value">--:--:--</span>
@@ -608,6 +643,24 @@
 <footer class="site-footer">
     {% include "_footer_sections.html" %}
 </footer>
+
+<script>
+(function () {
+    const sel = document.getElementById('m-nav-select');
+    if (!sel) return;
+    const ph = document.createElement('option');
+    ph.value = ''; ph.textContent = '\u2630 Menu';
+    sel.appendChild(ph);
+    document.querySelectorAll('header .nav a').forEach(function (a) {
+        const o = document.createElement('option');
+        o.value = a.getAttribute('href');
+        o.textContent = a.textContent.trim();
+        if (o.value === location.pathname) o.selected = true;
+        sel.appendChild(o);
+    });
+    sel.addEventListener('change', function () { if (sel.value) location.href = sel.value; });
+})();
+</script>
 
 <script>
 (function () {
