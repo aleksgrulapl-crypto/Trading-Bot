@@ -56,14 +56,27 @@ LEVERAGE = int(os.getenv("LEVERAGE", 5))
 #   MAX_EQUITY_PER_TRADE    – equity (before leverage) allocated to one trade
 #   MAX_EQUITY_PER_TICKER   – combined equity allowed across all open trades for one ticker
 #   MAX_EXPOSURE_PER_TRADE  – leveraged exposure allocated to one trade
-# Defaults: up to £100 equity per trade/timeframe (£500 exposure at 5x
-# leverage), and up to £300 combined equity per ticker across its 3
-# timeframes (3 x £100). These are the CEILING values for a ticker with a
-# strong (or not-yet-known) win rate; sizing.py scales them down per ticker
-# based on TICKER_EQUITY_SCALE_MIN / the ticker's TradingView win rate below.
-MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 100))
-MAX_EQUITY_PER_TICKER = float(os.getenv("MAX_EQUITY_PER_TICKER", 300))
-MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 500))
+# Defaults: up to £150 equity per trade/timeframe (£750 exposure at 5x
+# leverage), and up to £450 combined equity per ticker across its 3
+# timeframes. These are the base values: a stock with >= GATE_MIN_TRADES
+# closed trades is scaled by PERF_UPSIZE_FACTOR (net-positive, positive
+# Sharpe → £180 / £540) or PERF_DOWNSIZE_FACTOR (net-negative → £75 / £225).
+MAX_EQUITY_PER_TRADE = float(os.getenv("MAX_EQUITY_PER_TRADE", 150))
+MAX_EQUITY_PER_TICKER = float(os.getenv("MAX_EQUITY_PER_TICKER", 450))
+MAX_EXPOSURE_PER_TRADE = float(os.getenv("MAX_EXPOSURE_PER_TRADE", 750))
+PERF_UPSIZE_FACTOR = float(os.getenv("PERF_UPSIZE_FACTOR", 1.2))
+PERF_DOWNSIZE_FACTOR = float(os.getenv("PERF_DOWNSIZE_FACTOR", 0.5))
+
+# Max units per trade by share price in GBP: (upper price bound, max units).
+# Above the last bound only the equity-based calculation applies. Each band
+# is roughly the £750 exposure ceiling, so cheap stocks can't pile up units.
+PRICE_BAND_MAX_UNITS = (
+    (10.0, 75.0),
+    (50.0, 15.0),
+    (100.0, 7.5),
+    (250.0, 3.0),
+    (500.0, 1.5),
+)
 
 # Weekly-return gating (see gating.py). Stocks are ranked by Sharpe ratio
 # (and net PnL) from closed TradingView/Hedge trades; the bottom
