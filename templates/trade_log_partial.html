@@ -3,7 +3,15 @@
           <tr>
             <td class="small">{{ t.time_entered_human or t.time_entered or '�' }}</td>
             <td class="small">{{ t.time_exited_human or t.time_exited or '�' }}</td>
-            <td>{{ t.ticker or '�' }}</td>
+            <td>{{ t.ticker or '�' }}
+              {% if t.events %}
+              {% set ev = t.events %}
+              <span class="ev-line {{ 'ev-bullish' if ev.sentiment == 'Bullish' else ('ev-bearish' if ev.sentiment == 'Bearish' else '') }}" title="{{ ev.headlines|join(' | ') }}">{{ ev.sentiment }} sentiment</span>
+              {% if ev.earnings_days is not none and ev.earnings_days <= 14 %}
+              <span class="ev-line ev-earnings">Earnings {{ ev.earnings_date }} ({{ 'today' if ev.earnings_days == 0 else 'in ' ~ ev.earnings_days ~ 'd' }})</span>
+              {% endif %}
+              {% endif %}
+            </td>
             <td class="small">{{ t.timeframe or 'N/A' }}</td>
             <td>
               {% if is_owner and t._log_index is not none %}
@@ -19,9 +27,9 @@
             <td>
               {% set side = t.side or t.direction %}
               {% if side == 'Long' %}
-                <span class="pill pill-long">Long</span>
+                <span class="pill {{ 'pill-conflict-long' if t.events and t.events.conflict else 'pill-long' }}"{% if t.events and t.events.conflict %} title="News sentiment is {{ t.events.sentiment }} - against this position"{% endif %}>Long</span>
               {% elif side == 'Short' %}
-                <span class="pill pill-short">Short</span>
+                <span class="pill {{ 'pill-conflict-short' if t.events and t.events.conflict else 'pill-short' }}"{% if t.events and t.events.conflict %} title="News sentiment is {{ t.events.sentiment }} - against this position"{% endif %}>Short</span>
               {% else %}
                 <span class="pill pill-status">{{ side or '�' }}</span>
               {% endif %}

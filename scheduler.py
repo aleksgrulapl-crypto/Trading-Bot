@@ -247,6 +247,18 @@ def check_overnight_fee_job() -> None:
         logger.exception("check_overnight_fee_job failed")
 
 
+def refresh_events_job() -> None:
+    """Fetch earnings/news for open-trade tickers (cached) and send alerts."""
+    try:
+        import events
+        from trade_log import get_open_trades
+        open_trades = get_open_trades()
+        if events.refresh_open_trades(open_trades):
+            events.check_alerts(open_trades)
+    except Exception:
+        logger.exception("refresh_events_job failed")
+
+
 # single scheduler instance
 scheduler = Scheduler()
 
@@ -280,6 +292,8 @@ def start_scheduler() -> None:
     scheduler.add_interval_job(15, check_overnight_fee_job)
     # Public landing-page snapshot (percentages for the last completed week/month)
     scheduler.add_interval_job(3600, refresh_public_snapshot)
+    # Earnings dates + news sentiment for open trades (per-symbol TTL caching)
+    scheduler.add_interval_job(300, refresh_events_job)
     # Optional daily/hourly logging jobs (examples)
     scheduler.add_daily_job(getattr(config, "DAILY_REPORT_HOUR", 22), getattr(config, "DAILY_REPORT_MINUTE", 0), lambda: log_equity("equity_log.json"))
     scheduler.add_hourly_job(0, lambda: log_available("available_log.json"))

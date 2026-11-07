@@ -234,6 +234,12 @@ def notify_daily_pnl(summary: Dict[str, Any]) -> bool:
     return _send_email(f"Daily PnL {day.strftime('%a %d %b')}: {_fmt_money(summary['total'])}", "\n".join(lines))
 
 
+def send_event_alert(subject: str, body: str) -> bool:
+    """Email an events/sentiment alert to the Owner. Investor delivery for
+    affected holdings can be added here later."""
+    return _send_email(subject, body)
+
+
 def notify_position_opened(trade: Dict[str, Any]) -> bool:
     """Email when a position is opened, only when the dashboard toggle is On."""
     if not trade:
