@@ -54,6 +54,39 @@ def test_refresh_failure_is_swallowed(monkeypatch):
     assert events.refresh_symbol("NVDA") is None
 
 
+def test_stock_sectors_and_conflict(monkeypatch):
+    import stocks
+
+    monkeypatch.setattr(events, "_load", lambda: {
+        "NVDA": {"sentiment": "Bearish", "earnings_date": "2099-01-01", "headlines": ["h"]},
+    })
+    sectors = stocks.build_sectors([{"ticker": "NVDA", "side": "Long"}])
+    names = [s["name"] for s in sectors]
+    assert names[0] == "Semiconductors" and "Healthcare" in names
+    nvda = sectors[0]["stocks"][0]
+    assert nvda["symbol"] == "NVDA" and nvda["conflict"] and nvda["open_count"] == 1
+    assert stocks.sector_of("ZZZZ") == "Other"
+
+
+def test_stocks_route_renders(monkeypatch):
+    from flask import Flask
+    import dashboard as dashboard_module
+
+    monkeypatch.setattr(events, "_load", lambda: {"NVDA": {"sentiment": "Bullish", "headlines": ["Shares surge"]}})
+    monkeypatch.setattr(dashboard_module, "_build_request_context", lambda: {
+        "account": {"balance": 1000, "pnl": 0},
+        "combined_trades": [{"ticker": "NVDA", "side": "Long", "status": "OPEN"}],
+    })
+    app = Flask(__name__, template_folder="templates")
+    app.register_blueprint(dashboard_module.dashboard)
+    client = app.test_client()
+    client.set_cookie("dashboard_auth", "1")
+    resp = client.get("/dashboard/stocks")
+    body = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert "Semiconductors" in body and "Shares surge" in body
+
+
 def test_alerts_sent_once(monkeypatch):
     import notifications
 

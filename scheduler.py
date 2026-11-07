@@ -247,16 +247,31 @@ def check_overnight_fee_job() -> None:
         logger.exception("check_overnight_fee_job failed")
 
 
-def refresh_events_job() -> None:
-    """Fetch earnings/news for open-trade tickers (cached) and send alerts."""
+_events_running = threading.Event()
+
+
+def _refresh_events_worker() -> None:
     try:
         import events
+        import stocks
         from trade_log import get_open_trades
         open_trades = get_open_trades()
-        if events.refresh_open_trades(open_trades):
-            events.check_alerts(open_trades)
+        events.refresh_open_trades(open_trades, stocks.universe())
+        events.check_alerts(open_trades)
     except Exception:
         logger.exception("refresh_events_job failed")
+    finally:
+        _events_running.clear()
+
+
+def refresh_events_job() -> None:
+    """Fetch earnings/news for the stock universe (open trades first, cached)
+    and send alerts. Runs in its own thread because the throttled full pass
+    takes minutes and must not block the scheduler loop."""
+    if _events_running.is_set():
+        return
+    _events_running.set()
+    threading.Thread(target=_refresh_events_worker, daemon=True, name="EventsRefresh").start()
 
 
 # single scheduler instance

@@ -30,6 +30,7 @@ import gating
 import hedge
 import notifications
 import events
+import stocks
 import public_snapshot
 import trail_settings
 import trading_switch
@@ -1820,6 +1821,24 @@ def dashboard_users_delete(user_id: str):
             return jsonify({"status": "success"}), 200
         return jsonify({"status": "error", "message": status}), 404
     return redirect("/dashboard/users")
+
+
+@dashboard.route("/dashboard/stocks")
+@non_viewer_page_required
+def dashboard_stocks():
+    """Stocks page: every stock the bot trades, grouped by sector, with cached
+    news sentiment and upcoming earnings (cache-only, no network on load)."""
+    ctx = _build_request_context()
+    open_trades = [t for t in ctx["combined_trades"] or [] if not _is_closed_trade(t)]
+    return render_template(
+        "stocks.html",
+        title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
+        cache_bust=time.time(),
+        account=ctx["account"],
+        sectors=stocks.build_sectors(open_trades, [t.get("ticker") for t in ctx["combined_trades"] or []]),
+        events_enabled=bool(getattr(config, "FINNHUB_API_KEY", "")),
+        is_owner=current_role() == "owner",
+    )
 
 
 @dashboard.route("/dashboard/analytics")

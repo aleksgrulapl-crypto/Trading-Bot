@@ -6,7 +6,7 @@
             <td>{{ t.ticker or '�' }}
               {% if t.events %}
               {% set ev = t.events %}
-              <span class="ev-line {{ 'ev-bullish' if ev.sentiment == 'Bullish' else ('ev-bearish' if ev.sentiment == 'Bearish' else '') }}" title="{{ ev.headlines|join(' | ') }}">{{ ev.sentiment }} sentiment</span>
+              <span class="ev-line {{ 'ev-bullish' if ev.sentiment == 'Bullish' else ('ev-bearish' if ev.sentiment == 'Bearish' else '') }}">{{ ev.sentiment }} sentiment</span>
               {% if ev.earnings_days is not none and ev.earnings_days <= 14 %}
               <span class="ev-line ev-earnings">Earnings {{ ev.earnings_date }} ({{ 'today' if ev.earnings_days == 0 else 'in ' ~ ev.earnings_days ~ 'd' }})</span>
               {% endif %}

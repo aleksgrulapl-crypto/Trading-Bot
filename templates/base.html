@@ -283,6 +283,16 @@
         .ev-bullish { color: var(--success); }
         .ev-bearish { color: var(--danger); }
         .ev-earnings { color: var(--warning); }
+        .sector-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent-soft); margin: 8px 0 -4px; }
+        .stock-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+        .stock-card { padding: 12px; border-radius: 10px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(31, 41, 55, 0.8); display: flex; flex-direction: column; gap: 6px; }
+        .stock-card.sent-bullish { border-left: 3px solid var(--success); }
+        .stock-card.sent-bearish { border-left: 3px solid var(--danger); }
+        .stock-card.has-open { box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35); }
+        .stock-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+        .stock-sym { font-size: 15px; font-weight: 600; }
+        .stock-heads { margin: 0; padding-left: 14px; font-size: 11px; color: var(--text-muted); }
+        .stock-heads li { margin-bottom: 2px; }
         .role-badge {
             display: inline-flex;
             align-items: center;
@@ -484,6 +494,7 @@
             {% if role != 'viewer' %}
             <a href="/dashboard/trades" id="nav-trade-log" class="{% if pending_rejected %}flash-alert{% endif %}" title="{% if pending_rejected %}{{ pending_rejected }} rejected trade(s) to review{% endif %}">Trade Log</a>
             <a href="/dashboard/analytics">Analytics</a>
+            <a href="/dashboard/stocks">Stocks</a>
             {% endif %}
             <a href="/dashboard/investors">Investors</a>
             {% if role in ('owner', 'investor') %}
