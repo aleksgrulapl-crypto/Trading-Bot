@@ -9,6 +9,14 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
+    <script>
+        (function () {
+            try {
+                var t = localStorage.getItem('agc-theme');
+                if (t === 'day' || t === 'night') document.documentElement.setAttribute('data-theme', t);
+            } catch (e) {}
+        })();
+    </script>
 
     <style>
         :root {
@@ -24,17 +32,66 @@
             --success: #4ade80;
             --warning: #facc15;
             --gold: #f5d76e;
+            --surface: rgba(15, 23, 42, 0.85);
+            --surface-deep: rgba(2, 6, 23, 0.9);
+            --line: rgba(31, 41, 55, 0.85);
+            --shadow: rgba(15, 23, 42, 0.7);
+            --hdr-a: #020617;
+            --hdr-b: #0a1a2f;
+            --page-bg: radial-gradient(circle at top, #0f172a 0, #020617 45%, #000 100%);
+            --hover: rgba(56, 189, 248, 0.12);
+            --open-glow: rgba(56, 189, 248, 0.45);
+            --soon: #facc15;
+            --soon-bg: rgba(250, 204, 21, 0.16);
         }
+        :root[data-theme="night"] {
+            --bg: #000; --bg-alt: #0a0a0a; --card: #000; --border: #262626;
+            --accent: #60a5fa; --accent-soft: #3b82f6;
+            --text: #f5f5f5; --text-muted: #a3a3a3;
+            --surface: rgba(18, 18, 18, 0.92);
+            --surface-deep: rgba(0, 0, 0, 0.9);
+            --line: rgba(64, 64, 64, 0.8);
+            --shadow: rgba(0, 0, 0, 0.8);
+            --hdr-a: #000; --hdr-b: #0d0d0d;
+            --page-bg: #000;
+            --hover: rgba(96, 165, 250, 0.15);
+            --open-glow: rgba(96, 165, 250, 0.5);
+        }
+        :root[data-theme="day"] {
+            --bg: #f3f4f6; --bg-alt: #e5e7eb; --card: #fff; --border: #d1d5db;
+            --accent: #0369a1; --accent-soft: #0284c7;
+            --text: #111827; --text-muted: #4b5563;
+            --danger: #dc2626; --success: #15803d; --warning: #a16207; --gold: #a16207;
+            --surface: rgba(255, 255, 255, 0.95);
+            --surface-deep: rgba(243, 244, 246, 0.95);
+            --line: rgba(209, 213, 219, 0.95);
+            --shadow: rgba(100, 116, 139, 0.25);
+            --hdr-a: #ffffff; --hdr-b: #e0f2fe;
+            --page-bg: linear-gradient(180deg, #f8fafc, #e2e8f0);
+            --hover: rgba(2, 132, 199, 0.12);
+            --open-glow: rgba(2, 132, 199, 0.4);
+            --soon: #ca8a04;
+            --soon-bg: rgba(250, 204, 21, 0.3);
+        }
+        :root[data-theme="day"] header .title { text-shadow: none; }
+        :root[data-theme="day"] .pill-conflict-long, :root[data-theme="day"] .pill-conflict-short { color: #111827; }
+        .theme-picker { margin-top: 6px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font-size: 11px; padding: 2px 4px; cursor: pointer; }
+        .stock-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 12px; color: var(--text-muted); padding: 2px 4px; }
+        .stock-legend .lg { display: inline-flex; align-items: center; gap: 6px; }
+        .stock-legend .sw { width: 14px; height: 14px; border-radius: 4px; border: 2px solid var(--accent); background: var(--hover); }
+        .stock-legend .sw.soon { border-color: var(--soon); background: var(--soon-bg); }
+        .stock-legend .sw.bull { border: 0; border-left: 3px solid var(--success); background: var(--surface); }
+        .stock-legend .sw.bear { border: 0; border-left: 3px solid var(--danger); background: var(--surface); }
         * { box-sizing: border-box; }
         body {
             margin: 0;
             padding: 0;
             font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: radial-gradient(circle at top, #0f172a 0, #020617 45%, #000 100%);
+            background: var(--page-bg);
             color: var(--text);
         }
         header {
-            background: linear-gradient(90deg, #020617, #0a1a2f);
+            background: linear-gradient(90deg, var(--hdr-a), var(--hdr-b));
             padding: 20px 24px;
             border-bottom: 1px solid var(--border);
             display: grid;
@@ -118,7 +175,7 @@
         }
         #dashboard-content { padding: 20px 24px 8px; }
         .site-footer {
-            background: linear-gradient(90deg, #020617, #0a1a2f);
+            background: linear-gradient(90deg, var(--hdr-a), var(--hdr-b));
             border-top: 1px solid var(--border);
             padding: 14px 24px 18px;
             margin-top: 24px;
@@ -141,13 +198,13 @@
         .pagination a:hover { background: rgba(56, 189, 248, 0.12); }
         .pagination .disabled { color: var(--text-muted); opacity: 0.5; padding: 4px 10px; }
         .ticker-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
-        .ticker-card { background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(31, 41, 55, 0.9); border-radius: 10px; padding: 12px 14px; }
-        .ticker-card.ticker-pos { border-color: rgba(74, 222, 128, 0.35); background: linear-gradient(160deg, rgba(74, 222, 128, 0.08), rgba(2, 6, 23, 0.9)); }
-        .ticker-card.ticker-neg { border-color: rgba(249, 115, 115, 0.35); background: linear-gradient(160deg, rgba(249, 115, 115, 0.08), rgba(2, 6, 23, 0.9)); }
+        .ticker-card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+        .ticker-card.ticker-pos { border-color: rgba(74, 222, 128, 0.35); background: linear-gradient(160deg, rgba(74, 222, 128, 0.08), var(--surface-deep)); }
+        .ticker-card.ticker-neg { border-color: rgba(249, 115, 115, 0.35); background: linear-gradient(160deg, rgba(249, 115, 115, 0.08), var(--surface-deep)); }
         .ticker-pos .ticker-name { color: var(--success); }
         .ticker-neg .ticker-name { color: var(--danger); }
         .analytics-wrap.analytics-wide { max-width: 1400px; }
-        .card-navy { align-self: start; background: linear-gradient(160deg, #0a1a2f, #020617); }
+        .card-navy { align-self: start; background: linear-gradient(160deg, var(--hdr-b), var(--hdr-a)); }
         .ticker-card .ticker-name { font-weight: 700; font-size: 15px; margin-bottom: 8px; }
         .ticker-card .ticker-row { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; color: var(--text-muted); }
         .ticker-card .ticker-row span:last-child { color: var(--text); }
@@ -227,15 +284,15 @@
             letter-spacing: 0.05em;
             padding: 6px 14px;
             border-radius: 999px;
-            border: 1px solid rgba(31, 41, 55, 0.9);
-            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid var(--line);
+            background: var(--surface);
         }
         .analytics-tabs a.active {
             color: var(--accent);
             border-color: rgba(56, 189, 248, 0.4);
             background: rgba(56, 189, 248, 0.1);
         }
-        .card { background: rgba(15, 23, 42, 0.9); border-radius: 12px; border: 1px solid rgba(31, 41, 55, 0.9); padding: 14px 16px; box-shadow: 0 18px 40px rgba(15, 23, 42, 0.7); }
+        .card { background: var(--surface); border-radius: 12px; border: 1px solid var(--line); padding: 14px 16px; box-shadow: 0 18px 40px var(--shadow); }
         .card-header { 
             display: flex; 
             justify-content: center;
@@ -252,7 +309,7 @@
             padding: 6px 16px;
             border: 1px solid rgba(56, 189, 248, 0.45);
             border-radius: 10px;
-            background: linear-gradient(160deg, rgba(56, 189, 248, 0.14), rgba(2, 6, 23, 0.9));
+            background: linear-gradient(160deg, rgba(56, 189, 248, 0.14), var(--surface-deep));
             display: inline-block;
             white-space: nowrap;
         }
@@ -261,15 +318,15 @@
         .eye-btn:hover { background: rgba(56, 189, 248, 0.12); }
         .card-subtitle { font-size: 12px; color: var(--accent-soft); }
         .metrics-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
-        .metric { padding: 8px 10px; border-radius: 8px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(31, 41, 55, 0.8); }
+        .metric { padding: 8px 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); }
         .metric-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
         .metric-value { margin-top: 4px; font-size: 15px; font-weight: 600; }
         .metric-good { color: var(--success); }
         .metric-bad { color: var(--danger); }
         .metric-neutral { color: var(--accent); }
         .table { width: 100%; border-collapse: collapse; font-size: 12px; }
-        .table th, .table td { padding: 6px 8px; border-bottom: 1px solid rgba(31, 41, 55, 0.7); }
-        .table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); background: rgba(15, 23, 42, 0.9); }
+        .table th, .table td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+        .table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); background: var(--surface); }
         .table tbody tr:hover { background: rgba(31, 41, 55, 0.3); }
         .pill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; }
         .pill-long { background: rgba(34, 197, 94, 0.1); color: var(--success); border: 1px solid rgba(34, 197, 94, 0.4); }
@@ -285,10 +342,13 @@
         .ev-earnings { color: var(--warning); }
         .sector-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent-soft); margin: 8px 0 -4px; }
         .stock-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-        .stock-card { padding: 12px; border-radius: 10px; background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(31, 41, 55, 0.8); display: flex; flex-direction: column; gap: 6px; }
+        .stock-card { padding: 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
         .stock-card.sent-bullish { border-left: 3px solid var(--success); }
         .stock-card.sent-bearish { border-left: 3px solid var(--danger); }
-        .stock-card.has-open { border-color: #38bdf8; background: linear-gradient(180deg, rgba(56, 189, 248, 0.22), rgba(56, 189, 248, 0.08)); box-shadow: 0 0 0 2px #38bdf8, 0 0 16px rgba(56, 189, 248, 0.45); }
+        .stock-card.earn-soon { border-color: var(--soon); background: linear-gradient(180deg, var(--soon-bg), var(--surface)); box-shadow: 0 0 0 1px var(--soon); }
+        .stock-card.has-open { border-color: var(--accent); background: linear-gradient(180deg, var(--hover), var(--surface)); box-shadow: 0 0 0 2px var(--accent), 0 0 16px var(--open-glow); }
+        .stock-card.has-open.earn-soon { box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px var(--soon), 0 0 16px var(--open-glow); }
+        .stock-earn-soon { color: var(--soon); font-weight: 600; }
         .stock-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
         .stock-sym { font-size: 15px; font-weight: 600; }
         .stock-heads { margin: 0; padding-left: 14px; font-size: 11px; color: var(--text-muted); }
@@ -380,12 +440,12 @@
         .metrics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 8px; height: 100%; align-content: center; }
         .metrics-grid .metric { text-align: center; padding: 12px 8px; }
         .metrics-grid .metric-value { font-size: 17px; }
-        .card-accent-good, .card-pos { border-color: rgba(74, 222, 128, 0.35); background: linear-gradient(160deg, rgba(74, 222, 128, 0.08), rgba(2, 6, 23, 0.9)); }
-        .card-accent-bad, .card-neg { border-color: rgba(249, 115, 115, 0.35); background: linear-gradient(160deg, rgba(249, 115, 115, 0.08), rgba(2, 6, 23, 0.9)); }
-        .card-pos .card-title { color: var(--success); border-color: rgba(74, 222, 128, 0.45); background: linear-gradient(160deg, rgba(74, 222, 128, 0.14), rgba(2, 6, 23, 0.9)); }
-        .card-neg .card-title { color: var(--danger); border-color: rgba(249, 115, 115, 0.45); background: linear-gradient(160deg, rgba(249, 115, 115, 0.14), rgba(2, 6, 23, 0.9)); }
-        .card-accent-good .card-title { color: var(--success); border-color: rgba(74, 222, 128, 0.45); background: linear-gradient(160deg, rgba(74, 222, 128, 0.14), rgba(2, 6, 23, 0.9)); }
-        .card-accent-bad .card-title { color: var(--danger); border-color: rgba(249, 115, 115, 0.45); background: linear-gradient(160deg, rgba(249, 115, 115, 0.14), rgba(2, 6, 23, 0.9)); }
+        .card-accent-good, .card-pos { border-color: rgba(74, 222, 128, 0.35); background: linear-gradient(160deg, rgba(74, 222, 128, 0.08), var(--surface-deep)); }
+        .card-accent-bad, .card-neg { border-color: rgba(249, 115, 115, 0.35); background: linear-gradient(160deg, rgba(249, 115, 115, 0.08), var(--surface-deep)); }
+        .card-pos .card-title { color: var(--success); border-color: rgba(74, 222, 128, 0.45); background: linear-gradient(160deg, rgba(74, 222, 128, 0.14), var(--surface-deep)); }
+        .card-neg .card-title { color: var(--danger); border-color: rgba(249, 115, 115, 0.45); background: linear-gradient(160deg, rgba(249, 115, 115, 0.14), var(--surface-deep)); }
+        .card-accent-good .card-title { color: var(--success); border-color: rgba(74, 222, 128, 0.45); background: linear-gradient(160deg, rgba(74, 222, 128, 0.14), var(--surface-deep)); }
+        .card-accent-bad .card-title { color: var(--danger); border-color: rgba(249, 115, 115, 0.45); background: linear-gradient(160deg, rgba(249, 115, 115, 0.14), var(--surface-deep)); }
         .equity-chart-wrap { position: relative; height: 320px; }
         .trade-highlight { display: grid; grid-template-columns: 1fr; gap: 6px; }
         .trade-highlight .metric { padding: 6px 10px; }
@@ -461,6 +521,11 @@
     <div id="uk-clock" class="uk-clock" aria-live="off">
         <span class="uk-clock-label">UK Time</span>
         <span id="uk-clock-value">--:--:--</span>
+        <select id="theme-picker" class="theme-picker" aria-label="Theme" title="Theme">
+            <option value="navy">Theme: Navy</option>
+            <option value="day">Theme: Day</option>
+            <option value="night">Theme: Night</option>
+        </select>
     </div>
 
     <div class="title"><a href="{{ '/dashboard' if role in ('owner', 'investor') else '/' }}" class="title-link" style="color: inherit; text-decoration: none;">{{ title }}</a><span class="tagline">A private algorithmic trading project built around rules-based strategies and risk management.</span></div>
@@ -545,6 +610,18 @@
 <script>
 let isFirstLoad = true;
 let dashboardBusy = false;
+
+(function () {
+    const picker = document.getElementById('theme-picker');
+    if (!picker) return;
+    picker.value = document.documentElement.getAttribute('data-theme') || 'navy';
+    picker.addEventListener('change', function () {
+        const v = picker.value;
+        if (v === 'navy') document.documentElement.removeAttribute('data-theme');
+        else document.documentElement.setAttribute('data-theme', v);
+        try { localStorage.setItem('agc-theme', v); } catch (e) {}
+    });
+})();
 
 function updateUkClock() {
     const clock = document.getElementById('uk-clock-value');
