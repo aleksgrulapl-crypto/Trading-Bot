@@ -4,7 +4,7 @@
 <div class="analytics-wrap analytics-wide">
   <div class="stock-legend">
     <span class="lg"><span class="sw"></span>Open position</span>
-    <span class="lg"><span class="sw soon"></span>Earnings within 14 days</span>
+    <span class="lg"><span class="soon-txt">Earnings date</span> within 14 days</span>
     <span class="lg"><span class="sw bull"></span>Bullish</span>
     <span class="lg"><span class="sw bear"></span>Bearish</span>
     <span>News sentiment and key dates for every stock the bot trades.</span>
@@ -16,7 +16,7 @@
   <div class="stock-grid">
     {% for s in sector.stocks %}
     {% set info = s.info %}
-    <div class="stock-card {% if info and info.sentiment == 'Bullish' %}sent-bullish{% elif info and info.sentiment == 'Bearish' %}sent-bearish{% endif %} {% if s.open_count %}has-open{% endif %} {% if info and info.earnings_days is not none and info.earnings_days <= 14 %}earn-soon{% endif %}">
+    <div class="stock-card {% if info and info.sentiment == 'Bullish' %}sent-bullish{% elif info and info.sentiment == 'Bearish' %}sent-bearish{% endif %} {% if s.open_count %}has-open{% endif %}">
       <div class="stock-head">
         <span class="stock-sym">{{ s.symbol }}</span>
         {% if s.sides %}
