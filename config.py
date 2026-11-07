@@ -295,6 +295,15 @@ TRAIL_SETTINGS_PATH = os.getenv("TRAIL_SETTINGS_PATH", "/data/trail_settings.jso
 TRADING_SWITCH_PATH = os.getenv("TRADING_SWITCH_PATH", "/data/trading_switch.json")
 TERMS_VERSION_PATH = os.getenv("TERMS_VERSION_PATH", "/data/terms_version.json")
 
+# Events & sentiment for open trades (events.py). Free Finnhub key from
+# https://finnhub.io; with no key the feature stays dormant.
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
+EVENTS_CACHE_PATH = os.getenv("EVENTS_CACHE_PATH", "/data/events_cache.json")
+# Earnings alert lead time (days) and how often news/earnings are re-fetched.
+EVENTS_ALERT_DAYS = int(os.getenv("EVENTS_ALERT_DAYS", 2))
+EVENTS_NEWS_TTL_MIN = int(os.getenv("EVENTS_NEWS_TTL_MIN", 30))
+EVENTS_EARNINGS_TTL_HOURS = int(os.getenv("EVENTS_EARNINGS_TTL_HOURS", 6))
+
 # File paths and persistence
 TRADE_LOG_PATH = os.getenv("TRADE_LOG_PATH", os.getenv("TRADE_LOG_FILE", "/data/trade_log.json"))
 DAILY_REPORT_FILE = os.getenv("DAILY_REPORT_FILE", "/tmp/daily_report.json")

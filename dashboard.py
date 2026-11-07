@@ -29,6 +29,7 @@ import deposits
 import gating
 import hedge
 import notifications
+import events
 import public_snapshot
 import trail_settings
 import trading_switch
@@ -1279,6 +1280,7 @@ def build_trade_log_view(trades, args):
     each trade's ``_log_index`` untouched so edit/delete actions still work.
     """
     open_trades = [t for t in trades or [] if not _is_closed_trade(t)]
+    events.attach_to_trades(open_trades)
     closed = [t for t in trades or [] if _is_closed_trade(t)]
 
     sort = args.get("sort", "exited")
