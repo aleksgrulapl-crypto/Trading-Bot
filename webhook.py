@@ -294,6 +294,12 @@ except Exception as _dashboard_err:
 # App setup
 # ---------------------------------------------------------------------------
 app = Flask(__name__)
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return redirect("/static/favicon.svg", code=302)
+
 app.config["DEBUG"] = bool(DEBUG_LOGS)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.jinja_env.auto_reload = True

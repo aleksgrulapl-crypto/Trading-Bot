@@ -135,7 +135,7 @@ def parse_json_alert_strict(data: Dict[str, Any]) -> Dict[str, Any]:
     if quantity is None:
         return block_alert("invalid_quantity", raw=data)
 
-    if payload_raw in PLACEHOLDER_VALUES:
+    if isinstance(payload_raw, str) and payload_raw in PLACEHOLDER_VALUES:
         return block_alert("placeholder_payload", raw=data)
 
     # payload may be a dict already (some alert integrations send structured payload)
