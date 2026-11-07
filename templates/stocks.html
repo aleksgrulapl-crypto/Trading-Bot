@@ -2,13 +2,13 @@
 
 {% block content %}
 <div class="analytics-wrap analytics-wide">
-  <div class="card">
-    <div class="card-header">
-      <div class="card-subtitle">News sentiment and key dates for every stock the bot trades. Highlighted cards have an open position.</div>
-    </div>
-    {% if not events_enabled %}
-    <div class="small">Set FINNHUB_API_KEY to enable sentiment and earnings dates.</div>
-    {% endif %}
+  <div class="stock-legend">
+    <span class="lg"><span class="sw"></span>Open position</span>
+    <span class="lg"><span class="sw soon"></span>Earnings within 14 days</span>
+    <span class="lg"><span class="sw bull"></span>Bullish</span>
+    <span class="lg"><span class="sw bear"></span>Bearish</span>
+    <span>News sentiment and key dates for every stock the bot trades.</span>
+    {% if not events_enabled %}<span>Set FINNHUB_API_KEY to enable sentiment and earnings dates.</span>{% endif %}
   </div>
 
   {% for sector in sectors %}
@@ -16,7 +16,7 @@
   <div class="stock-grid">
     {% for s in sector.stocks %}
     {% set info = s.info %}
-    <div class="stock-card {% if info and info.sentiment == 'Bullish' %}sent-bullish{% elif info and info.sentiment == 'Bearish' %}sent-bearish{% endif %} {% if s.open_count %}has-open{% endif %}">
+    <div class="stock-card {% if info and info.sentiment == 'Bullish' %}sent-bullish{% elif info and info.sentiment == 'Bearish' %}sent-bearish{% endif %} {% if s.open_count %}has-open{% endif %} {% if info and info.earnings_days is not none and info.earnings_days <= 14 %}earn-soon{% endif %}">
       <div class="stock-head">
         <span class="stock-sym">{{ s.symbol }}</span>
         {% if s.sides %}
@@ -29,7 +29,7 @@
       <div class="metric-label">Sentiment</div>
       <div class="metric-value {% if info.sentiment == 'Bullish' %}metric-good{% elif info.sentiment == 'Bearish' %}metric-bad{% else %}metric-neutral{% endif %}" style="margin-top:0;">{{ info.sentiment }}</div>
       <div class="metric-label">Earnings</div>
-      <div class="small {% if info.earnings_days is not none and info.earnings_days <= 7 %}ev-earnings{% endif %}">
+      <div class="small {% if info.earnings_days is not none and info.earnings_days <= 14 %}stock-earn-soon{% endif %}">
         {% if info.earnings_days is none %}No date announced{% else %}{{ info.earnings_date }} ({{ 'today' if info.earnings_days == 0 else 'in ' ~ info.earnings_days ~ 'd' }}){% endif %}
       </div>
       {% if info.headlines %}
