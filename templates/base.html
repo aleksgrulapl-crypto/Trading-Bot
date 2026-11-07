@@ -553,7 +553,7 @@
             header .uk-clock { grid-area: clock; grid-column: auto; grid-row: auto; text-align: center; font-size: 14px; }
             header .title { grid-area: title; font-size: 20px; }
             header .title .tagline { display: none; }
-            header > .theme-picker { position: absolute; top: 14px; right: 14px; width: 84px; font-size: 13px; padding: 6px 4px; }
+            header .uk-clock .theme-picker { position: absolute; top: 12px; right: 14px; width: 84px; margin: 0; font-size: 13px; padding: 6px 4px; z-index: 5; }
             header .header-right { grid-area: right; align-items: center; }
             header .nav { display: none; }
             .m-nav select {
@@ -572,13 +572,11 @@
             .card-header { flex-direction: column; gap: 8px; }
             .card-title { white-space: normal; text-align: center; }
             .card-header .email-notify-toggle { position: static !important; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
-            .table, .table tbody, .table tr, .table td { display: block; max-width: 100%; box-sizing: border-box; white-space: normal; }
-            .table thead { display: none; }
-            .table tr { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; padding: 4px 10px; }
-            .table td, .table-spaced td { display: flex; justify-content: space-between; align-items: center; gap: 12px; border: 0; padding: 4px 0; text-align: right !important; word-break: break-word; }
-            .table td[data-label]:not([data-label=''])::before { content: attr(data-label); flex: 0 0 auto; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; text-align: left; }
-            .table td[colspan] { display: block; text-align: center !important; }
-            .table td button, .table td input { margin: 2px; }
+            .table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; font-size: 11px; }
+            .table th, .table td { padding: 5px 6px; }
+            .table th { font-size: 10px; letter-spacing: 0.03em; }
+            .table-spaced th, .table-spaced td { padding: 6px 8px; }
+            .table td button { padding: 3px 7px; }
         }
     </style>
 </head>
@@ -680,11 +678,9 @@
 
     // On phones the theme picker sits under the headline instead of beside the clock.
     const theme = document.getElementById('theme-picker');
-    const clock = document.getElementById('uk-clock');
     const mq = window.matchMedia('(max-width: 720px)');
     function placeTheme() {
-        if (!theme || !clock) return;
-        if (mq.matches) { document.querySelector('header').appendChild(theme); } else { clock.appendChild(theme); }
+        if (!theme) return;
         Array.prototype.forEach.call(theme.options, function (o) {
             if (!o.dataset.full) o.dataset.full = o.textContent;
             o.textContent = mq.matches ? o.dataset.full.replace('Theme: ', '') : o.dataset.full;
@@ -692,22 +688,6 @@
     }
     placeTheme();
     if (mq.addEventListener) mq.addEventListener('change', placeTheme);
-
-    // Label each table cell with its column heading so rows can stack as cards on phones.
-    function labelTables() {
-        document.querySelectorAll('table.table').forEach(function (t) {
-            const heads = Array.prototype.map.call(t.querySelectorAll('thead th'), function (h) { return h.textContent.trim(); });
-            if (!heads.length) return;
-            t.querySelectorAll('tbody tr').forEach(function (tr) {
-                Array.prototype.forEach.call(tr.children, function (td, i) {
-                    if (td.tagName === 'TD' && !td.hasAttribute('colspan') && td.dataset.label === undefined) td.dataset.label = heads[i] || '';
-                });
-            });
-        });
-    }
-    labelTables();
-    const dc = document.getElementById('dashboard-content');
-    if (dc && window.MutationObserver) new MutationObserver(labelTables).observe(dc, { childList: true, subtree: true });
 })();
 </script>
 
