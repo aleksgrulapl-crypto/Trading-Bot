@@ -3,6 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0b1f4d">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <script>if ("serviceWorker" in navigator) { window.addEventListener("load", function () { navigator.serviceWorker.register("/sw.js").catch(function () {}); }); }</script>
     <title>AGC Trader - Choose a new password</title>
     <style>
         body { background-color:#0d1117; color:#c9d1d9; font-family:Arial,sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; }

@@ -21,7 +21,7 @@ import threading
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from flask import Flask, request, jsonify, render_template, redirect
+from flask import Flask, request, jsonify, render_template, redirect, send_from_directory
 
 import pytz
 
@@ -299,6 +299,19 @@ app = Flask(__name__)
 @app.route("/favicon.ico")
 def favicon():
     return redirect("/static/favicon.svg", code=302)
+
+
+@app.route("/sw.js")
+def service_worker():
+    # Served from the root so its scope covers the whole site.
+    resp = send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript")
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.route("/manifest.webmanifest")
+def web_manifest():
+    return send_from_directory(app.static_folder, "manifest.webmanifest", mimetype="application/manifest+json")
 
 app.config["DEBUG"] = bool(DEBUG_LOGS)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
