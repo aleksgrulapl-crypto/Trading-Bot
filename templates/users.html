@@ -31,10 +31,6 @@
             <form method="POST" action="/dashboard/users/{{ u.id }}/role" style="display:inline;">
               <input type="hidden" name="role" value="investor"><button type="submit">Upgrade to investor</button>
             </form>
-            {% elif u.role == 'investor' %}
-            <form method="POST" action="/dashboard/users/{{ u.id }}/role" style="display:inline;">
-              <input type="hidden" name="role" value="viewer"><button type="submit">Downgrade to viewer</button>
-            </form>
             {% endif %}
             <form method="POST" action="/dashboard/users/{{ u.id }}/send-reset" style="display:inline;"
                   onsubmit="return confirm('Email a password reset link to {{ u.email }}?');">

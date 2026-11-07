@@ -1781,6 +1781,11 @@ def dashboard_users():
 def dashboard_users_set_role(user_id: str):
     role = (request.form.get("role") or (request.get_json(silent=True) or {}).get("role") or "").strip()
     previous = users.get_user(user_id)
+    # Active investors can't be downgraded (guards against accidental clicks).
+    if previous and previous.get("role") == "investor" and role != "investor":
+        if request.is_json:
+            return jsonify({"status": "error", "message": "investor_downgrade_blocked"}), 400
+        return redirect("/dashboard/users")
     ok, status = users.set_role(user_id, role)
     if ok and previous and previous.get("role") == "pending" and role in ("viewer", "investor"):
         account_emails.send_approved(previous["name"], previous["email"])
