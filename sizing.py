@@ -137,12 +137,34 @@ def _ticker_equity_scale(ticker: Optional[str]) -> float:
     £0. A ticker with no decided TradingView/Hedge trades yet (not yet
     present in the Analytics tab) is exempt and gets the full, unscaled
     ceiling."""
-    win_rate = _ticker_tradingview_win_rate(ticker)
-    if win_rate is None:
+    key = _normalize_ticker(ticker)
+    if not key:
         return 1.0
-    scale_min = float(getattr(config, "TICKER_EQUITY_SCALE_MIN", 0.3) or 0.0)
-    scale_min = max(0.0, min(1.0, scale_min))
-    return max(scale_min, min(1.0, win_rate))
+    try:
+        import gating
+        stats = gating.stock_stats(load_raw_log())
+        info = stats.get(key)
+        min_trades = int(getattr(config, "GATE_MIN_TRADES", 5))
+        if not info or info["count"] < min_trades:
+            return 1.0
+        if info["net_pnl"] < 0:
+            return float(getattr(config, "PERF_DOWNSIZE_FACTOR", 0.5))
+        if info["net_pnl"] > 0 and info["sharpe"] > 0 and key not in gating.weak_stocks(stats):
+            return float(getattr(config, "PERF_UPSIZE_FACTOR", 1.2))
+    except Exception:
+        logger.exception("performance scale unavailable for %s", ticker)
+    return 1.0
+
+
+def price_band_max_units(entry_price: float) -> Optional[float]:
+    """Max units per trade for the entry price's band (price converted to GBP),
+    or None when the price is above the top band (equity-based sizing only)."""
+    fx = float(getattr(config, "FX_USD_GBP", 0.78) or 0.78)
+    price_gbp = float(entry_price) * fx
+    for upper, units in getattr(config, "PRICE_BAND_MAX_UNITS", ()):
+        if price_gbp <= upper:
+            return float(units)
+    return None
 
 
 def _open_ticker_usage(ticker: Optional[str], side: Optional[str] = None) -> Dict[str, float]:
@@ -409,6 +431,10 @@ def calculate_size(entry_price, sl_price, tp_price, direction, symbol: Optional[
         raw_size = exposure / entry
     except Exception:
         return {"blocked": True, "reason": "division_error"}
+
+    band_units = price_band_max_units(entry)
+    if band_units is not None:
+        raw_size = min(raw_size, band_units * equity_scale * gate_scale)
 
     # Round to 2 decimals (adjust as needed for instrument granularity)
     size = _round_size(raw_size)

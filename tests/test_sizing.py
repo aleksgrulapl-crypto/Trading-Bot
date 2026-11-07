@@ -11,6 +11,12 @@ import pytest
 import config
 
 
+@pytest.fixture(autouse=True)
+def _no_price_bands(monkeypatch):
+    """Price-band unit caps are tested explicitly in TestPriceBands."""
+    monkeypatch.setattr(config, "PRICE_BAND_MAX_UNITS", ())
+
+
 def _make_tmp_log(initial_trades=None):
     """Create a temp JSON file holding *initial_trades* (default: [])."""
     fd, path = tempfile.mkstemp(suffix=".json")
@@ -469,17 +475,17 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
         monkeypatch.setattr(sizing.config, "TICKER_EQUITY_SCALE_MIN", 0.3)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"AMD": {"min_size": 0.1}})
-        # 0 wins, 4 losses -> win rate 0.0, floored at TICKER_EQUITY_SCALE_MIN.
+        # 5 losing trades -> net negative with >= 5 trades -> halved.
         monkeypatch.setattr(sizing, "load_raw_log", lambda: [
             {"ticker": "AMD", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": -10.0}
-            for _ in range(4)
+            for _ in range(5)
         ])
 
         result = sizing.calculate_size(100, 95, 110, "buy", symbol="AMD", ticker="AMD")
 
         assert result["blocked"] is False
-        assert result["ticker_equity_scale"] == pytest.approx(0.3)
-        assert result["equity_used"] == pytest.approx(60.0)
+        assert result["ticker_equity_scale"] == pytest.approx(0.5)
+        assert result["equity_used"] == pytest.approx(100.0)
 
     def test_mixed_win_rate_scales_equity_proportionally(self, monkeypatch):
         import sizing
@@ -493,20 +499,31 @@ class TestSizing:
         monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 1000)
         monkeypatch.setattr(sizing.config, "TICKER_EQUITY_SCALE_MIN", 0.3)
         monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"TSLA": {"min_size": 0.1}})
-        # 3 wins, 2 losses -> 60% win rate.
-        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
-            {"ticker": "TSLA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": 10.0},
-            {"ticker": "TSLA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": 10.0},
-            {"ticker": "TSLA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": 10.0},
-            {"ticker": "TSLA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": -5.0},
-            {"ticker": "TSLA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": -5.0},
+        # 5 trades, net positive with positive Sharpe, outside the bottom 20% -> upsized by 20%.
+        others = [
+            {"ticker": t, "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": p}
+            for t in ("A1", "A2", "A3", "A4")
+            for p in (30.0, -10.0, 25.0, -8.0, 12.0)
+        ]
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: others + [
+            {"ticker": "TSLA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": p}
+            for p in (10.0, 12.0, 10.0, -5.0, 8.0)
         ])
 
         result = sizing.calculate_size(100, 95, 110, "buy", symbol="TSLA", ticker="TSLA")
 
         assert result["blocked"] is False
-        assert result["ticker_equity_scale"] == pytest.approx(0.6)
-        assert result["equity_used"] == pytest.approx(120.0)
+        assert result["ticker_equity_scale"] == pytest.approx(1.2)
+        assert result["equity_used"] == pytest.approx(240.0)
+
+    def test_fewer_than_five_trades_not_scaled(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "TSLA", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": -10.0}
+            for _ in range(4)
+        ])
+        assert sizing._ticker_equity_scale("TSLA") == pytest.approx(1.0)
 
     def test_open_and_non_tradingview_trades_are_excluded_from_win_rate(self, monkeypatch):
         """Only CLOSED TradingView/Hedge trades count; OPEN trades and
@@ -531,3 +548,46 @@ class TestSizing:
         assert result["blocked"] is False
         assert result["ticker_equity_scale"] == pytest.approx(1.0)
         assert result["equity_used"] == pytest.approx(200.0)
+
+
+class TestPriceBands:
+    BANDS = ((10.0, 75.0), (50.0, 15.0), (100.0, 7.5), (250.0, 3.0), (500.0, 1.5))
+
+    def _setup(self, monkeypatch):
+        import sizing
+
+        monkeypatch.setattr(sizing.session, "get_account", lambda: {"balance": {"available": 5000}})
+        monkeypatch.setattr(sizing.session, "enrich_account", lambda raw: {"available": 5000.0})
+        monkeypatch.setattr(sizing.config, "EQUITY_PERCENT", 1.0)
+        monkeypatch.setattr(sizing.config, "LEVERAGE", 5)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TRADE", 150)
+        monkeypatch.setattr(sizing.config, "MAX_EQUITY_PER_TICKER", 450)
+        monkeypatch.setattr(sizing.config, "MAX_EXPOSURE_PER_TRADE", 750)
+        monkeypatch.setattr(sizing.config, "FX_USD_GBP", 1.0)
+        monkeypatch.setattr(sizing.config, "PRICE_BAND_MAX_UNITS", self.BANDS)
+        monkeypatch.setattr(sizing.config, "TICKER_SETTINGS", {"X": {"min_size": 0.1}})
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [])
+        return sizing
+
+    @pytest.mark.parametrize("price,expected", [
+        (5, 75.0), (9.99, 75.0), (20, 15.0), (75, 7.5), (150, 3.0), (400, 1.5),
+    ])
+    def test_band_caps_units(self, monkeypatch, price, expected):
+        sizing = self._setup(monkeypatch)
+        result = sizing.calculate_size(price, price * 0.95, price * 1.1, "buy", symbol="X", ticker="X")
+        assert result["size"] == pytest.approx(expected)
+
+    def test_above_top_band_uses_equity_sizing(self, monkeypatch):
+        sizing = self._setup(monkeypatch)
+        result = sizing.calculate_size(1000, 950, 1100, "buy", symbol="X", ticker="X")
+        assert result["size"] == pytest.approx(0.75)
+        assert result["equity_used"] == pytest.approx(150.0)
+
+    def test_band_cap_scales_with_performance(self, monkeypatch):
+        sizing = self._setup(monkeypatch)
+        monkeypatch.setattr(sizing, "load_raw_log", lambda: [
+            {"ticker": "X", "status": "CLOSED", "trade_source": "tradingview", "pnl_gbp": -10.0}
+            for _ in range(5)
+        ])
+        result = sizing.calculate_size(20, 19, 22, "buy", symbol="X", ticker="X")
+        assert result["size"] == pytest.approx(7.5)

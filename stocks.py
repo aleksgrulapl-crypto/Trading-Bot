@@ -1,4 +1,4 @@
-"""Stock universe grouped by sector, with cached events/sentiment for the
+﻿"""Stock universe grouped by sector, with cached events/sentiment for the
 dashboard's Stocks page."""
 
 from typing import Any, Dict, Iterable, List
@@ -8,14 +8,14 @@ import events
 
 SECTORS: Dict[str, List[str]] = {
     "Semiconductors": ["NVDA", "AMD", "INTC", "MU", "AVGO", "MRVL", "AMAT", "LRCX", "WDC", "STX"],
-    "Technology": ["MSFT", "AAPL", "PLTR", "CRM", "ORCL", "CSCO", "SHOP", "QBTS", "NBIS", "LITE"],
-    "Communication & Media": ["META", "GOOGL", "GOOG", "NFLX"],
-    "Consumer & Retail": ["TSLA", "AMZN", "BABA", "WMT"],
-    "Healthcare": ["UNH", "LLY", "ISRG"],
-    "Energy & Clean Tech": ["PLUG", "BE"],
-    "Financials & Crypto": ["COIN"],
-    "Materials": ["GOLD"],
-    "Industrials & Space": ["SPCX"],
+    "Technology": ["MSFT", "AAPL", "PLTR", "ORCL", "CSCO", "INTU", "ADBE", "CTSH", "QBTS", "NBIS", "LITE"],
+    "Communication & Media": ["META", "GOOG", "NFLX", "CMCSA", "DIS"],
+    "Consumer & Retail": ["TSLA", "AMZN", "WMT", "LULU", "NKE"],
+    "Healthcare": ["UNH", "LLY", "ISRG", "REGN", "ZTS", "CI", "GEHC"],
+    "Energy & Clean Tech": ["PLUG", "BE", "AR"],
+    "Financials & Crypto": ["PYPL", "SCHW", "SPGI", "CAN"],
+    "Industrials & Space": ["SPCX", "RKLB", "ROP"],
+    "Commodities": ["GOLD", "OIL_CRUDE"],
 }
 OTHER = "Other"
 _SECTOR_OF = {sym: sector for sector, syms in SECTORS.items() for sym in syms}
@@ -26,9 +26,9 @@ def sector_of(symbol: str) -> str:
 
 
 def universe(extra: Iterable[Any] = ()) -> List[str]:
-    """Every stock the bot is configured for, plus any extra tickers (e.g.
+    """Every stock in SECTORS, plus any extra tickers (e.g.
     from the trade log), as normalised Finnhub symbols."""
-    raw = list(getattr(config, "EPIC_MAP", {}) or {}) + list(getattr(config, "TICKER_SETTINGS", {}) or {}) + list(extra)
+    raw = list(_SECTOR_OF) + list(extra)
     return sorted({events.normalize_symbol(t) for t in raw} - {""})
 
 
@@ -67,3 +67,4 @@ def build_sectors(open_trades: List[Dict[str, Any]], extra: Iterable[Any] = ()) 
         }
         for name in ordered
     ]
+
