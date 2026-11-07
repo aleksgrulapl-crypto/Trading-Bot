@@ -74,12 +74,31 @@
             --soon-bg: rgba(250, 204, 21, 0.3);
         }
         :root[data-theme="day"] header .title { text-shadow: none; }
+        :root[data-theme="day"] body { background: #cbd5e1; }
+        :root[data-theme="day"] header { border-bottom: 2px solid #94a3b8; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12); }
+        :root[data-theme="day"] .card, :root[data-theme="day"] .metric, :root[data-theme="day"] .stock-card, :root[data-theme="day"] .ticker-card { border: 1px solid #94a3b8; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12); }
+        :root[data-theme="day"] .card-pos, :root[data-theme="day"] .card-accent-good, :root[data-theme="day"] .ticker-card.ticker-pos { border-color: #16a34a; background: linear-gradient(160deg, rgba(22, 163, 74, 0.14), #fff); }
+        :root[data-theme="day"] .card-neg, :root[data-theme="day"] .card-accent-bad, :root[data-theme="day"] .ticker-card.ticker-neg { border-color: #dc2626; background: linear-gradient(160deg, rgba(220, 38, 38, 0.12), #fff); }
+        :root[data-theme="day"] .card-title, :root[data-theme="day"] .card-pos .card-title, :root[data-theme="day"] .card-neg .card-title, :root[data-theme="day"] .card-accent-good .card-title, :root[data-theme="day"] .card-accent-bad .card-title { background: #fff; border-color: #94a3b8; font-weight: 700; }
+        :root[data-theme="day"] .table th { background: #e2e8f0; color: #1f2937; }
+        :root[data-theme="day"] .table th, :root[data-theme="day"] .table td { border-bottom-color: #cbd5e1; }
+        :root[data-theme="day"] .table tbody tr:hover { background: #e0f2fe; }
+        :root[data-theme="day"] .table-spaced tbody tr:nth-child(even) { background: rgba(15, 23, 42, 0.04); }
+        :root[data-theme="day"] .pill-long { background: rgba(22, 163, 74, 0.15); border-color: #16a34a; color: #166534; font-weight: 600; }
+        :root[data-theme="day"] .pill-short { background: rgba(220, 38, 38, 0.12); border-color: #dc2626; color: #991b1b; font-weight: 600; }
+        :root[data-theme="day"] .pill-status, :root[data-theme="day"] .eye-btn { background: rgba(2, 132, 199, 0.12); border-color: #0284c7; color: #075985; }
+        :root[data-theme="day"] .stock-card.sent-bullish { border-left: 4px solid #16a34a; }
+        :root[data-theme="day"] .stock-card.sent-bearish { border-left: 4px solid #dc2626; }
+        :root[data-theme="day"] .stock-card.has-open { background: #e0f2fe; border-color: #0369a1; box-shadow: 0 0 0 2px #0369a1, 0 0 12px rgba(3, 105, 161, 0.35); }
+        :root[data-theme="day"] .stock-earn-soon { color: #a16207; }
+        :root[data-theme="day"] .sector-title { color: #075985; }
+        :root[data-theme="day"] input, :root[data-theme="day"] select { background: #fff; color: #111827; border-color: #94a3b8; }
         :root[data-theme="day"] .pill-conflict-long, :root[data-theme="day"] .pill-conflict-short { color: #111827; }
         .theme-picker { margin-top: 6px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font-size: 11px; padding: 2px 4px; cursor: pointer; }
         .stock-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 12px; color: var(--text-muted); padding: 2px 4px; }
         .stock-legend .lg { display: inline-flex; align-items: center; gap: 6px; }
         .stock-legend .sw { width: 14px; height: 14px; border-radius: 4px; border: 2px solid var(--accent); background: var(--hover); }
-        .stock-legend .sw.soon { border-color: var(--soon); background: var(--soon-bg); }
+        .stock-legend .soon-txt { color: var(--soon); font-weight: 600; }
         .stock-legend .sw.bull { border: 0; border-left: 3px solid var(--success); background: var(--surface); }
         .stock-legend .sw.bear { border: 0; border-left: 3px solid var(--danger); background: var(--surface); }
         * { box-sizing: border-box; }
@@ -345,9 +364,7 @@
         .stock-card { padding: 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
         .stock-card.sent-bullish { border-left: 3px solid var(--success); }
         .stock-card.sent-bearish { border-left: 3px solid var(--danger); }
-        .stock-card.earn-soon { border-color: var(--soon); background: linear-gradient(180deg, var(--soon-bg), var(--surface)); box-shadow: 0 0 0 1px var(--soon); }
         .stock-card.has-open { border-color: var(--accent); background: linear-gradient(180deg, var(--hover), var(--surface)); box-shadow: 0 0 0 2px var(--accent), 0 0 16px var(--open-glow); }
-        .stock-card.has-open.earn-soon { box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px var(--soon), 0 0 16px var(--open-glow); }
         .stock-earn-soon { color: var(--soon); font-weight: 600; }
         .stock-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
         .stock-sym { font-size: 15px; font-weight: 600; }
