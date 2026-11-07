@@ -540,14 +540,18 @@
         @media (max-width: 720px) {
             body { overflow-x: hidden; }
             header {
-                grid-template-columns: auto minmax(0, 1fr);
-                grid-template-areas: "menu clock" "title title" "right right";
-                gap: 10px 12px;
+                grid-template-columns: 112px minmax(0, 1fr) 112px;
+                grid-template-areas: "clock clock clock" "menu title ." "right right right";
+                gap: 10px 8px;
                 padding: 12px 14px;
+                text-align: center;
             }
-            header .m-nav { display: block; grid-area: menu; justify-self: start; }
-            header .uk-clock { grid-area: clock; grid-column: auto; grid-row: auto; text-align: right; font-size: 14px; }
+            header .m-nav { display: block; grid-area: menu; justify-self: start; align-self: start; min-height: 38px; }
+            header .m-nav select { width: 112px; }
+            header .m-nav.stuck select { position: fixed; top: 8px; left: 10px; z-index: 1000; background: var(--surface-deep); box-shadow: 0 2px 10px var(--shadow); }
+            header .uk-clock { grid-area: clock; grid-column: auto; grid-row: auto; text-align: center; font-size: 14px; }
             header .title { grid-area: title; font-size: 20px; }
+            header .title .theme-picker { display: block; margin: 8px auto 0; }
             header .header-right { grid-area: right; align-items: center; }
             header .nav { display: none; }
             .m-nav select {
@@ -659,6 +663,26 @@
         sel.appendChild(o);
     });
     sel.addEventListener('change', function () { if (sel.value) location.href = sel.value; });
+
+    const wrap = sel.parentElement;
+    function onScroll() {
+        const top = wrap.getBoundingClientRect().top;
+        wrap.classList.toggle('stuck', top < 8);
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+
+    // On phones the theme picker sits under the headline instead of beside the clock.
+    const theme = document.getElementById('theme-picker');
+    const clock = document.getElementById('uk-clock');
+    const title = document.querySelector('header .title');
+    const mq = window.matchMedia('(max-width: 720px)');
+    function placeTheme() {
+        if (!theme || !clock || !title) return;
+        (mq.matches ? title : clock).appendChild(theme);
+    }
+    placeTheme();
+    if (mq.addEventListener) mq.addEventListener('change', placeTheme);
 })();
 </script>
 
