@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="analytics-wrap analytics-wide">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Stocks</div>
+      <div class="card-subtitle">News sentiment and key dates for every stock the bot trades. Highlighted cards have an open position.</div>
+    </div>
+    {% if not events_enabled %}
+    <div class="small">Set FINNHUB_API_KEY to enable sentiment and earnings dates.</div>
+    {% endif %}
+  </div>
+
+  {% for sector in sectors %}
+  <div class="sector-title">{{ sector.name }} <span class="small">({{ sector.stocks|length }}{% if sector.open_total %}, {{ sector.open_total }} open{% endif %})</span></div>
+  <div class="stock-grid">
+    {% for s in sector.stocks %}
+    {% set info = s.info %}
+    <div class="stock-card {% if info and info.sentiment == 'Bullish' %}sent-bullish{% elif info and info.sentiment == 'Bearish' %}sent-bearish{% endif %} {% if s.open_count %}has-open{% endif %}">
+      <div class="stock-head">
+        <span class="stock-sym">{{ s.symbol }}</span>
+        {% if s.sides %}
+        {% for side in s.sides %}
+        <span class="pill {% if s.conflict %}pill-conflict-{{ side|lower }}{% else %}pill-{{ side|lower }}{% endif %}" title="{{ s.open_count }} open">{{ side }}</span>
+        {% endfor %}
+        {% endif %}
+      </div>
+      {% if info %}
+      <div class="metric-label">Sentiment</div>
+      <div class="metric-value {% if info.sentiment == 'Bullish' %}metric-good{% elif info.sentiment == 'Bearish' %}metric-bad{% else %}metric-neutral{% endif %}" style="margin-top:0;">{{ info.sentiment }}</div>
+      <div class="metric-label">Earnings</div>
+      <div class="small {% if info.earnings_days is not none and info.earnings_days <= 7 %}ev-earnings{% endif %}">
+        {% if info.earnings_days is none %}No date announced{% else %}{{ info.earnings_date }} ({{ 'today' if info.earnings_days == 0 else 'in ' ~ info.earnings_days ~ 'd' }}){% endif %}
+      </div>
+      {% if info.headlines %}
+      <ul class="stock-heads">
+        {% for h in info.headlines[:2] %}<li>{{ h }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% else %}
+      <div class="small">No data yet</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

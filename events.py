@@ -89,7 +89,19 @@ def score_headlines(headlines: List[str]) -> Dict[str, Any]:
     return {"sentiment": label, "score": net}
 
 
+_last_call = 0.0
+_throttle_lock = threading.Lock()
+# Finnhub free tier allows 60 calls/min; stay safely under it.
+MIN_CALL_INTERVAL = 1.1
+
+
 def _get(endpoint: str, params: Dict[str, Any]) -> Any:
+    global _last_call
+    with _throttle_lock:
+        wait = MIN_CALL_INTERVAL - (time.time() - _last_call)
+        if wait > 0:
+            time.sleep(wait)
+        _last_call = time.time()
     params = dict(params, token=config.FINNHUB_API_KEY)
     resp = requests.get(f"{FINNHUB_URL}/{endpoint}", params=params, timeout=HTTP_TIMEOUT)
     resp.raise_for_status()
@@ -142,15 +154,16 @@ def refresh_symbol(symbol: str, now: Optional[float] = None) -> Optional[Dict[st
     return stored
 
 
-def refresh_open_trades(trades: List[Dict[str, Any]]) -> int:
-    """Refresh events for every distinct open-trade ticker (free-tier safe)."""
+def refresh_open_trades(trades: List[Dict[str, Any]], others: Optional[List[str]] = None) -> int:
+    """Refresh events for open-trade tickers first, then any ``others`` (the
+    wider stock universe). Calls are throttled to stay within the free tier."""
     if not _enabled():
         return 0
-    symbols = sorted({normalize_symbol(t.get("ticker")) for t in trades or [] if t.get("ticker")} - {""})
-    for symbol in symbols:
+    open_symbols = sorted({normalize_symbol(t.get("ticker")) for t in trades or [] if t.get("ticker")} - {""})
+    rest = [s for s in sorted(set(others or [])) if s and s not in open_symbols]
+    for symbol in open_symbols + rest:
         refresh_symbol(symbol)
-        time.sleep(0.2)
-    return len(symbols)
+    return len(open_symbols)
 
 
 def is_conflict(side: Any, sentiment: Optional[str]) -> bool:
