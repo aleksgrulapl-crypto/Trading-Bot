@@ -149,7 +149,7 @@
   <!-- Weekly / Monthly Snapshots -->
   <div class="grid-two" style="margin-top:16px;">
     <div class="card {% if weekly_analytics.total_pl is not none and weekly_analytics.total_pl >= 0 %}card-pos{% elif weekly_analytics.total_pl is not none %}card-neg{% endif %}">
-      <div class="card-header">
+      <div class="card-header snap-head">
         <div class="card-title">Weekly Snapshot</div>
         {% if (period_returns.labels or {}).weekly_trading %}<div class="small" style="position:absolute; right:0; top:0;">{{ period_returns.labels.weekly_trading }}</div>{% endif %}
       </div>
@@ -195,7 +195,7 @@
     </div>
 
     <div class="card {% if monthly_analytics.total_pl is not none and monthly_analytics.total_pl >= 0 %}card-pos{% elif monthly_analytics.total_pl is not none %}card-neg{% endif %}">
-      <div class="card-header">
+      <div class="card-header snap-head">
         <div class="card-title">Monthly Snapshot</div>
         {% if (period_returns.labels or {}).monthly %}<div class="small" style="position:absolute; right:0; top:0;">{{ period_returns.labels.monthly }}</div>{% endif %}
       </div>
