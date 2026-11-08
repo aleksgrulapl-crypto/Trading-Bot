@@ -21,7 +21,10 @@ def test_settings_owner_only(tmp_path, monkeypatch):
     _, user, _ = users.register("a@b.co", "password123", "Alice")
     users.set_role(user["id"], "investor")
     inv = _client(tmp_path, monkeypatch, "investor", user["id"])
-    assert inv.get("/dashboard/settings").status_code == 302
+    r0 = inv.get("/dashboard/settings")
+    assert r0.status_code == 200 and b"Appearance" in r0.data and b"Account details" not in r0.data
+    assert inv.post("/dashboard/settings/email", data={"email": "q@w.co", "current_password": "x"}).status_code == 302
+    assert users.get_user(user["id"])["email"] == "a@b.co"
     monkeypatch.setattr(dm, "_page_account", lambda: {"pnl": 0})
     owner = _client(tmp_path, monkeypatch, "owner")
     r = owner.get("/dashboard/settings")

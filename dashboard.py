@@ -385,7 +385,8 @@ def _viewer_safe_context(ctx):
 
 # Roles that can see the Settings page. Owner only while it is being tested;
 # add "investor" / "viewer" here to roll it out to everyone.
-SETTINGS_ROLES = ("owner",)
+SETTINGS_ROLES = ("owner", "investor", "viewer")
+SETTINGS_FULL_ROLES = ("owner",)
 
 
 def owner_required(view):
@@ -2264,6 +2265,15 @@ def settings_page_required(view):
     return wrapper
 
 
+def settings_full_required(view):
+    @functools.wraps(view)
+    def wrapper(*args, **kwargs):
+        if not is_logged_in() or current_role() not in SETTINGS_FULL_ROLES:
+            return redirect("/dashboard/settings")
+        return view(*args, **kwargs)
+    return wrapper
+
+
 @dashboard.route("/dashboard/settings")
 @settings_page_required
 def dashboard_settings():
@@ -2280,13 +2290,14 @@ def dashboard_settings():
         owner_email_enabled=notifications.is_enabled() if role == "owner" else False,
         owner_email_recipient=notifications.get_recipient() if role == "owner" else "",
         my_email_enabled=bool(account_user and account_user.get("email_notifications")),
+        full_settings=(role in SETTINGS_FULL_ROLES),
         flash_kind=msg[0] if msg else None,
         flash_text=msg[1] if msg else None,
     )
 
 
 @dashboard.route("/dashboard/settings/email", methods=["POST"])
-@settings_page_required
+@settings_full_required
 def dashboard_settings_email():
     user_id = flask_session.get("uid")
     if not user_id:
@@ -2298,7 +2309,7 @@ def dashboard_settings_email():
 
 
 @dashboard.route("/dashboard/settings/password", methods=["POST"])
-@settings_page_required
+@settings_full_required
 def dashboard_settings_password():
     user_id = flask_session.get("uid")
     if not user_id:

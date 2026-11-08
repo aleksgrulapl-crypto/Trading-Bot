@@ -33,6 +33,7 @@
     </div>
   </div>
 
+  {% if full_settings %}
   <div class="card">
     <div class="card-header"><div class="card-title">Notifications</div></div>
     {% if is_owner %}
@@ -74,6 +75,7 @@
     <div class="small">The Owner login uses the DASHBOARD_OWNER_PASSWORD environment variable, so email and password are changed there rather than in the dashboard.</div>
     {% endif %}
   </div>
+  {% endif %}
 </div>
 
 <script>

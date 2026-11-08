@@ -96,7 +96,7 @@
             <th>Current</th>
             <th>SL / TP</th>
             <th>PNL (GBP)</th>
-            <th></th>
+            {% if is_owner %}<th></th>{% endif %}
             {% endif %}
           </tr>
         </thead>
@@ -122,8 +122,7 @@
             <td class="{% if p.profit is not none and p.profit >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
               {{ p.profit is not none and p.profit or '—' }}
             </td>
-            <td>
-              {% if is_owner %}
+            {% if is_owner %}<td>
               {% if p.trade_type == 'Trader' %}
               <input type="number" min="0" step="0.5" id="trail-gbp-{{ p.dealId or p.id }}" value="{{ p.trail_activation_gbp if p.trail_activation_gbp else '' }}" placeholder="£15" title="Profit in £ at which the SL Trail starts (blank = standard £15)" style="width:64px">
               <button onclick="toggleTrail('{{ p.dealId or p.id }}', {{ 'false' if p.trail_enabled else 'true' }})">SL Trail: {{ 'ON' if p.trail_enabled else 'OFF' }}</button>
@@ -131,10 +130,7 @@
               {% endif %}
               <button onclick="closePosition('{{ p.dealId or p.id }}')">Close</button>
               <button onclick="hedgePosition('{{ p.dealId or p.id }}')" title="Open the opposite position, same size, no SL, TP at +£15">Hedge</button>
-              {% else %}
-              <span class="small">—</span>
-              {% endif %}
-            </td>
+            </td>{% endif %}
             {% endif %}
           </tr>
           {% endfor %}
