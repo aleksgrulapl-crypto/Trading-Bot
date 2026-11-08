@@ -2178,7 +2178,18 @@ def dashboard_transactions_add():
     note = payload.get("note", "")
     occurred_at = payload.get("occurred_at")
 
-    ok, record, status = deposits.add_entry(entry_type, amount, investor, note, occurred_at)
+    category = None
+    if str(entry_type or "").strip().lower() == "ofa":
+        entry_type = "fee"
+        category = deposits.OVERNIGHT_ADJUSTMENT_CATEGORY
+        try:
+            amount = -float(amount)
+        except (TypeError, ValueError):
+            pass
+        if not str(note or "").strip():
+            note = "Manual overnight funding adjustment"
+
+    ok, record, status = deposits.add_entry(entry_type, amount, investor, note, occurred_at, category=category)
 
     if request.is_json:
         if ok:
