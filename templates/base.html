@@ -558,7 +558,6 @@
             }
             header .m-nav { display: block; grid-area: menu; justify-self: start; align-self: start; min-height: 38px; }
             header .m-nav select { width: 112px; }
-            header .m-nav.stuck select { position: fixed; top: 8px; left: 10px; z-index: 1000; background: var(--surface-deep); box-shadow: 0 2px 10px var(--shadow); }
             header .uk-clock { display: contents; }
             header .uk-clock-text { display: block; grid-area: clock; text-align: center; font-size: 14px; font-weight: 700; color: var(--accent-soft); }
             header .uk-clock-label { display: inline; margin: 0 6px 0 0; }
@@ -685,20 +684,13 @@
         const o = document.createElement('option');
         o.value = a.getAttribute('href');
         o.textContent = a.textContent.trim();
+        if (a.classList.contains('logout')) o.dataset.noArrow = '1';
         if (o.value === location.pathname) o.selected = true;
         sel.appendChild(o);
     });
     sel.addEventListener('change', function () { if (sel.value) location.href = sel.value; });
 
-    const wrap = sel.parentElement;
-    function onScroll() {
-        const top = wrap.getBoundingClientRect().top;
-        wrap.classList.toggle('stuck', top < 8);
-    }
-    window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
-
-    const pages = Array.from(sel.options).filter(function (o) { return o.value; });
+    const pages = Array.from(sel.options).filter(function (o) { return o.value && !o.dataset.noArrow; });
     const idx = pages.findIndex(function (o) { return o.value === location.pathname; });
     const bar = document.createElement('div');
     bar.className = 'm-tabs';
