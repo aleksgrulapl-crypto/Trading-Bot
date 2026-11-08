@@ -383,6 +383,11 @@ def _viewer_safe_context(ctx):
     return safe
 
 
+# Roles that can see the Settings page. Owner only while it is being tested;
+# add "investor" / "viewer" here to roll it out to everyone.
+SETTINGS_ROLES = ("owner",)
+
+
 def owner_required(view):
     """Require the Owner role for mutating dashboard actions (close/delete/edit).
     Viewer/Investor accounts are limited to read-only pages."""
@@ -420,9 +425,11 @@ def _inject_role():
             "logged_in": ident["logged_in"],
             "user_name": ident["name"],
             "pending_rejected": _pending_rejected_count(),
+            "settings_enabled": ident["role"] in SETTINGS_ROLES,
         }
     except Exception:
-        return {"role": "viewer", "logged_in": False, "user_name": None, "pending_rejected": 0}
+        return {"role": "viewer", "logged_in": False, "user_name": None, "pending_rejected": 0,
+                "settings_enabled": False}
 
 
 def roi_access_required(view):
@@ -2225,6 +2232,84 @@ def dashboard_toggle_my_email_notifications():
     if not ok:
         return jsonify({"status": "error", "message": "save_failed"}), 500
     return jsonify({"status": "success", "enabled": enabled}), 200
+
+
+_SETTINGS_MESSAGES = {
+    "email_updated": ("ok", "Email address updated."),
+    "password_updated": ("ok", "Password updated."),
+    "wrong_password": ("err", "Current password is incorrect."),
+    "invalid_email": ("err", "Please enter a valid email address."),
+    "email_taken": ("err", "That email address is already in use."),
+    "password_too_short": ("err", f"New password must be at least {users.MIN_PASSWORD_LENGTH} characters."),
+    "password_too_long": ("err", "New password is too long."),
+    "password_mismatch": ("err", "New passwords do not match."),
+    "not_found": ("err", "Account not found."),
+    "owner_account": ("err", "The Owner login is managed outside the dashboard."),
+}
+
+
+def _settings_user():
+    """The stored user for the current session, or None (e.g. for the Owner,
+    whose login is the DASHBOARD_OWNER_PASSWORD environment variable)."""
+    user_id = flask_session.get("uid")
+    return users.get_user(user_id) if user_id else None
+
+
+def settings_page_required(view):
+    @functools.wraps(view)
+    def wrapper(*args, **kwargs):
+        if not is_logged_in() or current_role() not in SETTINGS_ROLES:
+            return redirect("/dashboard")
+        return view(*args, **kwargs)
+    return wrapper
+
+
+@dashboard.route("/dashboard/settings")
+@settings_page_required
+def dashboard_settings():
+    role = current_role()
+    account_user = _settings_user() if role != "owner" else None
+    msg = _SETTINGS_MESSAGES.get(request.args.get("msg") or "")
+    return render_template(
+        "settings.html",
+        title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
+        cache_bust=time.time(),
+        account=_page_account(),
+        is_owner=(role == "owner"),
+        account_user=account_user,
+        owner_email_enabled=notifications.is_enabled() if role == "owner" else False,
+        owner_email_recipient=notifications.get_recipient() if role == "owner" else "",
+        my_email_enabled=bool(account_user and account_user.get("email_notifications")),
+        flash_kind=msg[0] if msg else None,
+        flash_text=msg[1] if msg else None,
+    )
+
+
+@dashboard.route("/dashboard/settings/email", methods=["POST"])
+@settings_page_required
+def dashboard_settings_email():
+    user_id = flask_session.get("uid")
+    if not user_id:
+        return redirect("/dashboard/settings?msg=owner_account")
+    ok, status = users.change_email(
+        user_id, request.form.get("current_password", ""), request.form.get("email", ""),
+    )
+    return redirect(f"/dashboard/settings?msg={'email_updated' if ok else status}")
+
+
+@dashboard.route("/dashboard/settings/password", methods=["POST"])
+@settings_page_required
+def dashboard_settings_password():
+    user_id = flask_session.get("uid")
+    if not user_id:
+        return redirect("/dashboard/settings?msg=owner_account")
+    new_password = request.form.get("new_password", "")
+    if new_password != request.form.get("confirm_password", ""):
+        return redirect("/dashboard/settings?msg=password_mismatch")
+    ok, status = users.change_password(
+        user_id, request.form.get("current_password", ""), new_password,
+    )
+    return redirect(f"/dashboard/settings?msg={'password_updated' if ok else status}")
 
 
 @dashboard.route("/dashboard/trail/<position_id>", methods=["POST"])

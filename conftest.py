@@ -20,7 +20,7 @@ def _legacy_cookie_identity():
 
 @pytest.fixture(autouse=True)
 def _legacy_cookie_auth(request, monkeypatch):
-    if request.module.__name__ == "test_user_accounts":
+    if request.module.__name__ in ("test_user_accounts", "test_settings"):
         return
     import dashboard
 
