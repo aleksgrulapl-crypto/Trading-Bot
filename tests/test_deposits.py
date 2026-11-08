@@ -543,6 +543,12 @@ class TestOvernightFeeAndInvestorRoi:
         assert e["category"] == "overnight_funding_adjustment" and e["amount"] == -4.39
         assert dep.summarize([e])["total_fees"] == -4.39
 
+    def test_overnight_fee_excludes_withdrawal_made_in_window(self, dep):
+        dep.check_overnight_fee(1000.0, now=self._at(20, 30))
+        dep.add_entry("withdrawal", 200, "Jane", occurred_at=self._at(20, 35).isoformat(), path=dep.LOG_PATH)
+        res = dep.check_overnight_fee(798.51, now=self._at(22, 30))
+        assert res["action"] == "fee_recorded" and res["amount"] == pytest.approx(1.49)
+
     def test_update_fee_amount_only_edits_fees(self, dep):
         _ok, rec, _s = dep.add_entry("deposit", 100, "Jane", path=dep.LOG_PATH)
         assert dep.update_fee_amount(rec["id"], 5, path=dep.LOG_PATH)[1] == "not_a_fee"

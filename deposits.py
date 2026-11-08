@@ -1405,6 +1405,32 @@ def _fallback_overnight_baseline(window_start: datetime) -> Optional[Tuple[float
     return None
 
 
+def _external_flows_since(since: datetime, until: datetime) -> float:
+    """Net signed deposit(+)/withdrawal(-) cash moved on the broker account in
+    [since, until], from ledger rows (owner-paid rows never touch the
+    broker balance, so they're skipped). A row counts if either its
+    occurred_at or the time it was recorded falls in the window."""
+    total = 0.0
+    for e in load_entries(LOG_PATH):
+        if not isinstance(e, dict) or e.get("type") not in ("deposit", "withdrawal"):
+            continue
+        if is_owner_paid_backend(e.get("investor")):
+            continue
+        in_window = False
+        for key in ("occurred_at", "created_at"):
+            ts = _parse_entry_datetime(e.get(key))
+            if ts is not None and since <= ts <= until:
+                in_window = True
+        if not in_window:
+            continue
+        try:
+            amt = float(e.get("amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        total += amt if e.get("type") == "deposit" else -amt
+    return total
+
+
 def check_overnight_fee(
     current_balance: Optional[float],
     trade_pnl_events: Optional[List[Dict[str, Any]]] = None,
@@ -1467,7 +1493,10 @@ def check_overnight_fee(
             ev.get("pnl", 0.0) for ev in (trade_pnl_events or [])
             if isinstance(ev.get("ts"), datetime) and ev["ts"] >= started_at
         )
-        delta = round(current_balance - float(state.get("baseline")) - pnl_since, 2)
+        # Deposits/withdrawals logged in the window also move the balance;
+        # exclude them so only the funding adjustment remains.
+        flows = _external_flows_since(started_at, now)
+        delta = round(current_balance - float(state.get("baseline")) - pnl_since - flows, 2)
         state["recorded"] = True
         _atomic_write(state_path, state)
 

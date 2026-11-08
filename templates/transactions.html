@@ -58,6 +58,7 @@
           <option value="deposit">Deposit</option>
           <option value="withdrawal">Withdrawal</option>
           <option value="fee">Fee</option>
+          <option value="ofa">OFA (Overnight Funding Adjustment)</option>
         </select>
       </div>
       <div>
@@ -152,7 +153,11 @@ function onTransactionTypeChange() {
     const investorField = document.getElementById("investor-field");
     // Fees are a broker-level cost (not one investor's capital), so the
     // investor is fixed to "Broker" (also enforced server-side).
-    const isFee = type === "fee";
+    const isFee = type === "fee" || type === "ofa";
+    const amountInput = document.getElementById("amount");
+    // OFA is entered as shown in History: + credit / - charge.
+    amountInput.min = type === "ofa" ? "-1000000" : "0.01";
+    amountInput.placeholder = type === "ofa" ? "+ credit / - charge" : "";
     investorInput.required = !isFee;
     investorInput.readOnly = isFee;
     if (isFee) {
