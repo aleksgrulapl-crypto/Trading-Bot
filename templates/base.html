@@ -537,11 +537,13 @@
             header .nav { flex-wrap: wrap; justify-content: center; }
         }
         .m-nav { display: none; }
+        .uk-clock-text { display: contents; }
         @media (max-width: 720px) {
             body { overflow-x: hidden; }
             header {
                 grid-template-columns: 112px minmax(0, 1fr) 112px;
-                grid-template-areas: "menu title ." "clock clock clock" "right right right";
+                grid-template-areas: "menu title theme" "clock clock clock" "right right right";
+                align-items: start;
                 gap: 10px 8px;
                 padding: 12px 14px;
                 text-align: center;
@@ -550,10 +552,12 @@
             header .m-nav { display: block; grid-area: menu; justify-self: start; align-self: start; min-height: 38px; }
             header .m-nav select { width: 112px; }
             header .m-nav.stuck select { position: fixed; top: 8px; left: 10px; z-index: 1000; background: var(--surface-deep); box-shadow: 0 2px 10px var(--shadow); }
-            header .uk-clock { grid-area: clock; grid-column: auto; grid-row: auto; text-align: center; font-size: 14px; }
+            header .uk-clock { display: contents; }
+            header .uk-clock-text { display: block; grid-area: clock; text-align: center; font-size: 14px; font-weight: 700; color: var(--accent-soft); }
+            header .uk-clock-label { display: inline; margin: 0 6px 0 0; }
             header .title { grid-area: title; font-size: 20px; }
             header .title .tagline { display: none; }
-            header .uk-clock .theme-picker { position: absolute; top: 12px; right: 14px; width: 84px; margin: 0; font-size: 13px; padding: 6px 4px; z-index: 5; }
+            header .uk-clock .theme-picker { grid-area: theme; justify-self: end; width: 84px; margin: 0; font-size: 13px; padding: 8px 4px; }
             header .header-right { grid-area: right; align-items: center; }
             header .nav { display: none; }
             .m-nav select {
@@ -571,6 +575,8 @@
             .card { padding: 12px 10px; max-width: 100%; box-sizing: border-box; }
             .card-header { flex-direction: column; gap: 8px; }
             .card-title { white-space: normal; text-align: center; }
+            .card-header.snap-head { align-items: flex-start; }
+            .card-header.snap-head .small { position: static !important; }
             .card-header .email-notify-toggle { position: static !important; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
             .table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; font-size: 11px; }
             .table th, .table td { padding: 5px 6px; }
@@ -585,12 +591,12 @@
 <header>
     <div class="m-nav"><select id="m-nav-select" aria-label="Menu"></select></div>
     <div id="uk-clock" class="uk-clock" aria-live="off">
-        <span class="uk-clock-label">UK Time</span>
-        <span id="uk-clock-value">--:--:--</span>
+        <span class="uk-clock-text"><span class="uk-clock-label">UK Time</span>
+        <span id="uk-clock-value">--:--:--</span></span>
         <select id="theme-picker" class="theme-picker" aria-label="Theme" title="Theme">
-            <option value="navy">Theme: Navy</option>
-            <option value="day">Theme: Day</option>
-            <option value="night">Theme: Night</option>
+            <option value="navy">Navy</option>
+            <option value="day">Day</option>
+            <option value="night">Night</option>
         </select>
     </div>
 
@@ -676,18 +682,7 @@
     window.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
 
-    // On phones the theme picker sits under the headline instead of beside the clock.
-    const theme = document.getElementById('theme-picker');
-    const mq = window.matchMedia('(max-width: 720px)');
-    function placeTheme() {
-        if (!theme) return;
-        Array.prototype.forEach.call(theme.options, function (o) {
-            if (!o.dataset.full) o.dataset.full = o.textContent;
-            o.textContent = mq.matches ? o.dataset.full.replace('Theme: ', '') : o.dataset.full;
-        });
-    }
-    placeTheme();
-    if (mq.addEventListener) mq.addEventListener('change', placeTheme);
+
 })();
 </script>
 
