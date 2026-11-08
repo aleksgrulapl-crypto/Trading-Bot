@@ -306,6 +306,7 @@ NOTIFY_SETTINGS_PATH = os.getenv("NOTIFY_SETTINGS_PATH", "/data/notify_settings.
 TRAIL_SETTINGS_PATH = os.getenv("TRAIL_SETTINGS_PATH", "/data/trail_settings.json")
 # Owner master switch for accepting new trades (see trading_switch.py).
 TRADING_SWITCH_PATH = os.getenv("TRADING_SWITCH_PATH", "/data/trading_switch.json")
+UI_PREFS_PATH = os.getenv("UI_PREFS_PATH", "/data/ui_prefs.json")
 TERMS_VERSION_PATH = os.getenv("TERMS_VERSION_PATH", "/data/terms_version.json")
 
 # Events & sentiment for open trades (events.py). Free Finnhub key from

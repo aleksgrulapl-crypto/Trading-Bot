@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, List
 
 import config
 import events
+import ui_prefs
 
 SECTORS: Dict[str, List[str]] = {
     "Semiconductors": ["NVDA", "AMD", "INTC", "MU", "AVGO", "MRVL", "AMAT", "LRCX", "WDC", "STX"],
@@ -42,6 +43,11 @@ def build_sectors(open_trades: List[Dict[str, Any]], extra: Iterable[Any] = ()) 
             positions.setdefault(sym, []).append(t)
 
     symbols = universe(list(extra) + [t.get("ticker") for t in open_trades or []])
+
+    # Active stocks (open trade) flash when sentiment differs from the last
+    # acknowledged value. First sight of an active stock sets the baseline.
+    seen = ui_prefs.sentiment_seen()
+    new_seen: Dict[str, str] = {}
     groups: Dict[str, List[Dict[str, Any]]] = {}
     for sym in symbols:
         open_here = positions.get(sym, [])
@@ -50,13 +56,23 @@ def build_sectors(open_trades: List[Dict[str, Any]], extra: Iterable[Any] = ()) 
         conflict = bool(info) and any(
             events.is_conflict(t.get("side") or t.get("direction"), info["sentiment"]) for t in open_here
         )
+        sentiment = (info or {}).get("sentiment")
+        changed = False
+        if open_here and sentiment:
+            new_seen[sym] = seen.get(sym, sentiment)
+            changed = new_seen[sym] != sentiment
+        elif open_here and sym in seen:
+            new_seen[sym] = seen[sym]
         groups.setdefault(sector_of(sym), []).append({
             "symbol": sym,
+            "sentiment_changed": changed,
             "info": info,
             "open_count": len(open_here),
             "sides": sides,
             "conflict": conflict,
         })
+
+    ui_prefs.update_sentiment_seen(new_seen)
 
     ordered = [s for s in list(SECTORS) + [OTHER] if s in groups]
     return [
