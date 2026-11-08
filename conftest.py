@@ -5,6 +5,7 @@ tests were written around plain `dashboard_auth` / `dashboard_role` cookies, so
 they run against a small shim that reads those cookies instead. The real
 session-based flow is covered in test_user_accounts.py, which opts out.
 """
+import os
 import pytest
 from flask import request
 
@@ -25,3 +26,15 @@ def _legacy_cookie_auth(request, monkeypatch):
     import dashboard
 
     monkeypatch.setattr(dashboard, "_read_identity", _legacy_cookie_identity)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_data_paths(tmp_path, monkeypatch):
+    """Redirect every /data persistence path to a temp dir so tests never
+    depend on (or write to) a real /data volume, e.g. on CI runners."""
+    import config
+
+    for name in dir(config):
+        value = getattr(config, name)
+        if name.endswith(("_PATH", "_FILE")) and isinstance(value, str) and value.replace("\\", "/").startswith("/data/"):
+            monkeypatch.setattr(config, name, str(tmp_path / os.path.basename(value)))

@@ -539,6 +539,7 @@
             header .nav { flex-wrap: wrap; justify-content: center; }
         }
         .m-nav { display: none; }
+        .m-tabs { display: none; }
         .m-cog { display: none; }
         header .nav a.cog { display: inline-flex; align-items: center; }
         header .nav a.cog svg, .m-cog svg { display: block; }
@@ -568,15 +569,19 @@
             header .header-right { grid-area: right; align-items: center; }
             header .nav { display: none; }
             .m-nav select {
-                background: rgba(56, 189, 248, 0.12);
-                color: var(--accent);
-                border: 1px solid rgba(56, 189, 248, 0.45);
+                background: transparent;
+                color: var(--accent-soft);
+                border: 0;
                 border-radius: 8px;
-                padding: 8px 10px;
+                padding: 8px 4px;
                 font-size: 14px;
                 font-weight: 600;
                 max-width: 150px;
             }
+            .m-tabs { display: flex; position: fixed; left: 10px; right: 10px; bottom: 10px; z-index: 1000; justify-content: space-between; pointer-events: none; }
+            .m-tabs a { pointer-events: auto; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 50%; color: var(--accent-soft); background: var(--surface-deep); box-shadow: 0 2px 10px var(--shadow); text-decoration: none; }
+            .m-tabs a.disabled { visibility: hidden; }
+            body { padding-bottom: 64px; }
             #dashboard-content { padding-left: 10px; padding-right: 10px; }
             .grid > *, .grid-two > *, .grid-full > * { min-width: 0; }
             .card { padding: 12px 10px; max-width: 100%; box-sizing: border-box; }
@@ -692,6 +697,21 @@
     }
     window.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
+
+    const pages = Array.from(sel.options).filter(function (o) { return o.value; });
+    const idx = pages.findIndex(function (o) { return o.value === location.pathname; });
+    const bar = document.createElement('div');
+    bar.className = 'm-tabs';
+    function arrow(target, label, path) {
+        const a = document.createElement('a');
+        a.setAttribute('aria-label', label);
+        a.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="' + path + '"/></svg>';
+        if (target) { a.href = target.value; a.title = target.textContent; } else a.className = 'disabled';
+        return a;
+    }
+    bar.appendChild(arrow(idx > 0 ? pages[idx - 1] : null, 'Previous tab', 'M15 18l-6-6 6-6'));
+    bar.appendChild(arrow(idx >= 0 && idx < pages.length - 1 ? pages[idx + 1] : null, 'Next tab', 'M9 18l6-6-6-6'));
+    if (idx >= 0) document.body.appendChild(bar);
 
 
 })();
