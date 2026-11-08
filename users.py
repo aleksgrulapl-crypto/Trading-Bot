@@ -194,6 +194,46 @@ def set_password(user_id, new_password):
     return False, "not_found"
 
 
+def change_password(user_id, current_password, new_password):
+    """Self-service password change; requires the current password.
+    Returns (ok, status)."""
+    new_password = str(new_password or "")
+    with _lock:
+        users = _load()
+        user = next((u for u in users if u.get("id") == user_id), None)
+        if user is None:
+            return False, "not_found"
+        if not check_password_hash(user.get("password_hash", ""), str(current_password or "")):
+            return False, "wrong_password"
+        if len(new_password) < MIN_PASSWORD_LENGTH:
+            return False, "password_too_short"
+        if len(new_password) > MAX_PASSWORD_LENGTH:
+            return False, "password_too_long"
+        user["password_hash"] = generate_password_hash(new_password)
+        _save(users)
+    return True, "ok"
+
+
+def change_email(user_id, current_password, new_email):
+    """Self-service email change; requires the current password.
+    Returns (ok, status)."""
+    new_email = normalize_email(new_email)
+    if not _EMAIL_RE.match(new_email) or len(new_email) > 254:
+        return False, "invalid_email"
+    with _lock:
+        users = _load()
+        user = next((u for u in users if u.get("id") == user_id), None)
+        if user is None:
+            return False, "not_found"
+        if not check_password_hash(user.get("password_hash", ""), str(current_password or "")):
+            return False, "wrong_password"
+        if any(u.get("email") == new_email and u.get("id") != user_id for u in users):
+            return False, "email_taken"
+        user["email"] = new_email
+        _save(users)
+    return True, "ok"
+
+
 def list_users():
     with _lock:
         users = [_public(u) for u in _load()]

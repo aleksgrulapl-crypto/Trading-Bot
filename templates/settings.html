@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  .set-wrap { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .set-wrap form { display: flex; flex-direction: column; gap: 10px; }
+  .set-wrap label { font-size: 12px; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px; }
+  .set-wrap input[type=email], .set-wrap input[type=password] {
+    background: var(--surface-deep); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px 10px; font-size: 14px; width: 100%; box-sizing: border-box;
+  }
+  .set-wrap button { align-self: flex-start; padding: 8px 16px; font-size: 13px; }
+  .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .set-themes { display: flex; gap: 8px; flex-wrap: wrap; }
+  .set-themes button.active { background: rgba(56, 189, 248, 0.3); border-color: var(--accent); font-weight: 700; }
+  .set-flash { padding: 10px 14px; border-radius: 8px; font-size: 13px; }
+  .set-flash.ok { background: rgba(74, 222, 128, 0.12); border: 1px solid rgba(74, 222, 128, 0.45); color: var(--success); }
+  .set-flash.err { background: rgba(248, 113, 113, 0.12); border: 1px solid rgba(248, 113, 113, 0.45); color: var(--danger); }
+</style>
+
+<div class="set-wrap">
+  {% if flash_text %}<div class="set-flash {{ flash_kind }}" role="status">{{ flash_text }}</div>{% endif %}
+
+  <div class="card">
+    <div class="card-header"><div class="card-title">Appearance</div></div>
+    <div class="set-row">
+      <span class="small">Theme (saved on this device)</span>
+      <div class="set-themes" id="theme-buttons">
+        <button type="button" data-theme-value="navy">Navy</button>
+        <button type="button" data-theme-value="day">Day</button>
+        <button type="button" data-theme-value="night">Night</button>
+      </div>
+    </div>
+  </div>
+
+  {% if full_settings %}
+  <div class="card">
+    <div class="card-header"><div class="card-title">Notifications</div></div>
+    {% if is_owner %}
+    <div class="set-row">
+      <span class="small">Email alerts for trades{% if owner_email_recipient %} to {{ owner_email_recipient }}{% endif %}</span>
+      <button type="button" id="notify-btn" class="pill {% if owner_email_enabled %}pill-long{% else %}pill-status{% endif %}"
+              data-url="/dashboard/notifications/email/toggle" data-enabled="{{ 'true' if owner_email_enabled else 'false' }}">
+        {{ 'ON' if owner_email_enabled else 'OFF' }}
+      </button>
+    </div>
+    {% elif account_user %}
+    <div class="set-row">
+      <span class="small">Email trade alerts to {{ account_user.email }}</span>
+      <button type="button" id="notify-btn" class="pill {% if my_email_enabled %}pill-long{% else %}pill-status{% endif %}"
+              data-url="/dashboard/notifications/my-email" data-enabled="{{ 'true' if my_email_enabled else 'false' }}">
+        {{ 'ON' if my_email_enabled else 'OFF' }}
+      </button>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="card-title">Account details</div></div>
+    {% if account_user %}
+    <form method="POST" action="/dashboard/settings/email" autocomplete="off">
+      <div class="small">Current email: {{ account_user.email }}</div>
+      <label>New email<input type="email" name="email" required maxlength="254"></label>
+      <label>Current password<input type="password" name="current_password" required autocomplete="current-password"></label>
+      <button type="submit">Change email</button>
+    </form>
+    <hr style="border:0; border-top:1px solid var(--line); margin:16px 0;">
+    <form method="POST" action="/dashboard/settings/password" autocomplete="off">
+      <label>Current password<input type="password" name="current_password" required autocomplete="current-password"></label>
+      <label>New password<input type="password" name="new_password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
+      <label>Confirm new password<input type="password" name="confirm_password" required minlength="8" maxlength="128" autocomplete="new-password"></label>
+      <button type="submit">Change password</button>
+    </form>
+    {% else %}
+    <div class="small">The Owner login uses the DASHBOARD_OWNER_PASSWORD environment variable, so email and password are changed there rather than in the dashboard.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  const buttons = document.querySelectorAll('#theme-buttons button');
+  function current() { return document.documentElement.getAttribute('data-theme') || 'navy'; }
+  function mark() { buttons.forEach(function (b) { b.classList.toggle('active', b.dataset.themeValue === current()); }); }
+  buttons.forEach(function (b) {
+    b.addEventListener('click', function () {
+      const v = b.dataset.themeValue;
+      if (v === 'navy') document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', v);
+      try { localStorage.setItem('agc-theme', v); } catch (e) {}
+      mark();
+    });
+  });
+  mark();
+
+  const n = document.getElementById('notify-btn');
+  if (n) n.addEventListener('click', function () {
+    const next = n.dataset.enabled !== 'true';
+    fetch(n.dataset.url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: next }),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.status !== 'success') return;
+      n.dataset.enabled = String(!!d.enabled);
+      n.textContent = d.enabled ? 'ON' : 'OFF';
+      n.classList.toggle('pill-long', !!d.enabled);
+      n.classList.toggle('pill-status', !d.enabled);
+    });
+  });
+})();
+</script>
+{% endblock %}

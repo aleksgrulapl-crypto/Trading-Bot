@@ -537,6 +537,10 @@
             header .nav { flex-wrap: wrap; justify-content: center; }
         }
         .m-nav { display: none; }
+        .m-cog { display: none; }
+        header .nav a.cog { display: inline-flex; align-items: center; }
+        header .nav a.cog svg, .m-cog svg { display: block; }
+        .m-cog { color: var(--accent-soft); background: transparent; border: 0; text-decoration: none; }
         .uk-clock-text { display: contents; }
         @media (max-width: 720px) {
             body { overflow-x: hidden; }
@@ -557,6 +561,7 @@
             header .uk-clock-label { display: inline; margin: 0 6px 0 0; }
             header .title { grid-area: title; font-size: 20px; }
             header .title .tagline { display: none; }
+            header .m-cog { display: inline-flex; grid-area: theme; justify-self: end; align-self: start; padding: 8px; margin: 0 -4px 0 0; border-radius: 8px; }
             header .uk-clock .theme-picker { grid-area: theme; justify-self: end; width: 84px; margin: 0; font-size: 13px; padding: 8px 4px; }
             header .header-right { grid-area: right; align-items: center; }
             header .nav { display: none; }
@@ -593,12 +598,15 @@
     <div id="uk-clock" class="uk-clock" aria-live="off">
         <span class="uk-clock-text"><span class="uk-clock-label">UK Time</span>
         <span id="uk-clock-value">--:--:--</span></span>
+        {% if not settings_enabled %}
         <select id="theme-picker" class="theme-picker" aria-label="Theme" title="Theme">
             <option value="navy">Navy</option>
             <option value="day">Day</option>
             <option value="night">Night</option>
         </select>
+        {% endif %}
     </div>
+    {% if settings_enabled %}<a href="/dashboard/settings" class="m-cog" aria-label="Settings" title="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>{% endif %}
 
     <div class="title"><a href="{{ '/dashboard' if role in ('owner', 'investor') else '/' }}" class="title-link" style="color: inherit; text-decoration: none;">{{ title }}</a><span class="tagline">A private algorithmic trading project built around rules-based strategies and risk management.</span></div>
 
@@ -642,6 +650,7 @@
             <a href="/dashboard/users">Users</a>
             {% endif %}
             {% endif %}
+            {% if settings_enabled %}<a href="/dashboard/settings" class="cog" aria-label="Settings" title="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>{% endif %}
             <a href="/dashboard/logout" class="logout">Logout</a>
             {% endif %}
         </div>
@@ -665,7 +674,7 @@
     const ph = document.createElement('option');
     ph.value = ''; ph.textContent = '\u2630 Menu';
     sel.appendChild(ph);
-    document.querySelectorAll('header .nav a').forEach(function (a) {
+    document.querySelectorAll('header .nav a:not(.cog)').forEach(function (a) {
         const o = document.createElement('option');
         o.value = a.getAttribute('href');
         o.textContent = a.textContent.trim();
