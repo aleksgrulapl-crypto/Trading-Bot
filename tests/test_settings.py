@@ -40,3 +40,27 @@ def test_change_email_and_password(tmp_path, monkeypatch):
     assert users.change_password(user["id"], "password123", "short")[1] == "password_too_short"
     assert users.change_password(user["id"], "password123", "newpassword9") == (True, "ok")
     assert users.authenticate("x@y.co", "newpassword9")
+
+
+def test_position_controls_and_sentiment_ack(tmp_path, monkeypatch):
+    import config, events, stocks
+    monkeypatch.setattr(config, "UI_PREFS_PATH", str(tmp_path / "p.json"), raising=False)
+    monkeypatch.setattr(dm, "_page_account", lambda: {"pnl": 0})
+    owner = _client(tmp_path, monkeypatch, "owner")
+    assert owner.post("/dashboard/position-controls/toggle", json={"control": "hedge", "enabled": False}).status_code == 200
+    assert owner.post("/dashboard/position-controls/toggle", json={"control": "bogus", "enabled": False}).status_code == 400
+    import ui_prefs
+    assert ui_prefs.controls() == {"sltrail": True, "close": True, "hedge": False}
+    assert b"Trading" in owner.get("/dashboard/settings").data
+
+    cache = {"NVDA": {"sentiment": "Bullish", "headlines": []}}
+    monkeypatch.setattr(events, "_load", lambda: cache)
+    trades = [{"ticker": "NVDA", "side": "long"}]
+    flash = lambda: stocks.build_sectors(trades)
+    def changed():
+        return [s["sentiment_changed"] for g in flash() for s in g["stocks"] if s["symbol"] == "NVDA"][0]
+    assert changed() is False
+    cache["NVDA"]["sentiment"] = "Bearish"
+    assert changed() is True
+    assert owner.post("/dashboard/stocks/ack", json={"symbol": "NVDA"}).status_code == 200
+    assert changed() is False

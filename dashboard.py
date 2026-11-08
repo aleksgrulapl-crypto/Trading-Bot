@@ -31,6 +31,7 @@ import hedge
 import notifications
 import events
 import stocks
+import ui_prefs
 import public_snapshot
 import trail_settings
 import trading_switch
@@ -1208,9 +1209,7 @@ def dashboard_home():
         monthly_analytics=ctx["monthly_analytics"],
         period_returns=ctx.get("period_returns") or _default_period_returns(),
         is_owner=current_role() == "owner",
-        email_notify_enabled=notifications.is_enabled(),
-        email_notify_recipient=notifications.get_recipient(),
-        trading_enabled=trading_switch.is_enabled(),
+        position_controls=ui_prefs.controls(),
     )
 
 
@@ -1236,9 +1235,7 @@ def dashboard_data():
             monthly_analytics=ctx["monthly_analytics"],
             period_returns=ctx.get("period_returns") or _default_period_returns(),
             is_owner=current_role() == "owner",
-            email_notify_enabled=notifications.is_enabled(),
-            email_notify_recipient=notifications.get_recipient(),
-            trading_enabled=trading_switch.is_enabled(),
+            position_controls=ui_prefs.controls(),
         )
         return jsonify({
             "html": html,
@@ -2175,6 +2172,36 @@ def dashboard_transactions_delete(entry_id: str):
     return jsonify({"status": "error", "message": status}), code
 
 
+@dashboard.route("/dashboard/position-controls/toggle", methods=["POST"])
+@owner_required
+def dashboard_toggle_position_control():
+    """Owner-only: show/hide the SL Trail, Close or Hedge buttons in Open
+    Positions. Hiding is display-only; trailing and other logic keep running."""
+    payload = request.get_json(silent=True) or request.form or {}
+    name = str(payload.get("control") or "").strip().lower()
+    if name not in ui_prefs.CONTROLS:
+        return jsonify({"status": "error", "message": "unknown_control"}), 400
+    shown = str(payload.get("enabled")).strip().lower() in ("1", "true", "yes", "on")
+    if not ui_prefs.set_control(name, shown):
+        return jsonify({"status": "error", "message": "save_failed"}), 500
+    return jsonify({"status": "success", "control": name, "enabled": shown}), 200
+
+
+@dashboard.route("/dashboard/stocks/ack", methods=["POST"])
+@non_viewer_page_required
+def dashboard_stocks_ack():
+    """Acknowledge a sentiment change (hover on the flashing stock card)."""
+    payload = request.get_json(silent=True) or {}
+    sym = events.normalize_symbol(payload.get("symbol"))
+    info = events.event_info(sym, None, events._load()) if sym else None
+    if not info or not info.get("sentiment"):
+        return jsonify({"status": "error", "message": "unknown_symbol"}), 404
+    seen = ui_prefs.sentiment_seen()
+    seen[sym] = info["sentiment"]
+    ui_prefs.update_sentiment_seen(seen)
+    return jsonify({"status": "success"}), 200
+
+
 @dashboard.route("/dashboard/trading/toggle", methods=["POST"])
 @owner_required
 def dashboard_toggle_trading():
@@ -2291,6 +2318,8 @@ def dashboard_settings():
         owner_email_recipient=notifications.get_recipient() if role == "owner" else "",
         my_email_enabled=bool(account_user and account_user.get("email_notifications")),
         full_settings=(role in SETTINGS_FULL_ROLES),
+        trading_enabled=trading_switch.is_enabled(),
+        position_controls=ui_prefs.controls(),
         flash_kind=msg[0] if msg else None,
         flash_text=msg[1] if msg else None,
     )

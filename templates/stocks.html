@@ -16,7 +16,7 @@
   <div class="stock-grid">
     {% for s in sector.stocks %}
     {% set info = s.info %}
-    <div class="stock-card {% if info and info.sentiment == 'Bullish' %}sent-bullish{% elif info and info.sentiment == 'Bearish' %}sent-bearish{% endif %} {% if s.open_count %}has-open{% endif %}">
+    <div class="stock-card {% if info and info.sentiment == 'Bullish' %}sent-bullish{% elif info and info.sentiment == 'Bearish' %}sent-bearish{% endif %} {% if s.open_count %}has-open{% endif %} {% if s.sentiment_changed %}sent-flash{% endif %}" data-symbol="{{ s.symbol }}"{% if s.sentiment_changed %} title="Sentiment changed - hover to acknowledge"{% endif %}>
       <div class="stock-head">
         <span class="stock-sym">{{ s.symbol }}</span>
         {% if s.sides %}
@@ -45,4 +45,16 @@
   </div>
   {% endfor %}
 </div>
+<script>
+document.querySelectorAll('.stock-card.sent-flash').forEach(function (c) {
+  c.addEventListener('mouseenter', function () {
+    c.classList.remove('sent-flash');
+    c.removeAttribute('title');
+    fetch('/dashboard/stocks/ack', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: c.dataset.symbol }),
+    });
+  }, { once: true });
+});
+</script>
 {% endblock %}

@@ -34,6 +34,26 @@
   </div>
 
   {% if full_settings %}
+  {% if is_owner %}
+  <div class="card">
+    <div class="card-header"><div class="card-title">Trading</div></div>
+    <div class="set-row">
+      <span class="small">Master switch: OFF rejects every new trade</span>
+      <button type="button" id="trading-btn" class="pill {% if trading_enabled %}pill-long{% else %}pill-short{% endif %}"
+              data-enabled="{{ 'true' if trading_enabled else 'false' }}">{{ 'ON' if trading_enabled else 'OFF' }}</button>
+    </div>
+    <hr style="border:0; border-top:1px solid var(--line); margin:12px 0;">
+    <div class="small" style="margin-bottom:8px;">Show in Open Positions (OFF only hides the button; the feature keeps working)</div>
+    {% for key, label in [('sltrail', 'SL Trail'), ('close', 'Close'), ('hedge', 'Hedge')] %}
+    <div class="set-row" style="margin-bottom:6px;">
+      <span class="small">{{ label }}</span>
+      <button type="button" class="pill ctl-btn {% if position_controls[key] %}pill-long{% else %}pill-status{% endif %}"
+              data-control="{{ key }}" data-enabled="{{ 'true' if position_controls[key] else 'false' }}">{{ 'ON' if position_controls[key] else 'OFF' }}</button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <div class="card">
     <div class="card-header"><div class="card-title">Notifications</div></div>
     {% if is_owner %}
@@ -93,6 +113,31 @@
     });
   });
   mark();
+
+  function post(url, body) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json(); });
+  }
+  function paint(b, on, offClass) {
+    b.dataset.enabled = String(!!on);
+    b.textContent = on ? 'ON' : 'OFF';
+    b.classList.toggle('pill-long', !!on);
+    b.classList.toggle(offClass, !on);
+  }
+  const t = document.getElementById('trading-btn');
+  if (t) t.addEventListener('click', function () {
+    const on = t.dataset.enabled === 'true';
+    if (on && !window.confirm('Turn trading OFF? All new trades will be rejected until you switch it back on.')) return;
+    post('/dashboard/trading/toggle', { enabled: !on }).then(function (d) {
+      if (d.status === 'success') paint(t, d.enabled, 'pill-short');
+    });
+  });
+  document.querySelectorAll('.ctl-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      post('/dashboard/position-controls/toggle', { control: b.dataset.control, enabled: b.dataset.enabled !== 'true' })
+        .then(function (d) { if (d.status === 'success') paint(b, d.enabled, 'pill-status'); });
+    });
+  });
 
   const n = document.getElementById('notify-btn');
   if (n) n.addEventListener('click', function () {
