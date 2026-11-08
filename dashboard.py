@@ -303,6 +303,7 @@ PUBLIC_ENDPOINTS = frozenset({
     "dashboard.dashboard_terms",
     "dashboard.dashboard_contact",
     "dashboard.dashboard_faq",
+    "dashboard.export_closed_trades_csv",
 })
 
 
@@ -1400,6 +1401,48 @@ def dashboard_trades_data():
             "message": "Failed to render trade log partial",
             "details": str(exc),
         }), 500
+
+
+EXPORT_COLUMNS = [
+    "dealId", "ticker", "side", "size", "entry_price", "exit_price",
+    "time_entered", "time_exited", "pnl", "pnl_gbp", "timeframe",
+    "trade_source", "notes",
+]
+
+
+@dashboard.route("/dashboard/export/closed_trades.csv")
+def export_closed_trades_csv():
+    """One-way CSV export of CLOSED trades for Excel / Power Query.
+
+    Authenticated with the EXPORT_TOKEN env var (Authorization: Bearer <token>,
+    X-Export-Token header, or ?token=), since Power Query cannot use the
+    session-cookie login. Disabled when EXPORT_TOKEN is unset."""
+    import csv
+    import io
+    from flask import Response
+
+    expected = os.getenv("EXPORT_TOKEN", "")
+    supplied = (
+        request.headers.get("X-Export-Token")
+        or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        or request.args.get("token", "")
+    )
+    if not expected or not hmac.compare_digest(supplied.encode(), expected.encode()):
+        return Response("Forbidden", status=403)
+
+    closed = [t for t in load_raw_log() if str(t.get("status", "")).upper() == "CLOSED"]
+    closed.sort(key=lambda t: str(t.get("time_exited") or ""))
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(EXPORT_COLUMNS)
+    for t in closed:
+        writer.writerow(["" if t.get(c) is None else t.get(c) for c in EXPORT_COLUMNS])
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _page_account():
