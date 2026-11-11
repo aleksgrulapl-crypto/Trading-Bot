@@ -23,6 +23,7 @@ for _name, _file in {
     "USERS_PATH": "users.json", "NOTIFY_SETTINGS_PATH": "notify_settings.json",
     "TRAIL_SETTINGS_PATH": "trail_settings.json", "TRADING_SWITCH_PATH": "trading_switch.json",
     "UI_PREFS_PATH": "ui_prefs.json", "TERMS_VERSION_PATH": "terms_version.json",
+    "GALLERY_DIR": "gallery",
     "EVENTS_CACHE_PATH": "events_cache.json",
 }.items():
     os.environ[_name] = os.path.join(_SCRATCH, _file)

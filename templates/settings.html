@@ -42,6 +42,11 @@
       <button type="button" id="trading-btn" class="pill {% if trading_enabled %}pill-long{% else %}pill-short{% endif %}"
               data-enabled="{{ 'true' if trading_enabled else 'false' }}">{{ 'ON' if trading_enabled else 'OFF' }}</button>
     </div>
+    <div class="set-row" style="margin-top:8px;">
+      <span class="small">Register interest: OFF hides the Register buttons and blocks new sign-ups</span>
+      <button type="button" id="register-btn" class="pill {% if registration_enabled %}pill-long{% else %}pill-short{% endif %}"
+              data-enabled="{{ 'true' if registration_enabled else 'false' }}">{{ 'ON' if registration_enabled else 'OFF' }}</button>
+    </div>
     <hr style="border:0; border-top:1px solid var(--line); margin:12px 0;">
     <div class="small" style="margin-bottom:8px;">Show in Open Positions (OFF only hides the button; the feature keeps working)</div>
     {% for key, label in [('sltrail', 'SL Trail'), ('close', 'Close'), ('hedge', 'Hedge')] %}
@@ -130,6 +135,12 @@
     if (on && !window.confirm('Turn trading OFF? All new trades will be rejected until you switch it back on.')) return;
     post('/dashboard/trading/toggle', { enabled: !on }).then(function (d) {
       if (d.status === 'success') paint(t, d.enabled, 'pill-short');
+    });
+  });
+  const rg = document.getElementById('register-btn');
+  if (rg) rg.addEventListener('click', function () {
+    post('/dashboard/registration/toggle', { enabled: rg.dataset.enabled !== 'true' }).then(function (d) {
+      if (d.status === 'success') paint(rg, d.enabled, 'pill-short');
     });
   });
   document.querySelectorAll('.ctl-btn').forEach(function (b) {

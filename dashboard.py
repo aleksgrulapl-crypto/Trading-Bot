@@ -17,7 +17,7 @@ from statistics import mean
 from datetime import datetime, timedelta
 import logging
 import os
-from flask import Blueprint, request, render_template, redirect, jsonify, current_app
+from flask import Blueprint, request, render_template, redirect, jsonify, current_app, send_file
 from flask import session as flask_session
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
@@ -30,6 +30,7 @@ import gating
 import hedge
 import notifications
 import events
+import gallery
 import stocks
 import ui_prefs
 import public_snapshot
@@ -158,13 +159,15 @@ def dashboard_login_submit():
 
 @dashboard.route("/dashboard/register", methods=["GET"])
 def dashboard_register():
-    if _read_identity()["logged_in"]:
-        return redirect("/dashboard")
+    if _read_identity()["logged_in"] or not ui_prefs.registration_open():
+        return redirect("/dashboard" if _read_identity()["logged_in"] else "/")
     return render_template("register.html", title="Create an account")
 
 
 @dashboard.route("/dashboard/register", methods=["POST"])
 def dashboard_register_submit():
+    if not ui_prefs.registration_open():
+        return redirect("/")
     name = request.form.get("name", "")
     email = request.form.get("email", "")
     password = request.form.get("password", "")
@@ -429,10 +432,11 @@ def _inject_role():
             "user_name": ident["name"],
             "pending_rejected": _pending_rejected_count(),
             "settings_enabled": ident["role"] in SETTINGS_ROLES,
+            "registration_open": ui_prefs.registration_open(),
         }
     except Exception:
         return {"role": "viewer", "logged_in": False, "user_name": None, "pending_rejected": 0,
-                "settings_enabled": False}
+                "settings_enabled": False, "registration_open": True}
 
 
 def roi_access_required(view):
@@ -1522,6 +1526,61 @@ def dashboard_faq():
     return _render_static_page("faq.html")
 
 
+_GALLERY_MESSAGES = {
+    "uploaded": ("ok", "Image added."),
+    "deleted": ("ok", "Image removed."),
+    "no_file": ("err", "Please choose an image."),
+    "too_large": ("err", "Image is too large (max 5 MB)."),
+    "bad_type": ("err", "Only PNG, JPEG, GIF or WebP images are allowed."),
+    "save_failed": ("err", "Could not save the image."),
+    "delete_failed": ("err", "Could not remove the image."),
+}
+
+
+@dashboard.route("/dashboard/gallery")
+@login_required
+def dashboard_gallery():
+    msg = _GALLERY_MESSAGES.get(request.args.get("msg") or "")
+    return render_template(
+        "gallery.html",
+        title=getattr(config, "DASHBOARD_TITLE", "Dashboard"),
+        cache_bust=time.time(),
+        account=_page_account(),
+        items=gallery.list_items(),
+        is_owner=(current_role() == "owner"),
+        flash_kind=msg[0] if msg else None,
+        flash_text=msg[1] if msg else None,
+    )
+
+
+@dashboard.route("/dashboard/gallery/img/<name>")
+@login_required
+def dashboard_gallery_image(name):
+    path = gallery.image_path(name)
+    if not path:
+        return ("Not found", 404)
+    resp = send_file(path)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Cache-Control"] = "private, max-age=86400"
+    return resp
+
+
+@dashboard.route("/dashboard/gallery/upload", methods=["POST"])
+@owner_page_required
+def dashboard_gallery_upload():
+    f = request.files.get("image")
+    data = f.read(gallery.MAX_BYTES + 1) if f else b""
+    ok, status = gallery.add_image(data, request.form.get("caption", ""))
+    return redirect(f"/dashboard/gallery?msg={'uploaded' if ok else status}")
+
+
+@dashboard.route("/dashboard/gallery/delete", methods=["POST"])
+@owner_page_required
+def dashboard_gallery_delete():
+    ok = gallery.delete_image(request.form.get("file", ""))
+    return redirect(f"/dashboard/gallery?msg={'deleted' if ok else 'delete_failed'}")
+
+
 @dashboard.route("/")
 def landing():
     """Public welcome page. Serves only the cached, percentages-only snapshot,
@@ -2277,6 +2336,22 @@ def dashboard_toggle_trading():
     }), 200
 
 
+@dashboard.route("/dashboard/registration/toggle", methods=["POST"])
+@owner_required
+def dashboard_toggle_registration():
+    """Owner-only: show/hide the public "Register your interest" entry points
+    and block new sign-ups while hidden."""
+    payload = request.get_json(silent=True) or request.form or {}
+    enabled = payload.get("enabled")
+    if enabled is None:
+        enabled = not ui_prefs.registration_open()
+    else:
+        enabled = str(enabled).strip().lower() in ("1", "true", "yes", "on")
+    if not ui_prefs.set_registration_open(enabled):
+        return jsonify({"status": "error", "message": "save_failed"}), 500
+    return jsonify({"status": "success", "enabled": enabled}), 200
+
+
 @dashboard.route("/dashboard/notifications/email/toggle", methods=["POST"])
 @owner_required
 def dashboard_toggle_email_notifications():
@@ -2374,6 +2449,7 @@ def dashboard_settings():
         full_settings=(role in SETTINGS_FULL_ROLES),
         trading_enabled=trading_switch.is_enabled(),
         position_controls=ui_prefs.controls(),
+        registration_enabled=ui_prefs.registration_open(),
         flash_kind=msg[0] if msg else None,
         flash_text=msg[1] if msg else None,
     )

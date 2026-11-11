@@ -85,7 +85,7 @@
 
     <p style="margin-top:15px; font-size:13px;"><a href="/dashboard/forgot" style="color:#58a6ff;">Forgot password?</a></p>
     <p style="margin-top:10px; font-size:13px;">
-        No account yet? <a href="/dashboard/register" style="color:#58a6ff;">Create one</a>
+        {% if registration_open %}No account yet? <a href="/dashboard/register" style="color:#58a6ff;">Create one</a>{% endif %}
         &middot; <a href="/dashboard/terms" style="color:#58a6ff;">Terms</a>
     </p>
     {% include "_auth_footer.html" %}
