@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="analytics-wrap">
+  {% if flash_text %}
+  <div class="small" style="margin-bottom:10px;color:{{ 'var(--success)' if flash_kind == 'ok' else 'var(--danger)' }};">{{ flash_text }}</div>
+  {% endif %}
+
+  {% if is_owner %}
+  <div class="card">
+    <div class="card-header"><div class="card-title">Add to gallery</div></div>
+    <form method="POST" action="/dashboard/gallery/upload" enctype="multipart/form-data">
+      <div class="set-row" style="gap:8px;flex-wrap:wrap;">
+        <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp" required>
+        <input type="text" name="caption" maxlength="200" placeholder="Caption (optional)" style="flex:1;min-width:180px;">
+        <button type="submit" class="pill pill-long">Upload</button>
+      </div>
+      <div class="small" style="margin-top:6px;">PNG, JPEG, GIF or WebP, up to 5 MB.</div>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="card-header"><div class="card-title">Gallery</div></div>
+    {% if items %}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;">
+      {% for it in items %}
+      <figure style="margin:0;">
+        <a href="/dashboard/gallery/img/{{ it.file }}" target="_blank" rel="noopener">
+          <img src="/dashboard/gallery/img/{{ it.file }}" alt="{{ it.caption }}" loading="lazy" style="width:100%;border-radius:8px;display:block;">
+        </a>
+        {% if it.caption %}<figcaption class="small" style="margin-top:4px;">{{ it.caption }}</figcaption>{% endif %}
+        {% if is_owner %}
+        <form method="POST" action="/dashboard/gallery/delete" onsubmit="return confirm('Remove this image?');">
+          <input type="hidden" name="file" value="{{ it.file }}">
+          <button type="submit" class="pill pill-short" style="margin-top:4px;">Remove</button>
+        </form>
+        {% endif %}
+      </figure>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="small">Nothing here yet.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

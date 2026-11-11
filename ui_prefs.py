@@ -71,6 +71,19 @@ def set_control(name: str, shown: bool) -> bool:
         return _save(data)
 
 
+def registration_open() -> bool:
+    """Whether the public "Register your interest" entry points are shown."""
+    with _lock:
+        return bool(_load().get("registration_open", True))
+
+
+def set_registration_open(open_: bool) -> bool:
+    with _lock:
+        data = _load()
+        data["registration_open"] = bool(open_)
+        return _save(data)
+
+
 def sentiment_seen() -> Dict[str, str]:
     with _lock:
         seen = _load().get("sentiment_seen")
