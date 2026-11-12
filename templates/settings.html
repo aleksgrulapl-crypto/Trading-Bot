@@ -62,13 +62,14 @@
   <div class="card">
     <div class="card-header"><div class="card-title">Notifications</div></div>
     {% if is_owner %}
-    <div class="set-row">
-      <span class="small">Email alerts for trades{% if owner_email_recipient %} to {{ owner_email_recipient }}{% endif %}</span>
-      <button type="button" id="notify-btn" class="pill {% if owner_email_enabled %}pill-long{% else %}pill-status{% endif %}"
-              data-url="/dashboard/notifications/email/toggle" data-enabled="{{ 'true' if owner_email_enabled else 'false' }}">
-        {{ 'ON' if owner_email_enabled else 'OFF' }}
-      </button>
+    <div class="small" style="margin-bottom:8px;">Email alerts{% if owner_email_recipient %} to {{ owner_email_recipient }}{% endif %}</div>
+    {% for key, label, on in notification_categories %}
+    <div class="set-row" style="margin-bottom:6px;">
+      <span class="small">{{ label }}</span>
+      <button type="button" class="pill cat-btn {% if on %}pill-long{% else %}pill-status{% endif %}"
+              data-category="{{ key }}" data-enabled="{{ 'true' if on else 'false' }}">{{ 'ON' if on else 'OFF' }}</button>
     </div>
+    {% endfor %}
     {% elif account_user %}
     <div class="set-row">
       <span class="small">Email trade alerts to {{ account_user.email }}</span>
@@ -146,6 +147,13 @@
   document.querySelectorAll('.ctl-btn').forEach(function (b) {
     b.addEventListener('click', function () {
       post('/dashboard/position-controls/toggle', { control: b.dataset.control, enabled: b.dataset.enabled !== 'true' })
+        .then(function (d) { if (d.status === 'success') paint(b, d.enabled, 'pill-status'); });
+    });
+  });
+
+  document.querySelectorAll('.cat-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      post('/dashboard/notifications/category', { category: b.dataset.category, enabled: b.dataset.enabled !== 'true' })
         .then(function (d) { if (d.status === 'success') paint(b, d.enabled, 'pill-status'); });
     });
   });

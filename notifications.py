@@ -91,6 +91,41 @@ def is_enabled() -> bool:
     return bool(getattr(config, "NOTIFY_EMAIL_ENABLED", False))
 
 
+# Owner-selectable notification categories: key -> (label, default when unset).
+# A None default means "follow the master is_enabled() switch" (legacy behaviour).
+CATEGORIES = {
+    "opened": ("Position opened", None),
+    "closed": ("Position closed", True),
+    "sentiment": ("Sentiment & earnings alerts", None),
+    "daily_pnl": ("Daily PnL summary", True),
+}
+
+
+def category_enabled(category: str) -> bool:
+    """Whether the Owner wants emails for *category*. An explicit dashboard
+    choice wins; otherwise closed/daily PnL default On and the rest follow
+    the legacy master switch."""
+    chosen = (load_settings().get("categories") or {}).get(category)
+    if chosen is not None:
+        return bool(chosen)
+    default = CATEGORIES[category][1]
+    return is_enabled() if default is None else default
+
+
+def set_category(category: str, enabled: bool) -> Dict[str, Any]:
+    with _settings_lock:
+        settings = load_settings()
+        cats = settings.get("categories")
+        if not isinstance(cats, dict):
+            cats = {}
+        cats[category] = bool(enabled)
+        settings["categories"] = cats
+        if enabled and not settings.get("to") and not (getattr(config, "NOTIFY_EMAIL_TO", "") or ""):
+            settings["to"] = DEFAULT_RECIPIENT_EMAIL
+        save_settings(settings)
+        return settings
+
+
 def get_recipient() -> str:
     """Return the configured recipient address(es), preferring a persisted
     dashboard override over the NOTIFY_EMAIL_TO env default."""
@@ -218,6 +253,8 @@ def notify_owner_new_registration(name: str, email: str) -> bool:
 
 def notify_daily_pnl(summary: Dict[str, Any]) -> bool:
     """Email the day's realised PnL summary to the Owner recipient(s)."""
+    if not category_enabled("daily_pnl"):
+        return False
     day = summary["date"]
     lines = [
         f"Daily PnL for {day.strftime('%A %d %b %Y')}",
@@ -244,7 +281,7 @@ def notify_position_opened(trade: Dict[str, Any]) -> bool:
     """Email when a position is opened, only when the dashboard toggle is On."""
     if not trade:
         return False
-    if not is_enabled():
+    if not category_enabled("opened"):
         logger.info(
             "notify_position_opened: skipped for %s - email toggle is Off (settings file %s)",
             trade.get("ticker"), SETTINGS_PATH,
@@ -304,7 +341,7 @@ def notify_position_closed(trade: Dict[str, Any], balance: Optional[float] = Non
         f"Closed at: {_fmt_datetime(trade.get('time_exited'))}\n"
         f"Account balance: {_fmt_money(balance_after)}\n"
     )
-    sent = _send_email(subject, body)
+    sent = _send_email(subject, body) if category_enabled("closed") else False
     try:
         notify_investors_position_closed(trade)
     except Exception:

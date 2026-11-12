@@ -2265,6 +2265,19 @@ def dashboard_transactions_add():
 def dashboard_transactions_edit(entry_id: str):
     """Owner-only: correct the amount of a recorded broker fee."""
     payload = request.get_json(silent=True) or request.form or {}
+    entry = next((e for e in deposits.load_entries() if str(e.get("id")) == str(entry_id)), None)
+    if entry and entry.get("type") in ("deposit", "withdrawal"):
+        ok, status = deposits.update_capital_entry(
+            entry_id,
+            payload.get("amount"),
+            investor=payload.get("investor"),
+            occurred_at=payload.get("occurred_at"),
+            note=payload.get("note"),
+        )
+        if ok:
+            return jsonify({"status": "success", "message": "Entry updated; NAV units recalculated."}), 200
+        code = 404 if status == "not_found" else (500 if status == "save_failed" else 400)
+        return jsonify({"status": "error", "message": status}), code
     ok, status = deposits.update_fee_amount(entry_id, payload.get("amount"))
     if ok:
         return jsonify({"status": "success", "message": "Fee updated."}), 200
@@ -2376,6 +2389,23 @@ def dashboard_toggle_email_notifications():
     }), 200
 
 
+@dashboard.route("/dashboard/notifications/category", methods=["POST"])
+@owner_required
+def dashboard_toggle_notification_category():
+    """Owner-only: switch one email category (opened/closed/sentiment/daily PnL)."""
+    payload = request.get_json(silent=True) or request.form or {}
+    category = str(payload.get("category") or "").strip().lower()
+    if category not in notifications.CATEGORIES:
+        return jsonify({"status": "error", "message": "unknown_category"}), 400
+    enabled = str(payload.get("enabled")).strip().lower() in ("1", "true", "yes", "on")
+    settings = notifications.set_category(category, enabled)
+    return jsonify({
+        "status": "success",
+        "category": category,
+        "enabled": bool((settings.get("categories") or {}).get(category)),
+    }), 200
+
+
 @dashboard.route("/dashboard/notifications/my-email", methods=["POST"])
 @login_required
 def dashboard_toggle_my_email_notifications():
@@ -2444,6 +2474,10 @@ def dashboard_settings():
         is_owner=(role == "owner"),
         account_user=account_user,
         owner_email_enabled=notifications.is_enabled() if role == "owner" else False,
+        notification_categories=(
+            [(k, v[0], notifications.category_enabled(k)) for k, v in notifications.CATEGORIES.items()]
+            if role == "owner" else []
+        ),
         owner_email_recipient=notifications.get_recipient() if role == "owner" else "",
         my_email_enabled=bool(account_user and account_user.get("email_notifications")),
         full_settings=(role in SETTINGS_FULL_ROLES),

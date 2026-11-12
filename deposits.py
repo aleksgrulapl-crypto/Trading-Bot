@@ -316,6 +316,53 @@ def update_fee_amount(entry_id: str, amount: Any, path: str = LOG_PATH) -> Tuple
         return False, "not_found"
 
 
+def update_capital_entry(
+    entry_id: str,
+    amount: Any,
+    investor: Optional[str] = None,
+    occurred_at: Optional[str] = None,
+    note: Optional[str] = None,
+    path: str = LOG_PATH,
+) -> Tuple[bool, str]:
+    """Correct a deposit/withdrawal row. NAV units are derived by replaying the
+    ledger (see investor_breakdown), so saving the corrected row recalculates
+    every investor's units. Fields passed as None are left unchanged."""
+    target = str(entry_id or "").strip()
+    if not target:
+        return False, "invalid_id"
+    amt = _coerce_amount(amount)
+    if amt is None:
+        return False, "invalid_amount"
+    name = None
+    if investor is not None:
+        name = str(investor).strip()[:100]
+        if not name:
+            return False, "invalid_investor"
+        if is_owner_paid_backend(name):
+            name = BACKEND_OWNER_PAID_LABEL
+        elif is_backend_investor(name):
+            name = BACKEND_ENTRY_LABEL
+
+    with _deposits_lock:
+        entries = load_entries(path)
+        for e in entries:
+            if str(e.get("id")) == target:
+                if e.get("type") not in ("deposit", "withdrawal"):
+                    return False, "not_capital_entry"
+                e["amount"] = amt
+                if name is not None:
+                    e["investor"] = name
+                if occurred_at is not None and str(occurred_at).strip():
+                    e["occurred_at"] = str(occurred_at).strip()
+                if note is not None:
+                    e["note"] = str(note).strip()[:500]
+                e["edited_at"] = _now_iso()
+                if not save_entries(entries, path):
+                    return False, "save_failed"
+                return True, "updated"
+        return False, "not_found"
+
+
 def summarize(entries: List[Dict[str, Any]]) -> Dict[str, float]:
     """Compute totals: total deposited, total withdrawn, total fees, and net contribution."""
     total_deposits = 0.0

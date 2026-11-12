@@ -133,7 +133,7 @@
           {% endif %}
           <td>{{ e.note or '—' }}</td>
           <td>
-            {% if e.type == 'fee' %}<button onclick="editFeeEntry('{{ e.id }}', {{ e.amount or 0 }}, {{ 'true' if e.category == 'overnight_funding_adjustment' else 'false' }})">Edit</button>{% endif %}
+            {% if e.type == 'fee' %}<button onclick="editFeeEntry('{{ e.id }}', {{ e.amount or 0 }}, {{ 'true' if e.category == 'overnight_funding_adjustment' else 'false' }})">Edit</button>{% else %}<button onclick='editCapitalEntry({{ e|tojson }})'>Edit</button>{% endif %}
             <button class="button-danger" onclick="deleteTransactionEntry('{{ e.id }}')">Delete</button>
           </td>
         </tr>
@@ -191,6 +191,31 @@ function editFeeEntry(entryId, current, isAdjustment) {
             window.location.reload();
         })
         .catch(err => console.error("Edit fee error:", err));
+}
+
+function editCapitalEntry(entry) {
+    const amount = window.prompt('Amount (£):', Number(entry.amount || 0).toFixed(2));
+    if (amount === null) { return; }
+    const investor = window.prompt('Investor / Operator:', entry.investor || '');
+    if (investor === null) { return; }
+    const date = window.prompt('Date (YYYY-MM-DD):', String(entry.occurred_at || '').slice(0, 10));
+    if (date === null) { return; }
+    const note = window.prompt('Note:', entry.note || '');
+    if (note === null) { return; }
+    // Only send the date if it changed, so the original time of day is kept.
+    const body = { amount: amount, investor: investor, note: note };
+    if (date && date !== String(entry.occurred_at || '').slice(0, 10)) { body.occurred_at = date; }
+    fetch(`/dashboard/transactions/${encodeURIComponent(entry.id)}/edit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+    })
+        .then(r => r.json())
+        .then(d => {
+            if (d.status !== "success") { window.alert("Could not update entry: " + (d.message || "error")); return; }
+            window.location.reload();
+        })
+        .catch(err => console.error("Edit entry error:", err));
 }
 
 function deleteTransactionEntry(entryId) {
