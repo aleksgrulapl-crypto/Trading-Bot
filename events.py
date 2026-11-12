@@ -215,7 +215,7 @@ def check_alerts(trades: List[Dict[str, Any]]) -> int:
     trades, once per ticker/event. Returns the number of alerts queued."""
     import notifications
 
-    if not trades or not notifications.is_enabled():
+    if not trades or not notifications.category_enabled("sentiment"):
         return 0
     cache = _load()
     alerted = dict(cache.get("_alerted") or {})
