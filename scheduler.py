@@ -139,7 +139,7 @@ class Scheduler:
         Main loop: checks jobs and runs them when due.
         Sleeps a short interval between checks to be responsive.
         """
-        sleep_interval = 10  # seconds between loop iterations
+        sleep_interval = 1  # seconds between loop iterations
         while self.running:
             now_ts = time.time()
             now_uk = datetime.now(UK_TZ)
@@ -208,6 +208,30 @@ def sync_open_positions() -> None:
         logger.exception("sync_open_positions failed")
 
 
+_last_closed_sync = 0.0
+
+
+def sync_closed_trades_adaptive() -> None:
+    """Poll closed trades every CLOSED_SYNC_FAST_SECONDS while any trade is
+    open, otherwise only every CLOSED_SYNC_IDLE_SECONDS (avoids broker rate
+    limits while flat)."""
+    global _last_closed_sync
+    fast = float(getattr(config, "CLOSED_SYNC_FAST_SECONDS", 2))
+    idle = float(getattr(config, "CLOSED_SYNC_IDLE_SECONDS", 10))
+    now = time.time()
+    if now - _last_closed_sync < fast:
+        return
+    if now - _last_closed_sync < idle:
+        try:
+            from trade_log import get_open_trades
+            if not get_open_trades():
+                return
+        except Exception:
+            logger.debug("open-trade check failed; syncing anyway")
+    _last_closed_sync = now
+    sync_closed_trades()
+
+
 def send_daily_pnl_email() -> None:
     """Weekdays only: email today's realised PnL. Scheduled at 21:00 UK."""
     now_uk = datetime.now(UK_TZ)
@@ -224,6 +248,23 @@ def send_daily_pnl_email() -> None:
         logger.info("Daily PnL email queued (%d trades, total %s)", len(summary["trades"]), summary["total"])
     except Exception:
         logger.exception("send_daily_pnl_email failed")
+
+
+def send_weekly_pnl_email() -> None:
+    """Fridays only: email this week's realised PnL. Scheduled at 22:00 UK."""
+    now_uk = datetime.now(UK_TZ)
+    if now_uk.weekday() != 4:
+        return
+    try:
+        import dashboard
+        import notifications
+        from trade_log import load_raw_log
+        trades = dashboard.normalize_trades(dashboard.dedupe_trades(load_raw_log()))
+        summary = dashboard.build_weekly_pnl_summary(trades, now_uk.replace(tzinfo=None))
+        notifications.notify_weekly_pnl(summary)
+        logger.info("Weekly PnL email queued (%d trades, total %s)", len(summary["trades"]), summary["total"])
+    except Exception:
+        logger.exception("send_weekly_pnl_email failed")
 
 
 def check_overnight_fee_job() -> None:
@@ -299,7 +340,7 @@ def start_scheduler() -> None:
     scheduler.add_interval_job(5, run_trailing_sl)
 
     # Closed trade sync job (SL/TP/manual closes)
-    scheduler.add_interval_job(5, sync_closed_trades)
+    scheduler.add_interval_job(1, sync_closed_trades_adaptive)
 
     # Open position sync (manual/trader opens that bypass the webhook)
     scheduler.add_interval_job(10, sync_open_positions)
@@ -316,6 +357,11 @@ def start_scheduler() -> None:
         getattr(config, "DAILY_PNL_EMAIL_HOUR", 21),
         getattr(config, "DAILY_PNL_EMAIL_MINUTE", 0),
         send_daily_pnl_email,
+    )
+    scheduler.add_daily_job(
+        getattr(config, "WEEKLY_PNL_EMAIL_HOUR", 22),
+        getattr(config, "WEEKLY_PNL_EMAIL_MINUTE", 0),
+        send_weekly_pnl_email,
     )
 
     scheduler.start()

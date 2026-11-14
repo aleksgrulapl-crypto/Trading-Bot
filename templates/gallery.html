@@ -26,8 +26,8 @@
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;">
       {% for it in items %}
       <figure style="margin:0;">
-        <a href="/dashboard/gallery/img/{{ it.file }}" target="_blank" rel="noopener">
-          <img src="/dashboard/gallery/img/{{ it.file }}" alt="{{ it.caption }}" loading="lazy" style="width:100%;border-radius:8px;display:block;">
+        <a href="/dashboard/gallery/img/{{ it.file }}" class="gal-link" data-caption="{{ it.caption }}">
+          <img src="/dashboard/gallery/img/{{ it.file }}" alt="{{ it.caption }}" loading="lazy" style="width:100%;border-radius:8px;display:block;cursor:zoom-in;">
         </a>
         {% if it.caption %}<figcaption class="small" style="margin-top:4px;">{{ it.caption }}</figcaption>{% endif %}
         {% if is_owner %}
@@ -44,4 +44,40 @@
     {% endif %}
   </div>
 </div>
+
+<div id="gal-lb" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.88);align-items:center;justify-content:center;flex-direction:column;">
+  <button type="button" id="gal-close" aria-label="Close" style="position:absolute;top:14px;right:18px;font-size:30px;background:none;border:0;color:#fff;cursor:pointer;">&times;</button>
+  <button type="button" id="gal-prev" aria-label="Previous" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:44px;background:none;border:0;color:#fff;cursor:pointer;">&#8249;</button>
+  <img id="gal-img" alt="" style="max-width:90vw;max-height:80vh;border-radius:8px;">
+  <div id="gal-cap" style="color:#fff;margin-top:10px;"></div>
+  <button type="button" id="gal-next" aria-label="Next" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:44px;background:none;border:0;color:#fff;cursor:pointer;">&#8250;</button>
+</div>
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('.gal-link'));
+  var lb = document.getElementById('gal-lb');
+  if (!lb || !links.length) return;
+  var img = document.getElementById('gal-img'), cap = document.getElementById('gal-cap'), idx = 0;
+  function show(i) {
+    idx = (i + links.length) % links.length;
+    img.src = links[idx].getAttribute('href');
+    cap.textContent = links[idx].getAttribute('data-caption') || '';
+  }
+  function open(i) { show(i); lb.style.display = 'flex'; }
+  function close() { lb.style.display = 'none'; img.removeAttribute('src'); }
+  links.forEach(function (a, i) {
+    a.addEventListener('click', function (e) { e.preventDefault(); open(i); });
+  });
+  document.getElementById('gal-prev').onclick = function (e) { e.stopPropagation(); show(idx - 1); };
+  document.getElementById('gal-next').onclick = function (e) { e.stopPropagation(); show(idx + 1); };
+  document.getElementById('gal-close').onclick = close;
+  lb.addEventListener('click', function (e) { if (e.target === lb) close(); });
+  document.addEventListener('keydown', function (e) {
+    if (lb.style.display === 'none') return;
+    if (e.key === 'Escape') close();
+    else if (e.key === 'ArrowLeft') show(idx - 1);
+    else if (e.key === 'ArrowRight') show(idx + 1);
+  });
+})();
+</script>
 {% endblock %}
