@@ -1012,13 +1012,27 @@ def compute_detailed_analytics(trades):
 def build_daily_pnl_summary(trades, day):
     """Closed trades whose exit date (UK local, as logged) is *day*, with
     GBP PnL totals. Returns {"date", "trades", "total", "wins", "losses"}."""
+    return _build_pnl_summary(trades, lambda ts: ts.date() == day, {"date": day})
+
+
+def build_weekly_pnl_summary(trades, week_end):
+    """Closed trades exited from Monday 00:00 of *week_end*'s week up to and
+    including *week_end* (naive UK-local datetime, e.g. Friday 22:00)."""
+    start = datetime.combine((week_end - timedelta(days=week_end.weekday())).date(), datetime.min.time())
+    return _build_pnl_summary(
+        trades, lambda ts: start <= ts <= week_end,
+        {"date": week_end.date(), "week_start": start.date()},
+    )
+
+
+def _build_pnl_summary(trades, in_period, header):
     fx_rate = float(getattr(config, "FX_USD_GBP", 0.78) or 0.78)
     rows = []
     for t in trades or []:
         if not (t.get("status") == "CLOSED" or t.get("time_exited")):
             continue
         ts = _naive_dt(_parse_iso_like(t.get("time_exited")))
-        if ts is None or ts.date() != day:
+        if ts is None or not in_period(ts):
             continue
         try:
             if t.get("pnl_gbp") not in (None, ""):
@@ -1032,7 +1046,7 @@ def build_daily_pnl_summary(trades, day):
         rows.append({"ticker": t.get("ticker") or "?", "side": str(t.get("side") or "").upper(),
                      "timeframe": t.get("timeframe") or "N/A", "source": _trade_type_label(t), "pnl": pnl})
     return {
-        "date": day,
+        **header,
         "trades": rows,
         "total": round(sum(r["pnl"] for r in rows), 2),
         "wins": sum(1 for r in rows if r["pnl"] > 0),

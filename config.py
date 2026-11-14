@@ -280,6 +280,12 @@ DAILY_REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", 0))
 # Weekday-only daily PnL email to NOTIFY_EMAIL_TO (UK time).
 DAILY_PNL_EMAIL_HOUR = int(os.getenv("DAILY_PNL_EMAIL_HOUR", 21))
 DAILY_PNL_EMAIL_MINUTE = int(os.getenv("DAILY_PNL_EMAIL_MINUTE", 0))
+# Closed-trade polling: fast while positions are open, slower when flat.
+CLOSED_SYNC_FAST_SECONDS = float(os.getenv("CLOSED_SYNC_FAST_SECONDS", 2))
+CLOSED_SYNC_IDLE_SECONDS = float(os.getenv("CLOSED_SYNC_IDLE_SECONDS", 10))
+# Weekly PnL email: Fridays, UK time.
+WEEKLY_PNL_EMAIL_HOUR = int(os.getenv("WEEKLY_PNL_EMAIL_HOUR", 22))
+WEEKLY_PNL_EMAIL_MINUTE = int(os.getenv("WEEKLY_PNL_EMAIL_MINUTE", 0))
 
 # Email notifications: sent directly to NOTIFY_EMAIL_TO via SMTP when a
 # position is closed (always) and opened (only when NOTIFY_EMAIL_ENABLED / the

@@ -271,6 +271,26 @@ def notify_daily_pnl(summary: Dict[str, Any]) -> bool:
     return _send_email(f"Daily PnL {day.strftime('%a %d %b')}: {_fmt_money(summary['total'])}", "\n".join(lines))
 
 
+def notify_weekly_pnl(summary: Dict[str, Any]) -> bool:
+    """Email the week's realised PnL summary (Mon 00:00 - Fri 22:00 UK)."""
+    if not category_enabled("daily_pnl"):
+        return False
+    start, end = summary["week_start"], summary["date"]
+    lines = [
+        f"Weekly PnL: {start.strftime('%a %d %b')} - {end.strftime('%a %d %b %Y')}",
+        "",
+        f"Total PnL: {_fmt_money(summary['total'])}",
+        f"Closed trades: {len(summary['trades'])} ({summary['wins']} wins, {summary['losses']} losses)",
+    ]
+    if summary["trades"]:
+        lines.append("")
+        for r in summary["trades"]:
+            lines.append(f"- {r['ticker']} {r['side']} [{r['timeframe']}, {r['source']}]: {_fmt_money(r['pnl'])}")
+    else:
+        lines += ["", "No trades were closed this week."]
+    return _send_email(f"Weekly PnL {end.strftime('%d %b')}: {_fmt_money(summary['total'])}", "\n".join(lines))
+
+
 def send_event_alert(subject: str, body: str) -> bool:
     """Email an events/sentiment alert to the Owner. Investor delivery for
     affected holdings can be added here later."""
