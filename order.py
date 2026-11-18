@@ -172,7 +172,11 @@ def place_order(
                         body = {}
                     deal_status = str(body.get("dealStatus") or "").upper()
                     if deal_status in ("REJECTED", "DECLINED"):
-                        logger.warning("Broker rejected order for dealReference=%s: %s", deal_ref, body.get("reason"))
+                        reject_reason = body.get("rejectReason") or body.get("reason") or body.get("status")
+                        logger.warning(
+                            "Broker rejected order for dealReference=%s: reason=%s body=%s",
+                            deal_ref, reject_reason, body,
+                        )
                         rejected = True
                         break
                     real_deal_id = body.get("dealId") or body.get("deal_id")
