@@ -335,12 +335,12 @@ DAILY_REPORT_FILE = os.getenv("DAILY_REPORT_FILE", "/tmp/daily_report.json")
 # accurate equity context; it does not move real funds.
 DEPOSITS_LOG_PATH = os.getenv("DEPOSITS_LOG_PATH", "/data/deposits_log.json")
 
-# ROI allocation: the named investor receives a flat ownership-share
-# override (e.g. for covering backend/hosting costs as the account owner),
-# taken off the top before the remaining share pool is split by time-weighted
-# capital contribution. Set OWNER_INVESTOR_OVERRIDE_PCT to 0 to disable.
+# ROI allocation: the named investor (Owner) takes OWNER_INVESTOR_OVERRIDE_PCT
+# percent of each profitable trade; the remainder is split across all unit
+# holders (Owner included) pro-rata by NAV units. Losses are shared pro-rata.
+# Set OWNER_INVESTOR_OVERRIDE_PCT to 0 to disable the owner cut.
 OWNER_INVESTOR_NAME = os.getenv("OWNER_INVESTOR_NAME", "Aleks")
-OWNER_INVESTOR_OVERRIDE_PCT = float(os.getenv("OWNER_INVESTOR_OVERRIDE_PCT", 15))
+OWNER_INVESTOR_OVERRIDE_PCT = float(os.getenv("OWNER_INVESTOR_OVERRIDE_PCT", 60))
 
 # Per-investor ROI tier store (Owner-only, changeable from the Investors
 # page). By default every non-owner investor is "tradingview" tier: they

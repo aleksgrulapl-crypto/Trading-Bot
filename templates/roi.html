@@ -131,15 +131,13 @@
       so an investor only shares in gains or losses from trades closed
       <em>after</em> their own deposit, never retroactively.
       {% if breakdown.owner_name %}
-      <strong>{{ breakdown.owner_name }}</strong> additionally receives a
-      discretionary <strong>operator allocation</strong> of
-      {{ "%.0f"|format(breakdown.owner_override_pct) }}% for covering
-      backend/hosting costs, on profitable closed
-      <strong>TradingView/Hedge</strong> trades only. It is issued as
-      <strong>operator units</strong> at that trade's NAV, and only when NAV
-      exceeds its previous peak (high-water mark) &mdash; the allocation
-      applies solely to growth above that peak, so recovering earlier losses
-      attracts no allocation. It is separate from and does not apply to
+      <strong>{{ breakdown.owner_name }}</strong> takes
+      {{ "%.0f"|format(breakdown.owner_override_pct) }}% of the profit on each
+      profitable closed <strong>TradingView/Hedge</strong> trade, issued as
+      new units at that trade's NAV. The remaining
+      {{ "%.0f"|format(100 - breakdown.owner_override_pct) }}% is split across
+      all unit holders (the Owner included) in proportion to units held at
+      the time. Losses are shared pro-rata by units. It does not apply to
       Trader-sleeve profits.
       {% endif %}
       {% if breakdown.pre_ledger_pnl %}
@@ -196,7 +194,7 @@
           <td>
             {{ inv.investor }}
             <span class="tier-badge tier-badge-{{ inv.tier }}">{{ inv.tier }}</span>
-            {% if inv.is_owner %}<span class="pill pill-status" title="Receives a {{ '%.0f'|format(breakdown.owner_override_pct) }}% operator allocation (operator units) on TradingView growth above the high-water mark">Operator +{{ "%.0f"|format(breakdown.owner_override_pct) }}%</span>{% endif %}
+            {% if inv.is_owner %}<span class="pill pill-status" title="Takes {{ '%.0f'|format(breakdown.owner_override_pct) }}% of each profitable TradingView/Hedge trade (as new units); the rest is split by units held">Operator {{ "%.0f"|format(breakdown.owner_override_pct) }}%</span>{% endif %}
           </td>
           <td>£{{ "%.2f"|format(inv.deposited) }}</td>
           <td>£{{ "%.2f"|format(inv.withdrawn) }}</td>
