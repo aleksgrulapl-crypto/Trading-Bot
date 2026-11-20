@@ -971,13 +971,13 @@ def investor_breakdown(
     configured owner (``config.OWNER_INVESTOR_NAME``) as pre-ledger equity,
     or left unattributed if no owner is configured/present.
 
-    A configured operator allocation (``config.OWNER_INVESTOR_OVERRIDE_PCT``,
-    default 15%) is issued to the owner as operator units, covering
-    backend/hosting costs. It applies only when NAV-per-unit exceeds its
-    previous peak (a high-water mark), and only to the growth above that
-    peak, so recovering earlier drawdowns attracts no allocation. Units are
-    issued at that moment's NAV, diluting other unit holders only going
-    forward, never retroactively.
+    A configured owner profit share (``config.OWNER_INVESTOR_OVERRIDE_PCT``,
+    default 25%) is taken by the owner from every profitable trade, issued
+    as new units at that moment's NAV. The remaining profit (default 75%)
+    moves NAV for all unit holders pro-rata, the owner included, so with the
+    owner as sole holder they receive 100%. Losses are shared pro-rata by
+    units held. Units are issued at that moment's NAV, so earlier holders
+    are never diluted retroactively.
 
     ``owner_override_pct_override``, when given, replaces the configured
     percentage for this call only — used by dashboard.py to run a second,
@@ -1058,9 +1058,6 @@ def investor_breakdown(
     fund_value = 0.0
     total_units = 0.0
     nav_per_unit = 1.0
-    # High-water mark: the highest NAV-per-unit reached after any operator
-    # allocation. Operator units are only issued on NAV growth above it.
-    high_water_mark = 1.0
     investor_units: Dict[str, float] = {}
 
     # Per-investor value/contribution snapshots after each timeline event,
@@ -1084,31 +1081,29 @@ def investor_breakdown(
             sign = 1.0 if ev["ctype"] == "deposit" else -1.0
             net_contrib[ev["investor"]] = net_contrib.get(ev["investor"], 0.0) + sign * ev["amount"]
         if ev["kind"] == "pnl":
-            prior_nav = nav_per_unit
-            fund_value += ev["amount"]
-            if total_units > 0:
-                nav_per_unit = fund_value / total_units
-            else:
+            if total_units <= 0:
                 # No one holds units right now (e.g. everyone redeemed); this
                 # PnL has no owner to attribute to, so reset the baseline for
                 # whoever deposits next rather than crash on a divide-by-zero.
                 fund_value = 0.0
                 nav_per_unit = 1.0
-                high_water_mark = 1.0
                 continue
 
-            # Operator allocation, paid in newly issued operator units
-            # (dilutes other holders going forward only). Only the part of
-            # NAV growth above the previous peak (high-water mark) counts.
-            if ev["amount"] > 0 and owner_key and 0 < owner_override_pct < 100 and nav_per_unit > 0:
-                gain_above_peak = (nav_per_unit - max(high_water_mark, prior_nav)) * total_units
-                if gain_above_peak > 0:
-                    allocation = gain_above_peak * (owner_override_pct / 100.0)
-                    allocation_units = allocation / nav_per_unit
-                    investor_units[owner_key] = investor_units.get(owner_key, 0.0) + allocation_units
-                    total_units += allocation_units
-                    nav_per_unit = fund_value / total_units if total_units > 0 else nav_per_unit
-            high_water_mark = max(high_water_mark, nav_per_unit)
+            # Profit split: the Owner takes owner_override_pct% of each
+            # profitable trade (issued as new units at the post-split NAV)
+            # and the rest moves NAV for every holder pro-rata, Owner included.
+            # Losses are always shared pro-rata by units held.
+            amount = ev["amount"]
+            owner_cut = 0.0
+            if amount > 0 and owner_key and 0 < owner_override_pct < 100:
+                owner_cut = amount * (owner_override_pct / 100.0)
+            fund_value += amount
+            nav_per_unit = (fund_value - owner_cut) / total_units
+            if owner_cut > 0 and nav_per_unit > 0:
+                owner_units = owner_cut / nav_per_unit
+                investor_units[owner_key] = investor_units.get(owner_key, 0.0) + owner_units
+                total_units += owner_units
+                nav_per_unit = fund_value / total_units
         else:  # capital event
             if ev["backend"] and ev.get("owner_paid"):
                 # Owner covered the cost personally: shift units from every

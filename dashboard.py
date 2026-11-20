@@ -2119,7 +2119,13 @@ def _investor_equity_curves(tv_history, trader_history, rows, now=None):
             if ts > now:
                 continue
             contrib = lookup(tv_history, tv_ts, ts, name, "contrib")
-            value = lookup(tv_history, tv_ts, ts, name, "values") + lookup(trader_history, tr_ts, ts, name, "values")
+            # The Trader sleeve re-simulates the same deposits, so only its
+            # gain over contribution is added; otherwise capital double-counts.
+            trader_gain = (
+                lookup(trader_history, tr_ts, ts, name, "values")
+                - lookup(trader_history, tr_ts, ts, name, "contrib")
+            )
+            value = lookup(tv_history, tv_ts, ts, name, "values") + trader_gain
             points.append((ts, value, contrib))
         points.append((now, float(row.get("current_value") or 0.0), float(row.get("net_contribution") or 0.0)))
         # Drop leading points before this investor held anything.
