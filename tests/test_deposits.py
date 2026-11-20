@@ -250,27 +250,27 @@ class TestInvestorBreakdownOwnerFeeOverride:
         assert by_name["Aleks"]["allocated_gain_loss"] == pytest.approx(100.0, abs=0.01)
         assert by_name["Carol"]["allocated_gain_loss"] == pytest.approx(100.0, abs=0.01)
 
-    def test_owner_takes_60_percent_of_profit_rest_pro_rata(self):
+    def test_owner_takes_25_percent_of_profit_rest_pro_rata(self):
         import deposits
         entries = [
             {"type": "deposit", "amount": 1000, "investor": "Aleks", "occurred_at": "2026-01-01"},
             {"type": "deposit", "amount": 1000, "investor": "Carol", "occurred_at": "2026-01-01"},
         ]
         pnl_events = [{"ts": "2026-01-02T00:00:00", "pnl": 10.0}]
-        result = deposits.investor_breakdown(entries, pnl_events, owner_override_pct_override=60)
+        result = deposits.investor_breakdown(entries, pnl_events, owner_override_pct_override=25)
         by_name = {i["investor"]: i for i in result["investors"]}
-        # Owner: 6 + half of the 4 = 8; Carol: half of the 4 = 2.
-        assert by_name["Aleks"]["allocated_gain_loss"] == pytest.approx(8.0, abs=0.01)
-        assert by_name["Carol"]["allocated_gain_loss"] == pytest.approx(2.0, abs=0.01)
+        # Owner: 2.5 + half of 7.5 = 6.25; Carol: 3.75.
+        assert by_name["Aleks"]["allocated_gain_loss"] == pytest.approx(6.25, abs=0.01)
+        assert by_name["Carol"]["allocated_gain_loss"] == pytest.approx(3.75, abs=0.01)
 
-    def test_losses_are_shared_pro_rata_not_60_40(self):
+    def test_losses_are_shared_pro_rata_not_25_75(self):
         import deposits
         entries = [
             {"type": "deposit", "amount": 1000, "investor": "Aleks", "occurred_at": "2026-01-01"},
             {"type": "deposit", "amount": 1000, "investor": "Carol", "occurred_at": "2026-01-01"},
         ]
         pnl_events = [{"ts": "2026-01-02T00:00:00", "pnl": -10.0}]
-        result = deposits.investor_breakdown(entries, pnl_events, owner_override_pct_override=60)
+        result = deposits.investor_breakdown(entries, pnl_events, owner_override_pct_override=25)
         by_name = {i["investor"]: i for i in result["investors"]}
         assert by_name["Aleks"]["allocated_gain_loss"] == pytest.approx(-5.0, abs=0.01)
         assert by_name["Carol"]["allocated_gain_loss"] == pytest.approx(-5.0, abs=0.01)
@@ -311,7 +311,7 @@ class TestRoiTierBreakdown:
         assert by_name["Bob"]["tier"] == "tradingview"
         assert by_name["Bob"]["trader_allocated_gain_loss"] is None
         # Bob's gain/loss comes only from the TradingView sleeve.
-        assert by_name["Bob"]["allocated_gain_loss"] == pytest.approx(40.0, abs=0.01)
+        assert by_name["Bob"]["allocated_gain_loss"] == pytest.approx(75.0, abs=0.01)
 
     def test_full_tier_investor_shares_trader_pnl_pro_rata(self, monkeypatch, tmp_path):
         import dashboard, deposits
@@ -328,7 +328,7 @@ class TestRoiTierBreakdown:
         assert by_name["Aleks"]["tier"] == "owner"
 
     def test_owner_receives_no_trader_sleeve_performance_fee(self, monkeypatch, tmp_path):
-        """The Owner 60% profit share applies only to the TradingView
+        """The Owner 25% profit share applies only to the TradingView
         sleeve; the Trader sleeve is split purely pro-rata."""
         import dashboard, deposits
         monkeypatch.setattr(deposits, "TIERS_PATH", str(tmp_path / "tiers.json"))
@@ -366,7 +366,7 @@ class TestRoiTierBreakdown:
         trades = [{"status": "CLOSED", "trade_source": "hedge", "pnl_gbp": 300, "time_exited": "2026-01-03T00:00:00Z"}]
         breakdown = dashboard._build_roi_breakdown(self._entries(), trades, balance=3300)
         by_name = {i["investor"]: i for i in breakdown["investors"]}
-        assert by_name["Bob"]["tv_allocated_gain_loss"] == pytest.approx(40.0, abs=0.01)
+        assert by_name["Bob"]["tv_allocated_gain_loss"] == pytest.approx(75.0, abs=0.01)
 
 
 

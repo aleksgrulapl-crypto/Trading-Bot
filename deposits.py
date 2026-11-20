@@ -972,8 +972,8 @@ def investor_breakdown(
     or left unattributed if no owner is configured/present.
 
     A configured owner profit share (``config.OWNER_INVESTOR_OVERRIDE_PCT``,
-    default 60%) is taken by the owner from every profitable trade, issued
-    as new units at that moment's NAV. The remaining profit (default 40%)
+    default 25%) is taken by the owner from every profitable trade, issued
+    as new units at that moment's NAV. The remaining profit (default 75%)
     moves NAV for all unit holders pro-rata, the owner included, so with the
     owner as sole holder they receive 100%. Losses are shared pro-rata by
     units held. Units are issued at that moment's NAV, so earlier holders

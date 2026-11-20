@@ -340,7 +340,7 @@ DEPOSITS_LOG_PATH = os.getenv("DEPOSITS_LOG_PATH", "/data/deposits_log.json")
 # holders (Owner included) pro-rata by NAV units. Losses are shared pro-rata.
 # Set OWNER_INVESTOR_OVERRIDE_PCT to 0 to disable the owner cut.
 OWNER_INVESTOR_NAME = os.getenv("OWNER_INVESTOR_NAME", "Aleks")
-OWNER_INVESTOR_OVERRIDE_PCT = float(os.getenv("OWNER_INVESTOR_OVERRIDE_PCT", 60))
+OWNER_INVESTOR_OVERRIDE_PCT = float(os.getenv("OWNER_INVESTOR_OVERRIDE_PCT", 25))
 
 # Per-investor ROI tier store (Owner-only, changeable from the Investors
 # page). By default every non-owner investor is "tradingview" tier: they
