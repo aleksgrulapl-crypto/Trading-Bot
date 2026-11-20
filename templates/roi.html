@@ -234,5 +234,165 @@
   </div>
   {% endif %}
 
+  {% set curve_rows = ([my_row] if my_row else (breakdown.investors if breakdown else [])) %}
+  {% if curve_rows %}
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Equity Curve</div>
+      {% if curve_rows|length > 1 %}
+      <select id="roiCurveInvestor" class="input">
+        {% for r in curve_rows %}<option value="{{ loop.index0 }}">{{ r.investor }}</option>{% endfor %}
+      </select>
+      {% endif %}
+    </div>
+    <div id="roiCurveRanges" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;"></div>
+    <div class="metrics-row">
+      <div class="metric"><div class="metric-label">Period Start</div><div class="metric-value metric-neutral" id="roiCurveStart">—</div></div>
+      <div class="metric"><div class="metric-label">Period End</div><div class="metric-value metric-neutral" id="roiCurveEnd">—</div></div>
+      <div class="metric"><div class="metric-label">Gain / Loss</div><div class="metric-value" id="roiCurveGain">—</div></div>
+      <div class="metric"><div class="metric-label">Change</div><div class="metric-value" id="roiCurvePct">—</div></div>
+    </div>
+    <div class="equity-chart-wrap" style="margin-top:10px;"><canvas id="roiEquityChart"></canvas></div>
+    <p class="small" style="margin-top: 10px;">
+      Your equity is the value of your share of the fund over time; the dashed
+      line is your net contribution (deposits less withdrawals). Change is
+      measured against the period's starting value plus any money added, so
+      deposits and withdrawals don't count as gains or losses.
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Monthly Performance</div>
+    </div>
+    <table class="table table-spaced">
+      <thead>
+        <tr><th>Month</th><th>Start Equity</th><th>Deposits / Withdrawals</th><th>End Equity</th><th>Gain / Loss</th><th>% Change</th></tr>
+      </thead>
+      <tbody id="roiMonthlyBody"></tbody>
+    </table>
+  </div>
+
+  <script>
+  (function () {
+    const rows = {{ curve_rows | map(attribute='equity') | list | tojson }};
+    const canvas = document.getElementById('roiEquityChart');
+    if (!canvas) return;
+    const DAY = 86400000;
+    const RANGES = [['1D', 1], ['1W', 7], ['1M', 30], ['3M', 91], ['6M', 182], ['1Y', 365], ['ALL', null]];
+    const money = v => '£' + v.toFixed(2);
+    const signed = v => (v > 0 ? '+' : v < 0 ? '-' : '') + '£' + Math.abs(v).toFixed(2);
+    const colour = v => v > 0 ? '#4ade80' : v < 0 ? '#f97373' : '';
+    const rangeBox = document.getElementById('roiCurveRanges');
+    const select = document.getElementById('roiCurveInvestor');
+    let chart = null, active = 'ALL';
+
+    function parse(p) { return { t: new Date(p.t).getTime(), v: p.v, c: p.c }; }
+    function valueAt(pts, t) {
+      let r = { v: 0, c: 0 };
+      for (const p of pts) { if (p.t <= t) r = p; else break; }
+      return r;
+    }
+
+    function render() {
+      const eq = rows[select ? Number(select.value) : 0];
+      const pts = eq.points.map(parse);
+      const body = document.getElementById('roiMonthlyBody');
+      body.innerHTML = '';
+      eq.months.forEach(m => {
+        const tr = document.createElement('tr');
+        const cls = m.gain > 0 ? 'pnl-pos' : m.gain < 0 ? 'pnl-neg' : '';
+        tr.innerHTML = '<td>' + m.month + (m.partial ? ' <span class="small">(to date)</span>' : '') + '</td>' +
+          '<td>' + money(m.start) + '</td><td>' + signed(m.net_flow) + '</td><td>' + money(m.end) + '</td>' +
+          '<td class="' + cls + '">' + signed(m.gain) + '</td>' +
+          '<td class="' + cls + '">' + (m.pct === null ? '—' : (m.pct > 0 ? '+' : '') + m.pct.toFixed(2) + '%') + '</td>';
+        body.appendChild(tr);
+      });
+      if (!eq.months.length) body.innerHTML = '<tr><td colspan="6" class="small">No equity history yet.</td></tr>';
+
+      // Only offer intervals the history actually covers (plus the next one up).
+      const span = pts.length ? (pts[pts.length - 1].t - pts[0].t) / DAY : 0;
+      rangeBox.innerHTML = '';
+      let offered = false;
+      const shown = RANGES.filter(r => {
+        if (r[1] === null) return true;
+        if (offered) return false;
+        if (span <= r[1]) offered = true;
+        return true;
+      });
+      if (!shown.some(r => r[0] === active)) active = 'ALL';
+      shown.forEach(([label]) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn' + (label === active ? ' btn-primary' : '');
+        b.textContent = label;
+        b.onclick = () => { active = label; render(); };
+        rangeBox.appendChild(b);
+      });
+
+      const days = (RANGES.find(r => r[0] === active) || [])[1];
+      const endT = pts.length ? pts[pts.length - 1].t : 0;
+      const startT = days ? endT - days * DAY : (pts.length ? pts[0].t : 0);
+      let view = pts.filter(p => p.t >= startT);
+      if (days && pts.length) {
+        const base = valueAt(pts, startT);
+        view = [{ t: startT, v: base.v, c: base.c }].concat(view);
+      }
+
+      let startV = 0, endV = 0, gain = 0, pct = null;
+      if (view.length) {
+        const first = view[0], last = view[view.length - 1];
+        startV = first.v; endV = last.v;
+        const flow = last.c - first.c;
+        gain = endV - startV - flow;
+        const base = startV + flow;
+        pct = base > 0 ? gain / base * 100 : null;
+      }
+      document.getElementById('roiCurveStart').textContent = view.length ? money(startV) : '—';
+      document.getElementById('roiCurveEnd').textContent = view.length ? money(endV) : '—';
+      const g = document.getElementById('roiCurveGain');
+      g.textContent = view.length ? signed(gain) : '—';
+      g.style.color = colour(gain);
+      const pe = document.getElementById('roiCurvePct');
+      pe.textContent = pct === null ? '—' : (pct > 0 ? '+' : '') + pct.toFixed(2) + '%';
+      pe.style.color = pct === null ? '' : colour(pct);
+
+      if (chart) chart.destroy();
+      chart = new Chart(canvas, {
+        type: 'line',
+        data: {
+          datasets: [
+            { label: 'Equity', data: view.map(p => ({ x: p.t, y: p.v })), borderColor: '#4ade80',
+              backgroundColor: 'rgba(74, 222, 128, 0.15)', fill: true, borderWidth: 2, stepped: true, pointRadius: 0, pointHitRadius: 12 },
+            { label: 'Net contribution', data: view.map(p => ({ x: p.t, y: p.c })), borderColor: 'rgba(156, 163, 175, 0.6)',
+              borderDash: [5, 5], borderWidth: 1, stepped: true, fill: false, pointRadius: 0, pointHitRadius: 0 },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          scales: {
+            x: { type: 'linear', ticks: { color: '#9ca3af', maxTicksLimit: 6,
+                   callback: v => new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) },
+                 grid: { display: false } },
+            y: { ticks: { color: '#9ca3af', callback: v => '£' + v } },
+          },
+          plugins: {
+            legend: { labels: { color: '#e5e7eb' } },
+            tooltip: { callbacks: {
+              title: items => items.length ? new Date(items[0].parsed.x).toLocaleString('en-GB') : '',
+              label: item => item.dataset.label + ': ' + money(item.parsed.y),
+            } },
+          },
+        },
+      });
+    }
+
+    if (select) select.addEventListener('change', render);
+    render();
+  })();
+  </script>
+  {% endif %}
+
 </div>
 {% endblock %}

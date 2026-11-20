@@ -2090,6 +2090,79 @@ def _is_full_tier_investor(name, owner_name, tiers):
     return deposits.get_investor_tier(name, tiers) == "full"
 
 
+def _investor_equity_curves(tv_history, trader_history, rows, now=None):
+    """Build a per-investor equity curve (value vs. net contribution over
+    time) plus a per-month breakdown, from the NAV-per-unit snapshots of the
+    TradingView and Trader sleeves. Returns {investor_name: {"points",
+    "months"}}. The last point is pinned to the row's reported current value
+    so the curve always ends on the figure shown elsewhere on the page."""
+    import bisect
+
+    now = now or deposits._now_naive_uk()
+
+    def step(history):
+        return [h["ts"] for h in history], history
+
+    tv_ts, _ = step(tv_history)
+    tr_ts, _ = step(trader_history)
+    all_ts = sorted(set(tv_ts) | set(tr_ts))
+
+    def lookup(history, tss, ts, name, key):
+        i = bisect.bisect_right(tss, ts) - 1
+        return history[i][key].get(name, 0.0) if i >= 0 else 0.0
+
+    out = {}
+    for row in rows:
+        name = row["investor"]
+        points = []
+        for ts in all_ts:
+            if ts > now:
+                continue
+            contrib = lookup(tv_history, tv_ts, ts, name, "contrib")
+            value = lookup(tv_history, tv_ts, ts, name, "values") + lookup(trader_history, tr_ts, ts, name, "values")
+            points.append((ts, value, contrib))
+        points.append((now, float(row.get("current_value") or 0.0), float(row.get("net_contribution") or 0.0)))
+        # Drop leading points before this investor held anything.
+        while len(points) > 1 and points[0][1] == 0 and points[0][2] == 0:
+            points.pop(0)
+        if len(points) == 1 and points[0][1] == 0 and points[0][2] == 0:
+            out[name] = {"points": [], "months": []}
+            continue
+
+        def at(ts):
+            i = bisect.bisect_right([p[0] for p in points], ts) - 1
+            return (points[i][1], points[i][2]) if i >= 0 else (0.0, 0.0)
+
+        months = []
+        cursor = points[0][0].replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        while cursor <= now:
+            nxt = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+            start_val, start_contrib = at(cursor - timedelta(microseconds=1))
+            end_val, end_contrib = at(min(nxt - timedelta(microseconds=1), now))
+            flow = end_contrib - start_contrib
+            gain = end_val - start_val - flow
+            base = start_val + flow
+            months.append({
+                "month": cursor.strftime("%b %Y"),
+                "start": round(start_val, 2),
+                "net_flow": round(flow, 2),
+                "end": round(end_val, 2),
+                "gain": round(gain, 2),
+                "pct": round(gain / base * 100, 2) if base > 0 else None,
+                "partial": nxt > now,
+            })
+            cursor = nxt
+        months.reverse()
+        out[name] = {
+            "points": [
+                {"t": p[0].strftime("%Y-%m-%dT%H:%M:%S"), "v": round(p[1], 2), "c": round(p[2], 2)}
+                for p in points
+            ],
+            "months": months,
+        }
+    return out
+
+
 def _build_roi_breakdown(entries, combined_trades, balance):
     """Compute per-investor ROI split into two sleeves:
 
@@ -2166,6 +2239,10 @@ def _build_roi_breakdown(entries, combined_trades, balance):
         row["current_value"] = round(inv["current_value"] + trader_gain + owner_bonus, 2)
         row["roi_pct"] = combined_roi_pct
         investors_out.append(row)
+
+    curves = _investor_equity_curves(tv.get("history", []), trader.get("history", []), investors_out)
+    for row in investors_out:
+        row["equity"] = curves.get(row["investor"], {"points": [], "months": []})
 
     total_net_contribution = tv.get("total_net_contribution")
     overall_gain_loss = (

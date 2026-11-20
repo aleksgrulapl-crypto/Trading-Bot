@@ -1063,7 +1063,26 @@ def investor_breakdown(
     high_water_mark = 1.0
     investor_units: Dict[str, float] = {}
 
+    # Per-investor value/contribution snapshots after each timeline event,
+    # used to draw the investor equity curve.
+    history: List[Dict[str, Any]] = []
+    net_contrib: Dict[str, float] = {}
+    prev_ts = None
+
+    def _snapshot(ts):
+        history.append({
+            "ts": ts,
+            "values": {n: u * nav_per_unit for n, u in investor_units.items()},
+            "contrib": dict(net_contrib),
+        })
+
     for ev in timeline:
+        if prev_ts is not None:
+            _snapshot(prev_ts)
+        prev_ts = ev["ts"]
+        if ev["kind"] == "capital" and not ev["backend"]:
+            sign = 1.0 if ev["ctype"] == "deposit" else -1.0
+            net_contrib[ev["investor"]] = net_contrib.get(ev["investor"], 0.0) + sign * ev["amount"]
         if ev["kind"] == "pnl":
             prior_nav = nav_per_unit
             fund_value += ev["amount"]
@@ -1137,6 +1156,9 @@ def investor_breakdown(
             if total_units > 0:
                 nav_per_unit = fund_value / total_units
 
+    if prev_ts is not None:
+        _snapshot(prev_ts)
+
     balance = None
     if current_balance is not None:
         try:
@@ -1206,6 +1228,7 @@ def investor_breakdown(
         })
 
     return {
+        "history": history,
         "investors": investors,
         "total_net_contribution": total_net_contribution,
         "current_balance": balance,
